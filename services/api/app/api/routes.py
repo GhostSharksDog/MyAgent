@@ -38,7 +38,8 @@ from app.api.schemas import (
     ToolInfo,
 )
 from app.core.config import get_settings
-from app.core.telemetry import record_agent_event
+from app.core.resilience import TokenBucket
+from app.core.telemetry import METRICS, record_agent_event
 from app.llm.types import ChatMessage
 from app.rag.backend import describe_knowledge_backend
 from app.session.models import Session
@@ -174,6 +175,7 @@ async def healthz(request: Request) -> dict[str, object]:
     """
     settings = get_settings()
     rag_info = describe_knowledge_backend(settings)
+    rc = settings.resilience
     return {
         "status": "ok",
         "env": str(settings.app_env),
@@ -187,6 +189,11 @@ async def healthz(request: Request) -> dict[str, object]:
         "task_workers_in_api": settings.tasks.run_workers_in_api,
         "rag_backend": rag_info["backend"],
         "rag_service_url": rag_info.get("url", ""),
+        # 韧性状态。熔断器打开时，表现是"检索功能莫名其妙没结果" ——
+        # 如果没有地方能看到"它现在是 open、还有 12 秒恢复"，
+        # 排查会从"检索为什么没结果"这个完全错误的方向开始。
+        "circuit_enabled": rc.circuit_enabled,
+        "rate_limit_enabled": rc.rate_limit_enabled,
     }
 
 
@@ -219,10 +226,102 @@ async def list_tools(request: Request) -> list[ToolInfo]:
 
 
 # ============================================================
+# 限流
+# ============================================================
+def _limiter_state(request: Request) -> dict[str, Any]:
+    """惰性挂载限流器。
+
+    【为什么限流器必须在 app.state 上而不是模块级全局变量】
+    模块级全局变量会跨测试用例、跨 TestClient 实例共享 ——
+    上一个用例耗尽令牌，下一个用例就会莫名其妙地被 429。
+    挂在 app.state 上，生命周期就跟着 app 走，这也是本文件里
+    其它共享资源（store / agent / tasks）统一的做法。
+    """
+    state = request.app.state
+    if not hasattr(state, "rate_buckets"):
+        state.rate_buckets = {}  # type: dict[str, TokenBucket]
+        state.rate_global = None
+    return {"buckets": state.rate_buckets, "global": state.rate_global}
+
+
+async def _enforce_rate_limit(request: Request, payload: ChatRequest) -> None:
+    """按会话限流。
+
+    【为什么限流的 key 是会话而不是 IP】
+    这里的成本几乎全部来自 LLM 调用，而 LLM 成本是**按会话产生**的。
+    按 IP 限流有两个问题：
+      · 一个 IP 后面可能是很多人（公司出口、移动网络），
+        限制一个人会误伤所有人
+      · 一个人可以换 IP 绕过限制，但换会话的成本高得多（丢历史）
+
+    所以按会话限流，配合一个全局兜底（防止开大量会话绕过）。
+
+    【为什么用 429 而不是 403 或 503】
+    429 Too Many Requests 是**唯一一个语义明确表示"你太快了，等会儿再来"**
+    的状态码。用 403 会让调用方以为是自己权限有问题（然后去查鉴权），
+    用 503 会让它以为服务挂了（然后去查服务状态）——
+    两个都是错误的排查方向。
+
+    配合 `Retry-After` 头，调用方就知道该等多久，
+    而不是自己猜一个重试节奏 —— **猜出来的节奏往往比原来更糟**。
+    """
+    settings = request.app.state.settings
+    rc = settings.resilience
+    if not rc.rate_limit_enabled:
+        return
+
+    state = _limiter_state(request)
+
+    # 全局兜底
+    if rc.rate_limit_global_rps > 0:
+        if state["global"] is None:
+            state["global"] = TokenBucket(
+                rate=rc.rate_limit_global_rps,
+                burst=max(1, int(rc.rate_limit_global_rps * rc.rate_limit_burst)),
+            )
+        if not await state["global"].acquire():
+            _raise_429(state["global"], "服务整体繁忙")
+
+    key = payload.session_id or _client_key(request)
+    bucket = state["buckets"].get(key)
+    if bucket is None:
+        bucket = TokenBucket(rate=rc.rate_limit_rps, burst=rc.rate_limit_burst)
+        state["buckets"][key] = bucket
+
+    if not await bucket.acquire():
+        _raise_429(bucket, f"会话 {key[:12]} 请求过于频繁")
+
+
+def _client_key(request: Request) -> str:
+    """匿名请求的限流 key（无会话时）。
+
+    【为什么不直接信任 X-Forwarded-For】
+    那个头是**客户端可以随便伪造**的。信任它等于把限流 key 交给攻击者：
+    换一个头值就是一个全新的桶，限流形同虚设。
+
+    只有确定自己部署在可信反向代理后面（且代理会覆写这个头）时，
+    才应该读它。默认只取 TCP 层的直连地址 —— 宁可把代理后的所有
+    匿名请求算成一个，也不要提供一个能一键绕过的限流。
+    """
+    return f"anon:{request.client.host if request.client else 'unknown'}"
+
+
+def _raise_429(bucket: TokenBucket, reason: str) -> None:
+    wait = bucket.retry_after()
+    METRICS.inc("jobpilot_rate_limited_total", scope="chat")
+    raise HTTPException(
+        status_code=429,
+        detail=f"{reason}，请 {wait:.1f} 秒后重试。",
+        headers={"Retry-After": f"{max(1, int(wait + 0.5))}"},
+    )
+
+
+# ============================================================
 # 对话（非流式）
 # ============================================================
 @router.post("/api/chat", response_model=ChatResponse, summary="对话（非流式）")
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+    await _enforce_rate_limit(request, payload)
     agent, session = await _resolve(request, payload)
 
     # 会话模式以服务端历史为准，忽略客户端传来的 history。
@@ -261,6 +360,10 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
 
     `ping` 心跳用于穿透可能存在的反向代理空闲超时 —— 长连接最容易被中间层掐断。
     """
+    # 限流必须放在最前面：被限流的请求不该走到任何装配或 LLM 调用。
+    # 放在 `_resolve` 之后的话，一次被拒的请求也已经付出了建 Agent、
+    # 读会话历史、构造提示词的代价 —— 而这些正是限流想省下来的。
+    await _enforce_rate_limit(request, payload)
     agent, session = await _resolve(request, payload)
     store = _get_store(request)
     history = None if session is not None else _to_history(payload.history)

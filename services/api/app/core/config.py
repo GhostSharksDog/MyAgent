@@ -236,6 +236,49 @@ class RagSettings(BaseSettings):
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class ResilienceSettings(BaseSettings):
+    """韧性配置：熔断与限流。
+
+    【为什么这两个开关默认是"开"和"关"】
+    · 熔断默认**开**：它不是优化，是防级联故障的必需件。关掉它不会让
+      系统更快，只会让"下游挂了"升级成"整个服务挂了"。
+    · 限流默认**关**：它的阈值强依赖业务（单用户该给多少 QPS、
+      每天多少 token），设错会直接拒掉正常用户。**没有标定过的阈值
+      比没有阈值更危险** —— 所以默认关闭，由部署方按实际容量标定。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="RESILIENCE_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # ---------- 熔断 ----------
+    circuit_enabled: bool = True
+    # 连续失败多少次打开熔断。
+    # 5 次是经验值：既不会被单次抖动误触发，也能在"服务真挂了"时
+    # 只牺牲 5 个请求就开始快速失败。
+    circuit_failure_threshold: int = Field(default=5, ge=1, le=100)
+    # 打开后多久开始探测。要**大于**下游的典型恢复时间（重启、预热），
+    # 否则会陷入"探测→失败→再打开"的空转，白白反复打一个还没好的服务。
+    circuit_recovery_timeout: float = Field(default=30.0, gt=0)
+    # 半开时同时放行的探测请求数。宁可取小（1~2）：
+    # 它的作用是"试探"而不是"恢复流量"。
+    circuit_half_open_calls: int = Field(default=1, ge=1, le=10)
+
+    # ---------- 限流 ----------
+    rate_limit_enabled: bool = False
+    # 每个会话每秒允许的请求数（长期平均）
+    rate_limit_rps: float = Field(default=0.5, gt=0)
+    # 允许的瞬时突发，即桶容量。
+    # 必须 >= 1，否则冷启动时第一个请求就会被拒。
+    rate_limit_burst: int = Field(default=3, ge=1, le=100)
+    # 全局兜底：所有会话合计的上限。防止"开一堆会话"绕过单会话限流。
+    # 0 表示不限制。
+    rate_limit_global_rps: float = Field(default=0.0, ge=0.0)
+
+
 class Settings(BaseSettings):
     """全局配置聚合根。"""
 
@@ -258,6 +301,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     tasks: TaskSettings = Field(default_factory=TaskSettings)
+    resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
 
     database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
     redis_url: str = "redis://127.0.0.1:6379/0"

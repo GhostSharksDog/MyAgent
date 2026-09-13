@@ -23,11 +23,19 @@
 #   .\scripts\dev.ps1 worker     # 启动独立的任务 worker（需要 TASK_BACKEND=redis）
 #   .\scripts\dev.ps1 serve-split # 启动 API 服务并指向独立 RAG 服务（拆分拓扑）
 #   .\scripts\dev.ps1 verify-split # 跨进程验证：证明调用真的走了 HTTP
+#   .\scripts\dev.ps1 loadtest   # 并发压测，给出 P50/P95/P99 与 QPS
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'install', 'test', 'test-live', 'lint', 'fmt', 'check', 'cli', 'serve', 'tools', 'help')]
+    # ⚠ 新增子命令时**必须同时加到这里**：ValidateSet 是参数绑定阶段执行的，
+    # 不在列表里的值会在进入 switch 之前就被拒绝。
+    # 曾真实踩过：switch 里加了 rag/worker，却忘了加 ValidateSet，
+    # 结果 `dev.ps1 rag` 直接报"参数不在集合中"。
+    [ValidateSet(
+        'setup', 'install', 'test', 'test-live', 'lint', 'fmt', 'check', 'cli', 'serve', 'tools',
+        'rag', 'worker', 'serve-split', 'verify-split', 'loadtest', 'help'
+    )]
     [string]$Task = 'help',
 
     # 传给具体任务的额外参数，例如： .\scripts\dev.ps1 test -Extra "-k calculator"
@@ -160,11 +168,24 @@ function Task-Fmt {
 }
 
 function Task-Check {
-    Write-Host "=== 1/3 格式化 ===" -ForegroundColor Cyan
+    Write-Host "=== 0/4 修复 .ps1 的 UTF-8 BOM ===" -ForegroundColor Cyan
+    # 【为什么这个自愈步骤必须在最前面】
+    # 本机 PowerShell 是 5.1，读无 BOM 的 .ps1 会按 GBK 解码，
+    # 而 GBK 解码 UTF-8 中文会吞掉后续字节（常是换行或引号），
+    # 导致语法树崩溃，报错位置却指向一句无辜的中文注释。
+    #
+    # 关键在于：**任何编辑 .ps1 的工具都可能顺手去掉 BOM**
+    # （本项目的 edit 工具就会）。所以这不是一次性修复，
+    # 而是每次改动后都要重做的事 —— 放进 check 就变成自动的。
+    # 测试里另有门禁（TestPowerShellEncoding）兜底。
+    Initialize-Environment
+    Assert-Venv
+    & $VenvPython (Join-Path $PSScriptRoot 'fix_ps1_bom.py')
+    Write-Host "`n=== 1/4 格式化 ===" -ForegroundColor Cyan
     Task-Fmt
-    Write-Host "`n=== 2/3 静态检查 ===" -ForegroundColor Cyan
+    Write-Host "`n=== 2/4 静态检查 ===" -ForegroundColor Cyan
     Task-Lint
-    Write-Host "`n=== 3/3 测试 ===" -ForegroundColor Cyan
+    Write-Host "`n=== 3/4 测试 ===" -ForegroundColor Cyan
     Task-Test
     Write-Host "`n[OK] 全部通过，可以提交" -ForegroundColor Green
 }
@@ -234,6 +255,18 @@ function Task-VerifySplit {
     & $VenvPython (Join-Path $PSScriptRoot 'verify_split.py')
 }
 
+function Task-LoadTest {
+    Initialize-Environment
+    Assert-Venv
+    if ($Extra.Count -eq 0) {
+        # 默认带 --contention：CPU 争抢实验是"为什么要拆 RAG 服务"的直接证据，
+        # 只跑延迟基线会漏掉最有说服力的那组数字。
+        $Extra = @('--concurrency', '8', '--duration', '8', '--contention',
+                   '--json-out', 'eval_results/loadtest.json')
+    }
+    & $VenvPython (Join-Path $PSScriptRoot 'loadtest.py') @Extra
+}
+
 function Task-Help {
     Get-Content $PSCommandPath | Select-String -Pattern '^#   \.' | ForEach-Object {
         $_.Line -replace '^#   ', ''
@@ -255,5 +288,6 @@ switch ($Task) {
     'serve-split' { Task-ServeSplit }
     'worker'    { Task-Worker }
     'verify-split' { Task-VerifySplit }
+    'loadtest'  { Task-LoadTest }
     default     { Task-Help }
 }

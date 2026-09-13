@@ -37,10 +37,16 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.resilience import CircuitBreaker
 from app.rag.factory import get_shared_retriever
 from app.rag.loaders import DocType
 
 logger = logging.getLogger(__name__)
+
+# Sentinel：区分"没传 breaker 参数"与"显式传了 None 想关掉熔断"。
+# Python 没有别的干净方法表达这个区别，而这里的区别很重要 ——
+# 见 RemoteKnowledgeBackend.__init__ 的说明。
+_DEFAULT_BREAKER: object = object()
 
 
 class EmptyKnowledgeBase(RuntimeError):
@@ -193,6 +199,7 @@ class RemoteKnowledgeBackend:
         base_url: str,
         timeout: float = 15.0,
         client: httpx.AsyncClient | None = None,
+        breaker: CircuitBreaker | None = _DEFAULT_BREAKER,  # type: ignore[assignment]
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
@@ -201,6 +208,18 @@ class RemoteKnowledgeBackend:
         # 这是唯一能验证"客户端与服务端对协议的理解一致"的办法 ——
         # 用假的返回值去测，只能验证客户端自己编的那套约定。
         self._client: httpx.AsyncClient | None = client
+        # 熔断器默认**存在**，因为它是防级联故障的必需件而不是可选优化：
+        # 没有它，RAG 挂掉时每个检索请求都要白等满 timeout，
+        # agent 的待处理请求越堆越多 —— 一个非核心依赖的故障
+        # 就这样传染成整个对话服务不可用。详见 core/resilience.py。
+        #
+        # 传 `None` 可以显式关闭（调试用）。这里必须用哨兵值区分
+        # "没传参数"和"显式传了 None" —— 若默认值就是 None，
+        # 那么"忘记传"和"故意关闭"会变成同一个行为，
+        # 而前者是本该有熔断却没有，属于安全默认值被破坏。
+        self._breaker = (
+            CircuitBreaker(f"rag:{self._base_url}") if breaker is _DEFAULT_BREAKER else breaker
+        )
 
     def _get_client(self) -> httpx.AsyncClient:
         """惰性创建客户端。
@@ -234,8 +253,6 @@ class RemoteKnowledgeBackend:
         min_score: float = 0.0,
         max_chars: int = 3000,
     ) -> str:
-        from app.core.telemetry import get_trace_id
-
         payload = {
             "query": query,
             "k": k,
@@ -243,6 +260,28 @@ class RemoteKnowledgeBackend:
             "min_score": min_score,
             "max_chars": max_chars,
         }
+        # 【这一行是熔断器最容易写错的地方】
+        # `count_as_failure` 明确把 EmptyKnowledgeBase 排除在故障之外。
+        #
+        # 如果不过滤，后果是：一个"语料还没准备好"的部署，
+        # 前 5 次检索（每次都正常返回 503）会把熔断器打开，
+        # 之后所有请求都报"知识库服务不可用" ——
+        # 而服务其实完全健康，只是没有数据。
+        # 运维会去查服务为什么挂了，方向从一开始就错了。
+        #
+        # **故障（fault）与业务状态（state）必须分开统计。**
+        if self._breaker is None:
+            # 显式关闭熔断（调试用）。这里保留一条探通的路径而不是
+            # 把开关藏在调用方，是为了让"有没有熔断"在代码里看得见。
+            return await self._request_context(payload)
+        return await self._breaker.call(
+            lambda: self._request_context(payload),
+            count_as_failure=lambda exc: not isinstance(exc, EmptyKnowledgeBase),
+        )
+
+    async def _request_context(self, payload: dict[str, Any]) -> str:
+        from app.core.telemetry import get_trace_id
+
         try:
             resp = await self._get_client().post(
                 "/context",
@@ -285,6 +324,16 @@ class RemoteKnowledgeBackend:
 
         data = resp.json()
         return str(data.get("context", ""))
+
+    @property
+    def breaker(self) -> CircuitBreaker | None:
+        """暴露熔断器状态，供 /healthz 与 /api/meta 观测。
+
+        **熔断器的状态必须可见**：它打开时表现为"检索功能莫名其妙不工作"，
+        如果没有地方能看到"它现在是 open、还有 12 秒恢复"，
+        排查会从"检索为什么没结果"这个完全错误的方向开始。
+        """
+        return self._breaker
 
     async def stats(self) -> dict[str, Any]:
         try:
@@ -346,5 +395,18 @@ def build_knowledge_backend(
     target = (url if url is not None else s.rag_service_url).strip()
     if target:
         logger.info("使用远程 RAG 服务：%s", target)
-        return RemoteKnowledgeBackend(target, timeout=s.rag_service_timeout)
+        rc = s.resilience
+        # 熔断器在这里构造（而不是在类默认值里），是为了让阈值可配置。
+        # 关掉熔断需要显式配置 —— 默认必须是开的，见 ResilienceSettings 的说明。
+        breaker = (
+            CircuitBreaker(
+                f"rag:{target}",
+                failure_threshold=rc.circuit_failure_threshold,
+                recovery_timeout=rc.circuit_recovery_timeout,
+                half_open_max_calls=rc.circuit_half_open_calls,
+            )
+            if rc.circuit_enabled
+            else None
+        )
+        return RemoteKnowledgeBackend(target, timeout=s.rag_service_timeout, breaker=breaker)
     return LocalKnowledgeBackend(s)

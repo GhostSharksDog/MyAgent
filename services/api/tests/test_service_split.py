@@ -558,5 +558,53 @@ class TestPowerShellEncoding:
         """
         root = Path(__file__).resolve().parents[3]
         text = (root / "scripts" / "dev.ps1").read_text(encoding="utf-8-sig")
-        for cmd in ("rag", "worker", "serve-split", "verify-split"):
+        for cmd in ("rag", "worker", "serve-split", "verify-split", "loadtest"):
             assert f"'{cmd}'" in text, f"dev.ps1 缺少 {cmd} 子命令"
+
+    def test_switch_labels_are_all_in_validate_set(self) -> None:
+        """`switch` 里的每个子命令都必须同时出现在 `ValidateSet` 里。
+
+        【为什么这条测试必须存在 —— 它是由一次真实失误换来的】
+
+        加 rag / worker / serve-split 时，我往 `switch` 里加了分支，
+        也更新了文件头的用法注释，但**忘了改 `ValidateSet`**。
+
+        `ValidateSet` 是**参数绑定阶段**执行的：不在名单里的值会在进入
+        `switch` 之前就被 PowerShell 拒绝。所以 `dev.ps1 rag` 直接报
+        "参数不在集合中"，功能完全不可用。
+
+        而当时的测试只断言了"文件里出现了 'rag' 这个字符串" ——
+        它**通过了**。字符串出现在注释里、出现在 switch 里、
+        出现在 ValidateSet 里都算通过，这三种情况的行为却完全不同。
+
+        教训：断言"某个符号存在于文本中"几乎不构成验证。
+        要断言的是**那个让功能生效的具体结构**。
+        这里的结构就是"switch 标签 ⊆ ValidateSet"。
+        """
+        import re
+
+        root = Path(__file__).resolve().parents[3]
+        text = (root / "scripts" / "dev.ps1").read_text(encoding="utf-8-sig")
+
+        validate_match = re.search(r"\[ValidateSet\((.*?)\)\]", text, re.S)
+        assert validate_match, "找不到 ValidateSet"
+        allowed = set(re.findall(r"'([^']+)'", validate_match.group(1)))
+
+        # switch 主体：从 `switch ($Task) {` 到文件末尾
+        switch_match = re.search(r"switch \(\$Task\) \{(.*)", text, re.S)
+        assert switch_match, "找不到 switch ($Task)"
+        # 每个分支形如： 'name'  { ... }
+        labels = set(re.findall(r"^\s*'([^']+)'\s*\{", switch_match.group(1), re.M))
+
+        assert labels, "没有解析到任何 switch 分支 —— 正则可能失效了"
+        missing = labels - allowed
+        assert not missing, (
+            f"这些子命令在 switch 里有分支，但不在 ValidateSet 里，"
+            f"调用时会被参数绑定直接拒绝：{sorted(missing)}"
+        )
+
+        redundant = allowed - labels - {"help"}
+        assert not redundant, (
+            f"这些子命令在 ValidateSet 里却没有对应分支，调用会静默走到 default："
+            f"{sorted(redundant)}"
+        )

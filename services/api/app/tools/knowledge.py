@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+from app.core.resilience import CircuitOpen
 from app.rag.backend import (
     EmptyKnowledgeBase,
     KnowledgeBackend,
@@ -123,13 +124,29 @@ class KnowledgeSearchTool(Tool):
                 "把简历保存为 data/resume.md，或运行 "
                 "python scripts/ingest.py <你的简历.pdf> --type resume"
             )
+        except CircuitOpen as exc:
+            # 熔断与"下游调用失败"必须给出不同的提示。
+            #
+            # 对模型来说，这两者的正确反应完全不同：
+            #   · 下游故障  → 这可能是瞬时问题，值得换一种检索方式再试一次
+            #   · 熔断打开  → 重试**一定**会失败（我们根本没发起调用），
+            #                 正确动作是改用其他工具或不检索直接回答
+            #
+            # 如果把熔断也报成"服务不可用"，模型会去重试 ——
+            # 而重试恰好是熔断器最想阻止的行为。
+            logger.warning("检索已被熔断：%s", exc)
+            return ToolResult.failure(
+                f"知识库检索暂时被熔断（{exc}）。"
+                f"请不要重试检索，改用其他工具，或基于已知信息直接回答并说明未能检索。"
+            )
         except KnowledgeBackendError as exc:
             # 后端不可用时给出**可操作**的信息：谁挂了、地址是什么。
             # 只说"检索失败"会让人以为是知识库里没有内容，方向完全错了。
             logger.warning("知识库后端不可用：%s", exc)
             return ToolResult.failure(
                 f"知识库服务不可用：{exc}。"
-                f"请确认 RAG 服务已启动（RAG_SERVICE_URL={settings.rag_service_url or '未配置（本进程内检索）'}）。"
+                f"请确认 RAG 服务已启动（RAG_SERVICE_URL="
+                f"{settings.rag_service_url or '未配置（本进程内检索）'}）。"
             )
 
         if not ctx:
