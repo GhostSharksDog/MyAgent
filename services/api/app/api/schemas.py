@@ -73,6 +73,21 @@ class MetaResponse(BaseModel):
     max_steps: int
     tool_count: int
     session_backend: str = ""
+    # 检索后端：`local` 表示在本进程内检索（单体），
+    # `remote` 表示走独立的 RAG 服务。
+    #
+    # 【为什么这个字段必须暴露出来】
+    # 它与 session/task backend 是同一类问题：**配置错了不会报错，
+    # 只会默默地用另一种拓扑运行**。比如部署时忘了给 agent 容器设
+    # RAG_SERVICE_URL，它会"正常"在本进程建一份索引 —— 服务健康、
+    # 回答也对，但你以为的独立检索服务根本没被使用，
+    # CPU 依然在抢，扩容也没生效。
+    #
+    # 把拓扑状态放进元信息，就是把这类静默错误变成**可观测**的。
+    rag_backend: str = "local"
+    task_backend: str = ""
+    # 任务是否在本进程内消费。为 false 时任务由独立 worker 进程消费。
+    task_workers_in_api: bool = True
     # 支持的 Agent 形态。前端据此渲染模式选择器 —— 让 UI 从后端**发现**能力，
     # 而不是在前端硬编码一份可能过期的列表（新增形态时前端无需改代码）。
     agent_modes: list[str] = Field(default_factory=lambda: ["react", "plan", "multi"])

@@ -27,9 +27,13 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
-from app.rag.factory import get_shared_retriever
+from app.rag.backend import (
+    EmptyKnowledgeBase,
+    KnowledgeBackend,
+    KnowledgeBackendError,
+    build_knowledge_backend,
+)
 from app.rag.loaders import DocType
-from app.rag.retriever import Retriever
 from app.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -81,44 +85,52 @@ class KnowledgeSearchTool(Tool):
     params_model = SearchKnowledgeParams
 
     def __init__(
-        self, settings: Settings | None = None, retriever: Retriever | None = None
+        self, settings: Settings | None = None, backend: KnowledgeBackend | None = None
     ) -> None:
         self._settings = settings
-        # 允许注入检索器：测试可以塞一个用合成语料构建的实例，
-        # 从而不依赖文件系统、也不受进程内共享单例的影响。
-        # 这就是依赖注入在工具层的实际价值。
-        self._injected = retriever
+        # 允许注入后端：测试可以塞一个用合成语料构建的本地实现，
+        # 也可以塞一个假的远程实现，从而不依赖文件系统、
+        # 不受进程内共享单例影响、也不需要真的起一个服务。
+        # 这就是依赖注入在工具层的实际价值 —— 也是拆服务后
+        # 唯一能让工具层保持可测的原因。
+        self._injected = backend
         # 检索比普通工具慢（建索引 + 两路召回 + 重排），超时给宽一点
         self.timeout = 60.0
 
-    def _get_retriever(self, settings: Settings) -> Retriever:
-        return self._injected or get_shared_retriever(settings)
+    def _get_backend(self, settings: Settings) -> KnowledgeBackend:
+        return self._injected or build_knowledge_backend(settings)
 
     async def run(self, params: BaseModel) -> ToolResult:
         p = SearchKnowledgeParams.model_validate(params.model_dump())
         settings = self._settings or get_settings()
+        doc_types = _SCOPE_MAP[p.scope]
 
+        # 【这里的三个 except 分支就是拆服务的全部错误处理成本】
+        # 接口一旦定义清楚（见 rag/backend.py），本地与远程实现抛出的
+        # 异常类型完全一致，工具层因此**完全不需要知道**自己走的是
+        # 进程内调用还是 HTTP —— 这正是抽接口换来的东西。
         try:
-            retriever = self._get_retriever(settings)
-        except Exception as exc:
-            logger.exception("构建检索索引失败")
-            return ToolResult.failure(f"知识库索引构建失败：{type(exc).__name__}: {exc}")
-
-        if len(retriever.chunks) == 0:
+            ctx = await self._get_backend(settings).context(
+                p.query,
+                k=p.limit,
+                doc_types=doc_types,
+                min_score=settings.rag.min_score,
+                max_chars=settings.rag.max_context_chars,
+            )
+        except EmptyKnowledgeBase:
             return ToolResult.failure(
                 "知识库为空，无法检索。请先准备数据："
                 "把简历保存为 data/resume.md，或运行 "
                 "python scripts/ingest.py <你的简历.pdf> --type resume"
             )
-
-        doc_types = _SCOPE_MAP[p.scope]
-        ctx = await retriever.aretrieve_context(
-            p.query,
-            k=p.limit,
-            doc_types=doc_types,
-            min_score=settings.rag.min_score,
-            max_chars=settings.rag.max_context_chars,
-        )
+        except KnowledgeBackendError as exc:
+            # 后端不可用时给出**可操作**的信息：谁挂了、地址是什么。
+            # 只说"检索失败"会让人以为是知识库里没有内容，方向完全错了。
+            logger.warning("知识库后端不可用：%s", exc)
+            return ToolResult.failure(
+                f"知识库服务不可用：{exc}。"
+                f"请确认 RAG 服务已启动（RAG_SERVICE_URL={settings.rag_service_url or '未配置（本进程内检索）'}）。"
+            )
 
         if not ctx:
             hint = {

@@ -114,6 +114,14 @@ class TaskSettings(BaseSettings):
     worker_count: int = Field(default=1, ge=1, le=16)
     max_tasks: int = Field(default=200, ge=1)
     ttl_seconds: int = Field(default=24 * 3600, gt=0)
+    # 是否在 API 进程内启动 worker。
+    # 拆出独立 worker 进程后设为 false，API 只负责投递任务。
+    #
+    # 【为什么默认是 true】
+    # 单体模式下必须为 true，否则任务永远没人执行（静默失效）。
+    # 默认值的选取原则是"让最常见的部署形态零配置正确" ——
+    # 这里最常见的是单体，所以 worker 跟着 API 起。
+    run_workers_in_api: bool = True
 
 
 class SessionSettings(BaseSettings):
@@ -254,6 +262,18 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_fake: bool = True
+
+    # ---------- 微服务拆分 ----------
+    # 空字符串 = 在本进程内直接检索（单体模式，默认）。
+    # 设成 http://rag:8001 之类 = 改走独立的 RAG 服务。
+    #
+    # 【为什么用一个"空值即单体"的开关，而不是加一个 MODE 枚举】
+    # 开关越少，组合出的状态越少。用 `RAG_SERVICE_URL` 一个变量同时表达
+    # "在哪"和"是否远程"，就不可能出现"模式=远程但地址为空"这种
+    # 需要额外校验的非法组合。**能用一个变量表达的配置，
+    # 就不要用两个变量加一条校验规则。**
+    rag_service_url: str = ""
+    rag_service_timeout: float = Field(default=15.0, gt=0)
 
     embedding_backend: str = "tfidf"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"

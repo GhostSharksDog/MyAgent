@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sessions = await build_session_store(settings)
 
     # 任务队列：注册处理器 → 启动 worker（顺序不能反，见 factory 的说明）
+    # `run_workers_in_api=false` 时本进程只投递、不消费（配合独立 worker 进程）
     tasks = await build_task_queue(settings)
 
     app.state.settings = settings

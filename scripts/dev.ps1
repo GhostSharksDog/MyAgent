@@ -17,6 +17,12 @@
 #   .\scripts\dev.ps1 cli        # 启动命令行 Agent
 #   .\scripts\dev.ps1 serve      # 启动 API 服务（含 /docs 交互文档）
 #   .\scripts\dev.ps1 tools      # 列出已注册的工具
+#
+#   # ---- 微服务拆分（P4）----
+#   .\scripts\dev.ps1 rag        # 启动独立的 RAG 检索服务（端口 8001）
+#   .\scripts\dev.ps1 worker     # 启动独立的任务 worker（需要 TASK_BACKEND=redis）
+#   .\scripts\dev.ps1 serve-split # 启动 API 服务并指向独立 RAG 服务（拆分拓扑）
+#   .\scripts\dev.ps1 verify-split # 跨进程验证：证明调用真的走了 HTTP
 
 [CmdletBinding()]
 param(
@@ -184,6 +190,50 @@ function Task-Tools {
     & $VenvPython (Join-Path $PSScriptRoot 'list_tools.py')
 }
 
+# ============================================================
+# 微服务拆分（P4）
+# ============================================================
+function Task-Rag {
+    Initialize-Environment
+    Assert-Venv
+    # 独立进程运行检索服务：它的 CPU 占用不再影响 API 的响应延迟。
+    # 注意端口 8001 与 docker-compose 里 rag 服务的端口保持一致 ——
+    # 本地与容器两套拓扑用同一个端口，可以少一类"本地能跑容器不行"的问题。
+    Write-Host "RAG 文档: http://127.0.0.1:8001/docs" -ForegroundColor Green
+    & $VenvPython -m uvicorn app.rag_service.main:app --host 127.0.0.1 --port 8001 --reload --app-dir $ApiDir
+}
+
+function Task-ServeSplit {
+    Initialize-Environment
+    Assert-Venv
+    # 关键就是这一个环境变量：它让 agent 走 HTTP 而不是本进程内检索。
+    # 启动后用 GET /healthz 确认 rag_backend=remote ——
+    # **配置错了不会报错**，只会静默退回单体，所以必须核对。
+    $env:RAG_SERVICE_URL = 'http://127.0.0.1:8001'
+    Write-Host "拆分拓扑：API:8000 → RAG:8001" -ForegroundColor Green
+    Write-Host "启动后请确认 /healthz 的 rag_backend=remote" -ForegroundColor Yellow
+    & $VenvPython -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --app-dir $ApiDir
+}
+
+function Task-Worker {
+    Initialize-Environment
+    Assert-Venv
+    # worker 需要一个跨进程共享的队列，否则它收不到任何任务 ——
+    # fakeredis 也不行，它是进程内的假实现，不跨进程。
+    # 所以这里固定用 redis；连不上时 worker_main 会以退出码 2 明确报错，
+    # 而不是对着空队列静默等待（那是最难排查的一类故障）。
+    $env:TASK_BACKEND = 'redis'
+    Write-Host "独立 worker（TASK_BACKEND=redis，需要本机 Redis 已启动）" -ForegroundColor Green
+    Push-Location $ApiDir
+    try { & $VenvPython -m app.worker_main } finally { Pop-Location }
+}
+
+function Task-VerifySplit {
+    Initialize-Environment
+    Assert-Venv
+    & $VenvPython (Join-Path $PSScriptRoot 'verify_split.py')
+}
+
 function Task-Help {
     Get-Content $PSCommandPath | Select-String -Pattern '^#   \.' | ForEach-Object {
         $_.Line -replace '^#   ', ''
@@ -201,5 +251,9 @@ switch ($Task) {
     'cli'       { Task-Cli }
     'serve'     { Task-Serve }
     'tools'     { Task-Tools }
+    'rag'       { Task-Rag }
+    'serve-split' { Task-ServeSplit }
+    'worker'    { Task-Worker }
+    'verify-split' { Task-VerifySplit }
     default     { Task-Help }
 }

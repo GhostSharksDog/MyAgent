@@ -1,0 +1,52 @@
+# 构建上下文排除规则。
+#
+# 【为什么这个文件比看上去重要】
+# 没有它，`docker build .` 会把整个工作目录发给 Docker daemon ——
+# 包括 .venv（几百 MB）、node_modules（几百 MB）和 .git。
+# 后果有两个，第二个更严重：
+#   1. 构建变慢（每次都要传输这些内容）
+#   2. **可能把敏感文件打进镜像** —— 幸而 .env 在下面被排除了
+#
+# 尤其是 data/：里面有真实简历，属于个人信息。
+# 它必须是**挂载**进去的运行时数据，而不是构建进去的镜像内容。
+# 这一条同时是隐私要求和工程要求，两者恰好一致。
+
+# ---------- 版本控制与密钥 ----------
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# ---------- Python ----------
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+
+# ---------- 前端 ----------
+apps/web/node_modules
+apps/web/dist
+node_modules
+
+# ---------- 运行时数据（个人信息，必须挂载而非打包） ----------
+data
+!data/.gitkeep
+
+# ---------- 文档与评测产物 ----------
+docs
+*.md
+!services/api/README.md
+eval_results
+
+# ---------- 容器自身 ----------
+docker
+docker-compose.yml
+.dockerignore
+Dockerfile*

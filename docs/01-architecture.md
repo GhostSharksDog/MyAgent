@@ -131,24 +131,32 @@ MyAgent/
 │   │   └── 03-rag.md             # 78KB 讲义：切分 / embedding / HNSW / 混合检索 / rerank / 评测
 │   └── 03-journal/
 │       └── 2026-09-13-P0P1-搭建记录.md   # 开发日志（P0/P1 搭建记录）
+├── docker/
+│   └── Dockerfile                # 单镜像多入口：api / rag / worker 三种角色共用（见 6.3 的理由）
+├── docker-compose.yml            # P4 拆分编排：redis / rag / api / worker + 拓扑自洽性测试
+├── .dockerignore                 # 排除 .env 与 data/（简历属于个人信息，必须挂载而非打包）
 ├── scripts/
 │   ├── bootstrap_env.py          # 从环境变量生成 .env（UTF-8 无 BOM，末尾自检）
-│   ├── ingest.py                 # P2 语料入库脚本（并行落地，未纳入本文核对范围）
-│   ├── dev.ps1                   # 开发便捷脚本（并行落地）
-│   └── list_tools.py             # 列出已注册工具（并行落地）
+│   ├── ingest.py                 # P2 语料入库脚本
+│   ├── dev.ps1                   # 开发便捷脚本（含 rag / worker / serve-split / verify-split）
+│   ├── fix_ps1_bom.py            # 给 .ps1 补 UTF-8 BOM 并用 PS 解析器验证（见下）
+│   ├── verify_split.py           # P4 跨进程验证：去 RAG 服务自己的指标端点确认请求真的到了
+│   └── list_tools.py             # 列出已注册工具
 └── services/
-    └── api/                      # 后端服务（当前唯一的服务）
+    └── api/                      # 后端服务（三种进程角色共用这一份代码）
         ├── pyproject.toml        # 依赖 + ruff + mypy strict + pytest 配置
         ├── cli.py                # 命令行入口：流式渲染 + /tools /clear /history
         ├── seed/
         │   └── jobs.json         # 6 条岗位种子数据（job-001 ~ job-006，含 JD 原文）
         ├── app/
         │   ├── __init__.py       # __version__ = "0.1.0"
-        │   ├── main.py           # FastAPI 应用、lifespan 装配、CORS
+        │   ├── main.py           # FastAPI 应用、lifespan 装配、CORS、trace 中间件
+        │   ├── worker_main.py    # P4：独立任务 worker 进程入口（backend≠redis 时退出码 2）
         │   ├── core/
         │   │   ├── __init__.py
-        │   │   ├── config.py     # Settings 聚合根 / PROJECT_ROOT / 生产自检
-        │   │   └── logging.py    # 彩色分级日志 + 压制第三方噪音
+        │   │   ├── config.py     # Settings 聚合根 / PROJECT_ROOT / 生产自检 / rag_service_url
+        │   │   ├── logging.py    # 彩色分级日志 + trace_id 注入 + 压制第三方噪音
+        │   │   └── telemetry.py  # trace id / 计数器 / 直方图 / Prometheus 渲染
         │   ├── llm/
         │   │   ├── __init__.py
         │   │   ├── types.py      # 协议类型：ChatMessage / ToolCall / Usage / StreamDelta
@@ -157,26 +165,51 @@ MyAgent/
         │   │   ├── __init__.py
         │   │   ├── base.py       # Tool 抽象 / ToolResult / ToolRegistry / 截断
         │   │   ├── errors.py     # ToolError 语义分类
-        │   │   └── builtin.py    # 4 个内置工具 + build_default_registry
+        │   │   ├── knowledge.py  # P2：search_knowledge —— **只依赖 KnowledgeBackend 接口**
+        │   │   └── builtin.py    # 内置工具 + build_default_registry
         │   ├── agent/
         │   │   ├── __init__.py
         │   │   ├── events.py     # AgentEvent / EventType / AgentRunResult
         │   │   ├── prompts.py    # SYSTEM_PROMPT（能力边界 / 工具规则 / 诚实性 / 风格）
-        │   │   └── loop.py       # Agent.run_stream（流式）/ Agent.run（非流式）
-        │   ├── rag/              # ⚠️ P2 并行落地中（loaders/chunker/embedder/store/corpus/retriever/evaluate），
-        │   │                     #    尚未与 Agent 打通（未注册为工具），本文不描述其内部设计
+        │   │   ├── loop.py       # Agent.run_stream（流式）/ Agent.run（非流式）
+        │   │   ├── planning.py   # PlanAndExecuteAgent（规划-执行-重规划）
+        │   │   ├── multi.py      # SupervisorAgent（主管-专家委派）
+        │   │   └── memory.py     # 短期滑窗+摘要 / 长期事实
+        │   ├── rag/              # P2 检索链路
+        │   │   ├── backend.py    # P4 拆分的关键：KnowledgeBackend 显式契约 + 本地/远程两种实现
+        │   │   ├── loaders.py    # 文档加载与 DocType
+        │   │   ├── chunker.py    # 章节切分 / 小块合并 / citation
+        │   │   ├── embedder.py   # TF-IDF（零依赖基线）
+        │   │   ├── bm25.py       # 手写 BM25 倒排
+        │   │   ├── store.py      # 内存向量库 + SearchHit
+        │   │   ├── fusion.py     # RRF 排名融合
+        │   │   ├── rerank.py     # Lexical / LLM listwise 重排
+        │   │   ├── retriever.py  # 混合召回 → 闸门 → 重排
+        │   │   ├── corpus.py     # 默认语料装配
+        │   │   ├── evaluate.py   # Recall@k / MRR / NDCG 评测
+        │   │   └── factory.py    # 共享单例与配置驱动装配
+        │   ├── rag_service/
+        │   │   └── main.py       # P4：独立检索服务的 ASGI app（/retrieve /context /reindex）
+        │   ├── session/          # P3 会话存储（memory / fakeredis / redis）
+        │   ├── tasks/            # P3 异步任务队列（memory / redis）+ 处理器
         │   └── api/
         │       ├── __init__.py
-        │       ├── schemas.py    # HTTP 请求响应模型
-        │       └── routes.py     # 5 个端点
-        └── tests/
-            ├── __init__.py
-            ├── test_agent_loop.py  # 21 项：直答 / 单工具 / 多步 / 护栏 / 工具失败 / LLM 失败 / 空回复 / live
-            ├── test_stream.py      # 12 项：StreamAccumulator 聚合 / chunk 解析 / wire 序列化
-            └── test_tools.py       # 37 项：计算器 / 参数校验 / 安全（路径穿越）/ 注册表 / 岗位检索
+        │       ├── schemas.py    # HTTP 请求响应模型（含 rag_backend 等拓扑字段）
+        │       └── routes.py     # 端点：chat / stream / sessions / tasks / metrics / meta
+        └── tests/                # 563 项，含 test_service_split.py（拆分契约与编排自洽性）
 ```
 
-> **关于目录表的边界**：本文只对 P0/P1 基线（上表中未标注"并行落地"的部分）负责——那些文件我都逐行读过。`app/rag/` 等 P2 目录在写作时仍在被人改动，**我不把它们的设计写进本文**：一份描述正在施工中的代码的架构文档，比不写更快过期。P2 稳定后的第一件事应该是补齐这一节。
+> **关于目录表的边界**：P0/P1 基线部分我逐行读过并负责；`rag/`、`session/`、`tasks/`、前端等
+> 目录是在后续阶段快速迭代的，**我只在它们稳定后才把设计写进本文**——一份描述正在施工中的
+> 代码的架构文档，比不写更快过期。P4 的拆分（`rag/backend.py`、`rag_service/`、
+> `worker_main.py`、`docker-compose.yml`）已在 6.3 节说明其设计与取舍。
+>
+> **一个本机特有的坑（已加回归门禁）**：`scripts/*.ps1` 必须带 UTF-8 BOM。本机 PowerShell 是
+> **5.1**，只在见到 BOM 时才按 UTF-8 解码 `.ps1`，否则按 GBK 解码。GBK 解码 UTF-8 中文时，
+> 中文字的第三字节（0x80–0xBF）会单独成字并**继续吞掉后面那个字节**（常常是换行或引号），
+> 导致行号错位、引号断开、语法树崩溃——而报错位置指向的行往往只是一句中文注释，
+> 排查方向被彻底带偏。这个坑在给 `dev.ps1` 加几个函数后真实触发了，由
+> `TestPowerShellEncoding` 把关，修复脚本是 `scripts/fix_ps1_bom.py`。
 
 ### 2.2 每个文件干什么（逐文件职责）
 
@@ -498,6 +531,60 @@ graph LR
 | **调试难度上升** | 不能再用 pdb 单进程断点 | 完善可观测（第 7 节）+ 契约测试 + 本地 compose 复现路径 |
 
 **拆分粒度原则**（面试可直接答）：**按业务能力（business capability）拆，不按技术分层拆。** 反例是拆成 `llm-service` / `tool-service` / `prompt-service`——这会把一次对话变成 5 次网络往返，每个业务改动都要改 3 个服务，是典型的分布式单体。正例是 `rag-service`：它有自己的数据（向量库）、自己的扩缩容曲线、自己的故障语义，是一个内聚的能力单元。
+
+---
+
+### 6.3 P4 实际做了什么（以及为什么和上面的计划不一样）
+
+上面 6.2 是**设计时的计划**。实际落地的范围明显更小，这个差异本身比计划更有价值：
+
+| 计划 | 实际 | 为什么 |
+|---|---|---|
+| 拆 `gateway` / `agent-service` / `rag-service` / `worker` 四个服务 | 拆**三个进程角色**：`api` / `rag` / `worker`（镜像同一个） | 没有鉴权、限流、多租户需求时，`gateway` 只做转发。**多一跳网络换来零个能力**。等真正需要统一鉴权/限流时再加，那时它才有理由存在 |
+| 用 MQ + outbox 保证"简历入库 → 建索引"最终一致 | 沿用既有任务队列（Redis BRPOP），**未加 outbox** | outbox 解决的是"两个写操作跨服务跨库"的一致性问题。当前"入库"和"建索引"共用同一份 `data/` 卷，根本不存在双写。**为不存在的问题加复杂度是最常见的过度设计** |
+| OpenTelemetry + 结构化 JSON 日志 | 手写 `ContextVar` trace id，在 HTTP header 里跨服务透传 | 三个服务、单一进程内传播，OTel 的 collector/exporter/sampling 全套基础设施**成本远大于收益**。已经能回答"哪一跳慢了"这个问题 |
+| `COMPOSE_PROFILES=monolith` 保留单体模式 | **`RAG_SERVICE_URL` 为空即单体**（一个变量，无 profile） | 用"空值即单体"这样一个变量同时表达"在哪"和"是否远程"，就不可能出现"模式=远程但地址为空"这种需要额外校验的非法组合 |
+| 代码拆到独立仓库/独立包 | **同一代码库、同一镜像、不同入口** | 见下 |
+
+**"同一代码库"不是偷懒，是顺序问题。** 拆分应该分三步走，而且必须按这个顺序：
+
+```
+1. 进程边界    让它能在独立进程里跑起来        ← 本步已完成
+2. 接口边界    让它走网络调用，契约显式化        ← 本步已完成
+3. 仓库边界    最后才把代码搬开
+```
+
+理由很实际：如果第 1 步就同时搬代码，出问题时你**无法判断是"拆分设计有问题"还是"搬运时漏了什么"**——两个变量同时变，排障只能靠猜。
+
+**第 2 步才是真正有技术含量的那一步，也是唯一不可省略的。** 拆分失败的根源几乎都在这里：原来 `KnowledgeSearchTool` 和 `Retriever` 之间有一个**隐式契约**（`len(retriever.chunks) == 0` 表示语料为空），它在同进程里永远成立，一跨网络就彻底失效。所以实际做法是：
+
+1. 先把契约写成显式接口 `KnowledgeBackend`（`rag/backend.py`），只有 `context()` + `stats()` 两个方法；
+2. 让工具只依赖这个接口；
+3. **然后**才加 `RemoteKnowledgeBackend`。
+
+做完前两步，第三步几乎是免费的。反过来（先写 HTTP 客户端再想接口）会得到一个又宽又别扭的接口，每个调用点都要特判。
+
+**"知识库为空"这个语义是这次拆分中最值得讲的一个点。** 它在进程内靠 `len(chunks) == 0` 就能看出来；跨进程之后，调用方**没有任何办法**自己判断。所以必须由服务端把它说出来——HTTP 503 + 明确 detail，客户端再还原成 `EmptyKnowledgeBase` 异常。降级成一个 200 + 空结果的话，"该去准备简历"和"该换个问法"这两种完全不同的用户动作就会被压成同一句提示，用户会一直换问法而永远解决不了问题。**网络边界上的沉默会被错误解读。**
+
+**拆分付出的真实代价（都有对应代码与测试）：**
+
+| 代价 | 具体表现 | 应对 |
+|---|---|---|
+| **拓扑静默失效** | 忘了设 `RAG_SERVICE_URL`，agent 会在自己进程里另建一份索引——服务健康、回答正确，但资源隔离与独立扩容全部失效 | `/healthz` 与 `/api/meta` 暴露 `rag_backend` / `task_backend` / `task_workers_in_api`；三者共同点是**配错了不报错** |
+| **启动组合不自洽** | `TASK_RUN_WORKERS_IN_API=false` + 进程内队列 = 任务永远 pending 而服务完全健康 | `build_task_queue` 直接拒绝启动并说明正确组合；`worker_main` 在 backend≠redis 时以退出码 2 明确退出，而不是对着空队列静默空转 |
+| **连接失败与响应慢被混淆** | `httpx.ConnectTimeout` 同时继承 `TimeoutException` 与 `TransportError`，分支写反会把"服务没起来"报成"服务过载" | 异常分支按**具体→宽泛**排序；测试固定住两者的诊断措辞 |
+| **级联故障** | 让 `/healthz` 去 ping 下游依赖：RAG 变慢 → agent 副本被判定不健康 → 全部摘除 → 整个对话服务挂掉 | 健康检查**只读配置、永远常数时间**；探活属于就绪/依赖探针，单独端点 |
+| **连接建立成本** | 每次请求新建 `AsyncClient` 会重新握手，把刚拿到的毫秒级延迟又还回去 | 客户端惰性创建并复用（连接池） |
+
+**验证方式（这是本步最有说服力的部分）**：`scripts/verify_split.py` 不满足于"有结果返回"，而是去 RAG 服务**自己的指标端点**确认请求计数真的涨了——
+
+> 有结果 ≠ 请求真的到达了那个进程
+
+实测：一次真实 `/api/chat` 让 RAG 服务的 `jobpilot_rag_request_ms_count` 从 13 涨到 16，返回的答案带 `[1]` 引用。这同时证明了四件事：HTTP 调用真实发生、语料在服务端被检索、引用标注跨进程回传、agent 进程没有偷偷走本地路径。
+
+`tests/test_service_split.py` 里的 `TestContractAgainstRealServer` 则用 `ASGITransport` 让**真实客户端**调用**真实服务端 app**：不起进程、不占端口，但完整走一遍 HTTP 序列化与状态码。这填上了"单体单元测试"与"线上联调"之间的那个缺口——只在两端各自 mock 的测试里，字段名不一致（客户端发 `top_k`、服务端读 `k`）会同时"全绿"。
+
+**编排层的检查也做成了测试**（`TestComposeTopology`）：拆服务的事故绝大部分不是代码错，而是配置组合不自洽，这类错误在代码里没有任何痕迹——`docker-compose.yml` 里那些"必须成对出现"的变量（`RAG_SERVICE_URL` 的主机名必须是真实服务、`TASK_RUN_WORKERS_IN_API=false` 必须配 `worker` 服务、api/rag/worker 必须挂同一份 `data/`）都由测试把关。
 
 ---
 

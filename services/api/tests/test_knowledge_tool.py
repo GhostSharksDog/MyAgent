@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 from app.core.config import get_settings
 from app.llm.types import ToolCall
+from app.rag.backend import LocalKnowledgeBackend
 from app.rag.chunker import ChunkStrategy
 from app.rag.factory import (
     build_configured_retriever,
@@ -57,6 +58,16 @@ def _retriever() -> Retriever:
     )
 
 
+def _backend() -> LocalKnowledgeBackend:
+    """把合成语料检索器包成本地后端。
+
+    工具层现在只依赖 KnowledgeBackend 接口（见 rag/backend.py），
+    所以测试注入的是后端而不是检索器 —— 这个改动本身就是拆分的一部分：
+    接口变清楚之后，测试也不再需要知道底层是 Retriever。
+    """
+    return LocalKnowledgeBackend(retriever=_retriever())
+
+
 def _call(name: str = "search_knowledge", **args: object) -> ToolCall:
     import json
 
@@ -81,7 +92,7 @@ class TestToolContract:
         assert "search_knowledge" in build_default_registry().names()
 
     def test_schema_is_valid_json_schema(self) -> None:
-        schema = KnowledgeSearchTool(retriever=_retriever()).json_schema()
+        schema = KnowledgeSearchTool(backend=_backend()).json_schema()
         fn = schema["function"]
         assert fn["name"] == "search_knowledge"
         assert fn["parameters"]["type"] == "object"
@@ -108,7 +119,7 @@ class TestToolContract:
 # ============================================================
 class TestRetrieval:
     async def test_returns_snippets_with_citations(self) -> None:
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="消息队列"))
         assert result.ok
         # 出处标注是"回答可验证"的前提，必须存在
@@ -116,24 +127,24 @@ class TestRetrieval:
         assert "[1]" in result.content
 
     async def test_finds_relevant_content(self) -> None:
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="用了哪些大数据技术"))
         assert result.ok
         assert any(kw in result.content for kw in ("Kafka", "Flink", "ClickHouse"))
 
     async def test_scope_resume_excludes_jobs(self) -> None:
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="RAG 向量数据库", scope="resume"))
         # RAG 只出现在岗位块里；限定 scope=resume 后不应召回它
         assert "job-001" not in result.content
 
     async def test_scope_jobs_excludes_resume(self) -> None:
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="Kafka", scope="jobs"))
         assert "resume.md" not in result.content
 
     async def test_limit_respected(self) -> None:
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="技术", limit=1))
         assert result.ok
         assert "[2]" not in result.content  # 只要 1 条，不该出现第 2 条编号
@@ -147,7 +158,7 @@ class TestRetrieval:
         from app.core.config import RagSettings
 
         settings = get_settings().model_copy(update={"rag": RagSettings(min_score=0.3)})
-        tool = KnowledgeSearchTool(settings=settings, retriever=_retriever())
+        tool = KnowledgeSearchTool(settings=settings, backend=_backend())
         result = await tool.run(
             SearchKnowledgeParams(query="外星语言量子纠缠拓扑绝缘体", scope="resume")
         )
@@ -161,7 +172,7 @@ class TestRetrieval:
         这个用例把这个事实固定下来：它不是 bug，是必须被上层知晓的语义。
         因此工具层**必须**考虑是否开启闸门，而不是假设"没结果"会自然发生。
         """
-        tool = KnowledgeSearchTool(retriever=_retriever())
+        tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="外星语言量子纠缠拓扑绝缘体"))
         assert result.ok  # 无闸门 → 总会有"结果"
         assert result.content  # 但内容其实无关
@@ -171,7 +182,7 @@ class TestRetrieval:
         from app.core.config import RagSettings
 
         settings = get_settings().model_copy(update={"rag": RagSettings(min_score=0.05)})
-        tool = KnowledgeSearchTool(settings=settings, retriever=_retriever())
+        tool = KnowledgeSearchTool(settings=settings, backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="Kafka 消息队列"))
         assert result.ok
 
@@ -186,7 +197,7 @@ class TestRetrieval:
 
         emb = TfidfEmbedder()
         emb.fit(["占位内容"])
-        tool = KnowledgeSearchTool(retriever=Retriever([], emb))
+        tool = KnowledgeSearchTool(backend=LocalKnowledgeBackend(retriever=Retriever([], emb)))
         result = await tool.run(SearchKnowledgeParams(query="任何"))
         assert not result.ok
         assert "知识库为空" in result.content
@@ -202,7 +213,7 @@ class TestRegistryIntegration:
         from app.tools.base import ToolRegistry
 
         registry = ToolRegistry()
-        registry.register(KnowledgeSearchTool(retriever=_retriever()))
+        registry.register(KnowledgeSearchTool(backend=_backend()))
         result = await registry.execute(_call(query="Kafka"))
         assert result.ok
         assert result.duration_ms >= 0
@@ -212,7 +223,7 @@ class TestRegistryIntegration:
         from app.tools.base import ToolRegistry
 
         registry = ToolRegistry()
-        registry.register(KnowledgeSearchTool(retriever=_retriever()))
+        registry.register(KnowledgeSearchTool(backend=_backend()))
         result = await registry.execute(_call(query="Kafka", scope="不存在的范围"))
         assert not result.ok
         assert "参数校验失败" in result.content

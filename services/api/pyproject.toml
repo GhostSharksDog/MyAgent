@@ -19,7 +19,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8", "mypy>=1.13"]
+# pyyaml 用于**校验 docker-compose.yml 的拓扑自洽性**（见 test_service_split.py）。
+# 它必须显式声明：测试如果依赖未声明的传递依赖，会在换了依赖解析结果时
+# 突然失败，而且失败原因看起来和测试本身毫无关系。
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pyyaml>=6.0",
+]
 
 # ============================================================
 # Ruff：lint + format（比 flake8+isort+black 快一个数量级）

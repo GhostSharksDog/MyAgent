@@ -40,6 +40,7 @@ from app.api.schemas import (
 from app.core.config import get_settings
 from app.core.telemetry import record_agent_event
 from app.llm.types import ChatMessage
+from app.rag.backend import describe_knowledge_backend
 from app.session.models import Session
 from app.session.store import SessionStore
 
@@ -164,16 +165,28 @@ async def _persist(
 # ============================================================
 @router.get("/healthz", summary="健康检查")
 async def healthz(request: Request) -> dict[str, object]:
+    """健康检查。
+
+    【为什么这里只报配置，不探活下游】
+    见 `rag/backend.py::describe_knowledge_backend`：让健康检查依赖下游
+    会导致级联故障 —— 检索服务变慢会把所有 agent 副本一起拖下水。
+    这里只回答"本进程的装配是否正确"，因此永远是常数时间。
+    """
     settings = get_settings()
+    rag_info = describe_knowledge_backend(settings)
     return {
         "status": "ok",
         "env": str(settings.app_env),
         "llm_configured": settings.llm.is_configured,
         "model": settings.llm.model,
         "tools": request.app.state.tools.names(),
-        # 会话后端必须可见：`memory` 意味着多副本部署下会丢会话，
-        # 这正是运维最需要一眼看到的信息
+        # 三个 backend 必须同时可见：它们的共同点是**配错了不报错**，
+        # 只会默默以另一种拓扑运行。健康检查是唯一能一眼看出来的地方。
         "session_backend": request.app.state.sessions.backend,
+        "task_backend": request.app.state.tasks.backend,
+        "task_workers_in_api": settings.tasks.run_workers_in_api,
+        "rag_backend": rag_info["backend"],
+        "rag_service_url": rag_info.get("url", ""),
     }
 
 
@@ -188,6 +201,9 @@ async def meta(request: Request) -> MetaResponse:
         max_steps=settings.agent.max_steps,
         tool_count=len(request.app.state.tools.names()),
         session_backend=request.app.state.sessions.backend,
+        rag_backend=describe_knowledge_backend(settings)["backend"],
+        task_backend=request.app.state.tasks.backend,
+        task_workers_in_api=settings.tasks.run_workers_in_api,
     )
 
 

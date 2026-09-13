@@ -96,7 +96,26 @@ async def build_task_queue(
     types = register_default_handlers(queue)
     logger.info("任务队列就绪：backend=%s，已知类型=%s", queue.backend, ", ".join(types))
 
-    if autostart:
+    if autostart and not cfg.run_workers_in_api:
+        # 【这个组合是静默失效，必须拦下来】
+        # "进程内队列 + API 不启动 worker" 意味着投递出去的任务永远没人消费：
+        # 接口返回 202，任务状态永远停在 pending，而服务本身完全健康。
+        # 唯一的跨进程消费者是独立 worker 进程，而它只认 redis。
+        #
+        # 与其让运维去猜"为什么任务不执行"，不如在这里直接拒绝启动组合，
+        # 顺便说清正确的三选一。
+        if queue.backend != "redis":
+            raise RuntimeError(
+                f"TASK_RUN_WORKERS_IN_API=false 与 TASK_BACKEND={queue.backend} 的组合不成立："
+                f"任务将永远无人消费。请改为 "
+                f"TASK_BACKEND=redis（配合独立 worker 进程），"
+                f"或设 TASK_RUN_WORKERS_IN_API=true（单体模式，worker 跟随 API）。"
+            )
+        logger.info(
+            "API 进程不启动 worker（TASK_RUN_WORKERS_IN_API=false），任务由独立 worker 进程消费"
+        )
+
+    if autostart and cfg.run_workers_in_api:
         await queue.start()
 
     return queue
