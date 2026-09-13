@@ -24,6 +24,11 @@
 #   .\scripts\dev.ps1 serve-split # 启动 API 服务并指向独立 RAG 服务（拆分拓扑）
 #   .\scripts\dev.ps1 verify-split # 跨进程验证：证明调用真的走了 HTTP
 #   .\scripts\dev.ps1 loadtest   # 并发压测，给出 P50/P95/P99 与 QPS
+#
+#   # ---- 求职转化（P5）：演示 ----
+#   .\scripts\dev.ps1 record-demo  # 录一次真实对话的事件流（含 PII 闸门）
+#   .\scripts\dev.ps1 demo        # **离线演示模式**：重放录制的事件流，不调模型
+#   .\scripts\dev.ps1 verify-demo # 验证离线回放真的不需要网络
 
 [CmdletBinding()]
 param(
@@ -34,7 +39,8 @@ param(
     # 结果 `dev.ps1 rag` 直接报"参数不在集合中"。
     [ValidateSet(
         'setup', 'install', 'test', 'test-live', 'lint', 'fmt', 'check', 'cli', 'serve', 'tools',
-        'rag', 'worker', 'serve-split', 'verify-split', 'loadtest', 'help'
+        'rag', 'worker', 'serve-split', 'verify-split', 'loadtest',
+        'record-demo', 'demo', 'verify-demo', 'install-hooks', 'help'
     )]
     [string]$Task = 'help',
 
@@ -181,13 +187,40 @@ function Task-Check {
     Initialize-Environment
     Assert-Venv
     & $VenvPython (Join-Path $PSScriptRoot 'fix_ps1_bom.py')
+
+    # 【为什么每个阶段都要显式检查 $LASTEXITCODE】
+    #
+    # PowerShell 调用外部程序（python）时**不会**因为非零退出码而中止 ——
+    # 脚本会继续往下跑。所以原来的实现里，ruff 报了 lint 错误、
+    # pytest 有失败用例，最后**依然打印"[OK] 全部通过，可以提交"**。
+    #
+    # 一个会在失败时报告成功的检查流水线，比没有流水线更糟：
+    # 没有流水线时人会自己去跑测试；有流水线但它在撒谎，
+    # 人会**相信它**并跳过检查。这是真实发生的 ——
+    # 写这段时就出现过"lint 报 RUF043 但 check 说全部通过"。
+    $failed = @()
+
     Write-Host "`n=== 1/4 格式化 ===" -ForegroundColor Cyan
     Task-Fmt
+    if ($LASTEXITCODE -ne 0) { $failed += "格式化" }
+
     Write-Host "`n=== 2/4 静态检查 ===" -ForegroundColor Cyan
     Task-Lint
+    if ($LASTEXITCODE -ne 0) { $failed += "静态检查" }
+
     Write-Host "`n=== 3/4 测试 ===" -ForegroundColor Cyan
     Task-Test
-    Write-Host "`n[OK] 全部通过，可以提交" -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) { $failed += "测试" }
+
+    Write-Host ""
+    if ($failed.Count -gt 0) {
+        Write-Host "[FAIL] 以下阶段未通过：$($failed -join '、')" -ForegroundColor Red
+        Write-Host "       不要提交。" -ForegroundColor Red
+        # 显式设退出码：否则从 CI 或别的脚本调用时，外部只能看到 0
+        $global:LASTEXITCODE = 1
+        exit 1
+    }
+    Write-Host "[OK] 全部通过，可以提交" -ForegroundColor Green
 }
 
 function Task-Cli {
@@ -267,6 +300,60 @@ function Task-LoadTest {
     & $VenvPython (Join-Path $PSScriptRoot 'loadtest.py') @Extra
 }
 
+# ============================================================
+# 求职转化（P5）：演示
+# ============================================================
+function Task-RecordDemo {
+    Initialize-Environment
+    Assert-Venv
+    # 前提是 API 正在跑（真实链路，需要 LLM 额度）。
+    # 录完会做 PII 检查：简历原文会出现在工具返回里，命中则拒绝写出。
+    Write-Host "录制演示事件流（需要 API 已启动且有 LLM 额度）" -ForegroundColor Green
+    & $VenvPython (Join-Path $PSScriptRoot 'record_demo.py') @Extra
+}
+
+function Task-Demo {
+    Initialize-Environment
+    Assert-Venv
+    # 【离线演示模式】
+    # 优先用提交在仓库里的 PII-free 录制；本地录了含真实简历的版本就用本地那份。
+    $local = Join-Path $Root 'data\demo\transcript.json'
+    $public = Join-Path $Root 'demo\transcript-public.json'
+    if (Test-Path $local) {
+        $env:DEMO_REPLAY_FILE = $local
+        Write-Host "使用本地录制（含真实简历，已在 gitignore 内）" -ForegroundColor Yellow
+    } elseif (Test-Path $public) {
+        $env:DEMO_REPLAY_FILE = $public
+        Write-Host "使用仓库内的 PII-free 录制" -ForegroundColor Green
+    } else {
+        Write-Host "[!] 找不到录制文件。先跑：.\scripts\dev.ps1 record-demo" -ForegroundColor Red
+        return
+    }
+    # 默认加速 3 倍：去掉录制时的网络冷场，但保持事件之间的相对节奏，
+    # token 依然是逐个出现的。
+    if (-not $env:DEMO_REPLAY_SPEED) { $env:DEMO_REPLAY_SPEED = '3' }
+
+    Write-Host "离线演示模式：/api/chat/stream 将重放录制的事件流，不会调用模型" -ForegroundColor Green
+    Write-Host "启动后**务必**确认 /healthz 的 demo_replay 字段不是 off" -ForegroundColor Yellow
+    Write-Host "API 文档: http://127.0.0.1:8000/docs" -ForegroundColor Green
+    & $VenvPython -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir $ApiDir
+}
+
+function Task-VerifyDemo {
+    Initialize-Environment
+    Assert-Venv
+    & $VenvPython (Join-Path $PSScriptRoot 'verify_demo.py') @Extra
+}
+
+function Task-InstallHooks {
+    Initialize-Environment
+    Assert-Venv
+    # 把 scripts/hooks/ 下版本化的 hook 装到 .git/hooks。
+    # hook 的真实内容随代码提交（可以被 review），.git/hooks 里只是安装产物 ——
+    # 因为 .git/ 不进版本控制，直接写进去的话换台机器克隆下来就没有了。
+    & $VenvPython (Join-Path $PSScriptRoot 'install_hooks.py') @Extra
+}
+
 function Task-Help {
     Get-Content $PSCommandPath | Select-String -Pattern '^#   \.' | ForEach-Object {
         $_.Line -replace '^#   ', ''
@@ -289,5 +376,9 @@ switch ($Task) {
     'worker'    { Task-Worker }
     'verify-split' { Task-VerifySplit }
     'loadtest'  { Task-LoadTest }
+    'record-demo' { Task-RecordDemo }
+    'demo'      { Task-Demo }
+    'verify-demo' { Task-VerifyDemo }
+    'install-hooks' { Task-InstallHooks }
     default     { Task-Help }
 }

@@ -49,28 +49,62 @@ def ps_parse_errors(path: pathlib.Path) -> list[str]:
 
 def main() -> int:
     root = pathlib.Path(__file__).parent
-    files = sorted(p for p in root.rglob("*.ps1") if ".venv" not in p.parts)
-    if not files:
-        print("没有找到 .ps1 文件")
-        return 0
+    scripts_dir = root
+    problems = 0
 
-    changed = 0
-    for p in files:
+    # ---------- .ps1：必须有 UTF-8 BOM ----------
+    ps1_files = sorted(p for p in scripts_dir.rglob("*.ps1") if ".venv" not in p.parts)
+    if not ps1_files:
+        print("没有找到 .ps1 文件")
+
+    fixed = 0
+    for p in ps1_files:
         raw = p.read_bytes()
         had_bom = raw.startswith(BOM)
         if not had_bom:
             p.write_bytes(BOM + raw)
-            changed += 1
+            fixed += 1
 
         errs = ps_parse_errors(p)
         status = "OK " if not errs else "ERR"
-        print(f"[{status}] {p.relative_to(root.parent)}  "
-              f"BOM={'有' if had_bom else '已补'}")
+        print(f"[{status}] {p.relative_to(root.parent)}  BOM={'有' if had_bom else '已补'}")
         for e in errs[:5]:
             print(f"       {e}")
+        if errs:
+            problems += 1
 
-    print(f"\n共 {len(files)} 个文件，补 BOM {changed} 个")
-    return 0
+    # ---------- .cmd / .bat：必须纯 ASCII ----------
+    #
+    # 【为什么这条规则是必要的，而不是洁癖】
+    # cmd.exe 和 PowerShell 5.1 一样，按系统 ANSI 代码页解码脚本文件。
+    # 一个 UTF-8 编码、带中文注释的 .cmd 会被解成乱码，
+    # 而乱码片段会被 cmd.exe **当成命令去执行** ——
+    # 实测输出是几百行
+    #     'xx），' is not recognized as an internal or external command
+    # 然后脚本卡死。
+    #
+    # 更关键的是：`fix-bom.cmd` 是"dev.ps1 已经坏掉时唯一的修复入口"，
+    # **它自己不能有和它要修复的问题同源的脆弱性**。
+    # 所以规则写成"必须纯 ASCII"，而不是"给它也加 BOM"——
+    # cmd.exe 对 UTF-8 BOM 的支持在各版本 Windows 上并不一致，
+    # 而 ASCII 在任何代码页下解码结果都相同。
+    cmd_files = sorted(
+        p for p in scripts_dir.rglob("*") if p.suffix.lower() in {".cmd", ".bat"}
+    )
+    for p in cmd_files:
+        raw = p.read_bytes()
+        try:
+            raw.decode("ascii")
+            print(f"[OK ] {p.relative_to(root.parent)}  纯 ASCII")
+        except UnicodeDecodeError as exc:
+            problems += 1
+            print(
+                f"[ERR] {p.relative_to(root.parent)}  含非 ASCII 字符（{exc.reason}，"
+                f"偏移 {exc.start}）—— cmd.exe 会按 ANSI 解码成乱码并当作命令执行"
+            )
+
+    print(f"\n共 {len(ps1_files)} 个 .ps1、{len(cmd_files)} 个 .cmd/.bat；补 BOM {fixed} 个")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

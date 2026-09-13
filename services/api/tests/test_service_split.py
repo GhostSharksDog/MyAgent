@@ -547,8 +547,74 @@ class TestPowerShellEncoding:
         missing = [p.name for p in files if not p.read_bytes().startswith(b"\xef\xbb\xbf")]
         assert not missing, (
             f"这些 .ps1 缺少 UTF-8 BOM，PowerShell 5.1 会按 GBK 解码并可能解析失败："
-            f"{missing}。修复：python scripts/fix_ps1_bom.py"
+            f"{missing}。修复：python scripts/fix_ps1_bom.py（或用 scripts\\fix-bom.cmd）"
         )
+
+    def test_cmd_files_are_ascii_only(self) -> None:
+        """`.cmd` / `.bat` 必须**纯 ASCII**。
+
+        【为什么这条规则不是洁癖，而是必需】
+        cmd.exe 和 PowerShell 5.1 一样按系统 ANSI 代码页解码脚本。
+        一个 UTF-8 编码、带中文注释的 `.cmd` 会被解成乱码，
+        而乱码片段会被 cmd.exe **当成命令去执行** —— 实测输出几百行
+        `'xx），' is not recognized as an internal or external command` 然后卡死。
+
+        【为什么这一条比 .ps1 的 BOM 规则更严格】
+        `scripts/fix-bom.cmd` 是"`dev.ps1` 已经坏掉时**唯一**的修复入口"。
+        它自己**不能有和它要修复的问题同源的脆弱性** ——
+        否则两者会一起坏，没有任何东西能救它。
+
+        所以规则是"纯 ASCII"而不是"也加 BOM"：cmd.exe 对 UTF-8 BOM 的
+        支持在各版本 Windows 上并不一致，而 **ASCII 在任何代码页下
+        解码结果都相同**。一个救援工具应该尽量少依赖环境特性。
+
+        （这条规则是被一次真实失败逼出来的：第一版 fix-bom.cmd 带中文注释，
+        执行时爆炸成几百行 "is not recognized as an internal or external command"。）
+        """
+        root = Path(__file__).resolve().parents[3]
+        files = [p for p in (root / "scripts").rglob("*") if p.suffix.lower() in {".cmd", ".bat"}]
+        assert files, "没有找到任何 .cmd/.bat —— 恢复脚本 fix-bom.cmd 应该存在"
+        bad: list[str] = []
+        for p in files:
+            try:
+                p.read_bytes().decode("ascii")
+            except UnicodeDecodeError as exc:
+                bad.append(f"{p.name}（偏移 {exc.start}）")
+        assert not bad, (
+            f"这些批处理文件含非 ASCII 字符，cmd.exe 会按 ANSI 解码成乱码并当作命令执行："
+            f"{bad}。修复：python scripts/fix_ps1_bom.py"
+        )
+
+    def test_recovery_entrypoint_does_not_need_powershell(self) -> None:
+        """恢复入口必须能在 `dev.ps1` 已损坏时运行。
+
+        它只能用 cmd.exe + python，**不能**调用任何 .ps1 或 powershell ——
+        否则就成了"用一个可能已损坏的东西去修复另一个已损坏的东西"。
+
+        注意这里**只检查会真正执行的命令**：这个文件里有一段注释在解释
+        "为什么不能依赖 PowerShell"，还有若干 `echo` 提示文本提到了
+        `scripts\\dev.ps1`。直接对整个文件做字符串匹配会命中这些内容 ——
+        这是写这类检查时最容易踩的假阳性，而且它会诱导人把有价值的注释
+        和提示删掉（那才是真的损失）。**检查的粒度必须匹配危险的粒度。**
+        """
+        root = Path(__file__).resolve().parents[3]
+        text = (root / "scripts" / "fix-bom.cmd").read_text(encoding="ascii")
+
+        # 剥掉注释行（REM/::）与输出行（echo）—— 它们不执行任何东西
+        skipped = ("REM", "::", "@REM", "ECHO", "@ECHO")
+        code_lines = [
+            ln.strip()
+            for ln in text.splitlines()
+            if ln.strip() and not ln.strip().upper().startswith(skipped)
+        ]
+        code = "\n".join(code_lines).lower()
+
+        assert "powershell" not in code, f"恢复入口的可执行部分依赖 PowerShell：{code_lines}"
+        assert "pwsh" not in code, "恢复入口的可执行部分依赖 pwsh"
+        assert ".ps1" not in code, (
+            f"恢复入口不能调用 .ps1 —— 那正是它要修复的东西，可能已损坏：{code_lines}"
+        )
+        assert "fix_ps1_bom.py" in code, "恢复入口必须调用真正的修复逻辑"
 
     def test_dev_ps1_exposes_split_commands(self) -> None:
         """拆分拓扑的启动命令必须能从统一入口拿到。

@@ -194,6 +194,13 @@ async def healthz(request: Request) -> dict[str, object]:
         # 排查会从"检索为什么没结果"这个完全错误的方向开始。
         "circuit_enabled": rc.circuit_enabled,
         "rate_limit_enabled": rc.rate_limit_enabled,
+        # 回放状态必须可见：演示前最怕"以为在放录制内容，其实在真调模型" ——
+        # 那会在现场变成一个无法解释的等待（或者直接失败）。
+        "demo_replay": (
+            request.app.state.replayer.describe()
+            if getattr(request.app.state, "replayer", None) is not None
+            else "off"
+        ),
     }
 
 
@@ -372,8 +379,19 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         final_answer = ""
         total_tokens = 0
 
+        # 【离线回放：只换数据源，不换任何下游逻辑】
+        # 下面的 `async for` 循环体完全不变 —— 同一套事件序列化、同一套指标采集、
+        # 同一套持久化。回放之所以可信，正是因为它走的是**完全相同的路径**，
+        # 区别只在事件从哪来。这正是一个适配器应该做到的事。
+        replayer = getattr(request.app.state, "replayer", None)
+        source = (
+            replayer.stream(speed=request.app.state.settings.demo_replay_speed)
+            if replayer is not None
+            else agent.run_stream(payload.message, history)
+        )
+
         try:
-            async for event in agent.run_stream(payload.message, history):
+            async for event in source:
                 # 边转发边收集需要持久化的信息。
                 # 不能等流结束再重跑一遍 —— 那会重复调用模型与工具。
                 if event.type is EventType.FINAL:

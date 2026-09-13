@@ -1,0 +1,83 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""JobPilot pre-commit hook（git 直接按 shebang 执行，不经 sh）。
+
+【为什么这个 hook 必须存在 —— 它是由三次真实复现换来的】
+
+项目里三次出现"编辑 scripts/dev.ps1 之后脚本无法运行"，原因都一样：
+编辑工具会**顺手去掉 UTF-8 BOM**，而本机 PowerShell 是 5.1，
+读无 BOM 的 .ps1 会按 GBK 解码。GBK 解码 UTF-8 中文时，
+中文字的第三字节（0x80-0xBF）会单独成字并**继续吞掉后面那个字节**
+（常常是换行或引号），于是行号错位、引号断开、语法树崩溃 ——
+而报错位置指向的行往往只是一句无辜的中文注释。
+
+【为什么不能只靠 dev.ps1 check 里的自愈步骤】
+我最初把 fix_ps1_bom.py 放进了 `dev.ps1 check` 的**最前面**，
+以为这样就自动了。第三次复现时发现这条路走不通：
+**BOM 缺失严重到一定程度时，dev.ps1 本身根本解析不了** ——
+脚本里的自愈步骤永远没有机会执行。
+
+所以防线必须在脚本**之外**。pre-commit hook 正是那个位置：
+它由 git 调用，不依赖被保护的文件本身能否运行。
+
+【为什么用 Python 而不是 shell 脚本】
+最初的版本是 `#!/bin/sh`，在本机直接失败：
+    sh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
+msys 的 sh 需要创建信号管道，而这类环境可能不允许（沙箱、受限权限）。
+Python 已经是被测项目的依赖，没有额外前提 —— **hook 不应该比项目本身
+要求更多的东西**。
+
+【为什么只做 BOM 修复，不跑完整 check】
+完整 check 要 30 秒以上，放进 pre-commit 会被人用 --no-verify 绕过 ——
+一个会被绕过的检查等于没有。这里只做**亚秒级、且能自动修好**的事，
+修完把改动重新暂存，提交照常进行。
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    try:
+        root = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return 0
+
+    # 只在有 .ps1 被改动时才做事，避免每次提交都付一次进程启动成本
+    changed = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    ).stdout
+    if not any(line.endswith(".ps1") for line in changed.splitlines()):
+        return 0
+
+    script = root / "scripts" / "fix_ps1_bom.py"
+    if not script.exists():
+        return 0
+
+    # 用当前解释器跑，不依赖 PATH 里的 python ——
+    # hook 被 git 用 shebang 启动时，sys.executable 就是可用的那个解释器。
+    result = subprocess.run([sys.executable, str(script)], cwd=root, check=False)
+    if result.returncode != 0:
+        print("[pre-commit] fix_ps1_bom.py 执行失败，已中止提交", file=sys.stderr)
+        return 1
+
+    # 把修复后的内容重新暂存，否则修了但没进这次提交
+    subprocess.run(["git", "add", "-u", "--", "*.ps1"], cwd=root, check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

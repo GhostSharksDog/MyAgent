@@ -319,6 +319,22 @@ class Settings(BaseSettings):
     rag_service_url: str = ""
     rag_service_timeout: float = Field(default=15.0, gt=0)
 
+    # ---------- 离线回放（演示兜底） ----------
+    # 非空时，/api/chat/stream 不再调用模型，而是重放录制好的事件流。
+    # 空 = 正常走真实链路（默认）。
+    #
+    # 【为什么这值得成为一个配置项，而不是一个临时脚本】
+    # 现场演示最怕的不是讲错，是网络不通或额度用完 —— 那会否定整个项目。
+    # 而且即使网络正常，真实模型也可能"这次不用工具"或答出不同内容，
+    # 而演示要传达的是"**这套系统能做什么**"，这件事应该是确定的。
+    #
+    # 回放走的是完全相同的 SSE 端点与序列化，只有数据源不同 ——
+    # 所以它演示的是真东西，不是前端 mock。
+    demo_replay_file: str = ""
+    # 回放速度倍率。>1 加快（去掉录制时的网络冷场），
+    # 但保持事件之间的**相对**节奏，token 依然是逐个出现的。
+    demo_replay_speed: float = Field(default=3.0, gt=0)
+
     embedding_backend: str = "tfidf"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     embedding_dim: int = 512

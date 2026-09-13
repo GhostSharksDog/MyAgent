@@ -32,6 +32,7 @@ from app.api.tasks import router as tasks_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, set_trace_id
+from app.demo.replay import build_replayer
 from app.llm.client import LLMClient
 from app.session.factory import build_session_store
 from app.tasks.factory import build_task_queue
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # `run_workers_in_api=false` 时本进程只投递、不消费（配合独立 worker 进程）
     tasks = await build_task_queue(settings)
 
+    # 离线回放（演示兜底）。装配阶段就加载好，让格式问题**在启动时**暴露，
+    # 而不是等演示到一半才发现录制文件过期了。
+    replayer = build_replayer(settings.demo_replay_file)
+
     app.state.settings = settings
     app.state.llm = llm_client
     app.state.tools = tools
@@ -84,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.long_term = long_term
     app.state.sessions = sessions
     app.state.tasks = tasks
+    app.state.replayer = replayer
 
     logger.info(
         "装配完成：model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话=%s，任务队列=%s",
