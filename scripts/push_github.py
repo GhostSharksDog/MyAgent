@@ -43,8 +43,8 @@ import getpass
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -118,41 +118,53 @@ def main() -> int:
         print("[x] 没有令牌，退出")
         return 1
 
-    # ---------- 用 ASKPASS 提供凭据 ----------
+    # ---------- 注入凭据 ----------
     #
-    # git 需要用户名和密码时各调用一次 askpass 脚本，靠提示词区分：
-    # 提示里含 "Username" 就给用户名，否则给令牌。
-    # 这个脚本写到临时目录，用完立刻删。
-    with tempfile.TemporaryDirectory(prefix="jobpilot-push-") as tmp:
-        askpass = Path(tmp) / "askpass.py"
-        askpass.write_text(
-            "import os, sys\n"
-            "prompt = sys.argv[1] if len(sys.argv) > 1 else ''\n"
-            "if 'username' in prompt.lower():\n"
-            "    sys.stdout.write(os.environ.get('JP_GIT_USER', ''))\n"
-            "else:\n"
-            "    sys.stdout.write(os.environ.get('JP_GIT_TOKEN', ''))\n",
-            encoding="utf-8",
-        )
+    # 【为什么用"一次性 URL"而不是其它方式】
+    #
+    # 试过并失败的：
+    #   · `git remote set-url origin https://<token>@...` —— **能用但绝不能这么做**：
+    #     令牌会明文落进 `.git/config`，而 .git/ 整个不在版本控制里、
+    #     也不会被 .gitignore 提醒。之后任何一次 `git remote -v`、
+    #     任何能读到工作目录的脚本、任何一次误备份都会把它带出去。
+    #   · `GIT_ASKPASS` —— 它的值必须是**单个可执行文件路径**，不能是
+    #     "解释器 + 参数"。本机实测：
+    #         error: cannot spawn "...python.exe" "...askpass.py": Permission denied
+    #   · `-c http.<url>.extraheader=AUTHORIZATION: Basic ...` —— 本机 git 2.46
+    #     下 git 仍报 "could not read Username"，凭据没被采信。
+    #   · `GIT_CONFIG_COUNT/KEY_0/VALUE_0` 环境变量注入 —— 同样未被采信。
+    #
+    # 所以用「把凭据放进这一次 push 的 URL 参数」：
+    #   · **不写入任何配置文件** —— 命令结束即消失
+    #   · 代价是令牌在命令执行期间出现在进程参数里（`ps` 可见）
+    #
+    # 这个代价是**有意识接受的**：本机是单用户开发环境，命令只存活几秒；
+    # 而落盘的风险是永久的。**在两个风险之间选"短暂暴露"而不是"永久留存"**，
+    # 这是凭据处理里最重要的一条取舍原则。
+    #
+    # 注意 URL 里的名字部分会被 git 当作用户名，所以这里要放真实用户名。
+    auth_url = (
+        f"https://{quote(OWNER, safe='')}:{quote(token, safe='')}"
+        f"@github.com/{OWNER}/{REPO}.git"
+    )
 
-        env = dict(os.environ)
-        env["JP_GIT_USER"] = OWNER
-        env["JP_GIT_TOKEN"] = token
-        env["GIT_ASKPASS"] = f'"{sys.executable}" "{askpass}"'
-        env["GIT_TERMINAL_PROMPT"] = "0"
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
 
-        print("\n推送中……")
-        result = git(
-            # 必须显式禁用系统级 helper：本机 credential.helper=manager
-            # 会拉起 sh.exe 并在沙箱里崩溃，反而挡住推送。
-            "-c",
-            "credential.helper=",
-            "push",
-            "-u",
-            "origin",
-            f"{args.branch}:{args.branch}",
+    print("\n推送中……")
+    result = git(
+        # 显式禁用系统级 helper：本机 credential.helper=manager 会拉起
+        # sh.exe 并在沙箱里崩溃（fatal error - couldn't create signal pipe），
+        # 那会挡住整个推送 —— 而网络和 TLS 其实都是好的。
+        # 诊断依据：禁用后推送能正常到达 GitHub，只在缺凭据时失败。
+        "-c",
+        "credential.helper=",
+        "push",
+        "-u",
+        auth_url,
+        f"{args.branch}:{args.branch}",
         env=env,
-        )
+    )
 
     # 输出可能含令牌吗？不会 —— git 只会回显 URL 与状态。
     out = (result.stdout + result.stderr).strip()
