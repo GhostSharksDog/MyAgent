@@ -38,6 +38,7 @@ from app.api.schemas import (
     ToolInfo,
 )
 from app.core.config import get_settings
+from app.core.telemetry import record_agent_event
 from app.llm.types import ChatMessage
 from app.session.models import Session
 from app.session.store import SessionStore
@@ -260,6 +261,12 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                     final_answer = event.content
                 elif event.type is EventType.DONE and event.usage:
                     total_tokens = event.usage.total_tokens
+
+                # 指标采集放在**消费端**而不是 Agent 内核里：
+                # 内核有 CLI / HTTP / 测试等多种调用方式，让它直接打点会把
+                # "跑一次测试"也变成"污染全局指标"。在事件流经的地方统一采集，
+                # 既覆盖所有 Agent 形态（react/plan/multi），内核又保持纯粹。
+                record_agent_event(event, mode=payload.mode)
 
                 yield event.to_sse()
         except Exception as exc:

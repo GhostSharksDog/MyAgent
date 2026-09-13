@@ -10,6 +10,8 @@ import logging
 import sys
 from typing import ClassVar
 
+from app.core.telemetry import TraceIdFilter
+
 _CONFIGURED = False
 
 
@@ -39,10 +41,17 @@ def setup_logging(level: str = "INFO", *, colorful: bool = True) -> None:
     _CONFIGURED = True
 
     handler = logging.StreamHandler(sys.stderr)
-    fmt = "%(asctime)s %(levelname)s %(name)s | %(message)s"
+    # trace_id 放在时间之后、级别之前：它是排查时**第一眼要找的东西**，
+    # 埋在行尾会让人习惯性地跳过它
+    fmt = "%(asctime)s [%(trace_id)s] %(levelname)s %(name)s | %(message)s"
     handler.setFormatter(
         _ColorFormatter(fmt, datefmt="%H:%M:%S") if colorful else logging.Formatter(fmt)
     )
+    # 【关键】Filter 挂在 handler 上而不是 logger 上。
+    # 挂在 logger 上时，通过 propagate 冒泡上来的记录**不会**经过 root logger
+    # 的 filter，于是第三方库打的日志里没有 trace_id 字段，
+    # 格式化时直接 KeyError 把日志系统打挂。挂在 handler 上才是正确的。
+    handler.addFilter(TraceIdFilter())
 
     root = logging.getLogger()
     root.handlers.clear()

@@ -143,3 +143,22 @@ class TaskListResponse(BaseModel):
     tasks: list[dict[str, Any]] = Field(default_factory=list)
     backend: str = "memory"
     known_types: list[str] = Field(default_factory=list)
+
+
+# ============================================================
+# 可观测性
+# ============================================================
+class MetricsResponse(BaseModel):
+    """指标快照。
+
+    结构与 `/metrics` 的 Prometheus 格式刻意不同：这里是**给人看的**
+    （数组 + 具名字段），Prometheus 那边是给抓取器看的（行式文本）。
+    同一个数据用两种形态暴露，是为了不让任何一方将就。
+    """
+
+    counters: list[dict[str, Any]] = Field(default_factory=list)
+    histograms: list[dict[str, Any]] = Field(default_factory=list)
+    uptime_seconds: float = 0.0
+    # 各组件当前的后端选择。`session_backend=memory` 这类信息在多副本部署下
+    # 是**最需要一眼看到**的（它意味着会话无法共享），所以放在指标快照里
+    components: dict[str, Any] = Field(default_factory=dict)

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
