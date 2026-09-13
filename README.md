@@ -116,6 +116,59 @@ python scripts\eval_rag.py --compare --with-llm          # 含 LLM 重排（真�
 
 完整分析见 [`docs/03-journal/2026-09-13-P2-检索基线评测.md`](docs/03-journal/2026-09-13-P2-检索基线评测.md)。
 
+## 前端与全栈
+
+```powershell
+# 终端 1：后端
+.\scripts\dev.ps1 serve
+
+# 终端 2：前端（Vite 已配好 /api 与 /healthz 代理到 8000）
+cd apps\web
+pnpm install
+pnpm dev          # 打开 http://localhost:5173
+```
+
+前端**只依赖 react + react-dom** —— SSE 解帧器、事件归约器、Markdown 解析器
+与整套 CSS token 设计系统（暗/亮双主题）都是手写的。理由见
+[`apps/web/README.md`](apps/web/README.md)。
+
+前端与后端的契约一致性由脚本自动验证（这是唯一能发现"两边各自都对、
+合起来不对"的手段）：
+
+```powershell
+cd apps\web
+node scripts\verify-backend.mjs      # 复用前端真实解析器消费后端真实响应
+```
+
+## Agent 的四种运行形态
+
+| 形态 | 入口 | 适合 |
+|---|---|---|
+| **ReAct**（默认） | `Agent` | 探索型任务：不知道下一步会看到什么 |
+| **Plan-and-Execute** | `PlanAndExecuteAgent` | 结构型任务：步骤事先大致可预知 |
+| **多 Agent（主管-工人）** | `SupervisorAgent` | 任务能按专长切分且各专家输出互不依赖 |
+| 记忆增强 | `Agent(memory=…, long_term=…)` | 需要跨轮次/跨会话保持上下文 |
+
+选择依据是**任务形态**，不是哪个听起来更高级。具体的取舍分析见
+[`docs/01-architecture.md`](docs/01-architecture.md) 与各模块的顶部注释。
+
+## 异步任务队列
+
+耗时的 CPU 密集操作（重建检索索引实测 **1894ms**）走队列，不阻塞请求路径：
+
+```
+reindex 任务耗时   1894 ms
+同期 10 次 /healthz  平均 1.6ms，最大 4.5ms
+```
+
+若在事件循环里跑，那 10 次健康检查会全部变成约 1.9 秒 ——
+**近 2 秒的耗时让"阻塞与否"的差异变得极其明显**。
+
+```powershell
+curl -X POST http://127.0.0.1:8000/api/tasks -H "Content-Type: application/json" -d '{\"type\":\"reindex\"}'
+curl http://127.0.0.1:8000/api/tasks/<task_id>
+```
+
 ## 当前进度
 
 | 阶段 | 内容 | 状态 |
@@ -123,9 +176,11 @@ python scripts\eval_rag.py --compare --with-llm          # 含 LLM 重排（真�
 | **P0** | 工程基座：环境、配置、文档、lint/test 工具链 | ✅ 完成 |
 | **P1** | Agent 内核：手写 LLM 客户端、Tool Use、ReAct 循环、SSE 流式 | ✅ 完成 |
 | **P2** | RAG + 记忆：解析/切分/两段式检索/评测消融；检索接入 Agent 工具；短期窗口+摘要、长期事实记忆 | ✅ 完成 |
-| **P3** | 全栈化：React 界面、Redis 会话、异步任务、Planning | ⏳ |
+| **P3** | 全栈化：服务端会话层（内存/Redis）、异步任务队列、React 前端、Planning、多 Agent | ✅ 完成 |
 | **P4** | 架构纵深：微服务拆分、可观测、评测回归 | ⏳ |
 | **P5** | 求职转化：简历条目、STAR 故事、技术深挖问答 | ⏳ |
+
+**508 个测试**（后端 465 + 前端 43），全部通过。
 
 详细路线见 [`docs/00-roadmap.md`](docs/00-roadmap.md)。
 
