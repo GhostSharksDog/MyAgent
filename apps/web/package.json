@@ -1,0 +1,30 @@
+{
+  "name": "@jobpilot/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "JobPilot 前端：流式对话 + 工具调用可视化的 Agent 控制台",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "node --test --test-isolation=none test/sse.test.mjs test/stream.test.mjs test/markdown.test.mjs test/styles.test.mjs"
+  },
+  "pnpm": {
+    "//": "pnpm 10 默认拦截依赖的构建脚本。esbuild 的 postinstall 负责落位平台二进制，必须放行，否则 vite build 会报找不到 esbuild。",
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^7.0.0"
+  }
+}

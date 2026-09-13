@@ -1,0 +1,19 @@
+/**
+ * 样式入口。
+ *
+ * 拆成六个文件的顺序 = 层叠顺序，顺序有意义：
+ *   tokens 定义变量 → base 重置 → ui 原子 → layout 骨架 → 各功能区 → markdown。
+ * 后加载的可以覆盖前面的，所以"功能区"一定在"原子"之后。
+ *
+ * 不用 CSS Modules / CSS-in-JS 的理由：本项目组件数量可控，
+ * 全局一套带前缀的类名（.toolcard__head 这类 BEM 风格）已经足够隔离，
+ * 而它带来的好处是**样式可以整体一眼看完** —— 对作品集来说，
+ * "能一眼看懂设计系统"本身就是价值。
+ */
+@import './tokens.css';
+@import './base.css';
+@import './ui.css';
+@import './layout.css';
+@import './chat.css';
+@import './markdown.css';
+@import './tools.css';

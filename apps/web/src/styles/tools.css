@@ -1,0 +1,207 @@
+/* ============================================================
+ * 工具抽屉（右侧面板）
+ * ============================================================
+ * 为什么是抽屉而不是弹窗：看工具列表时用户往往**同时在读对话**
+ * （"它刚才为什么要调这个工具？"）。居中弹窗会把对话完全挡住，
+ * 侧抽屉保留左侧上下文，是更合适的形态。
+ */
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  border: none;
+  padding: 0;
+  z-index: 60;
+  animation: fade-in var(--dur-fast) var(--ease);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(540px, 94vw);
+  z-index: 61;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: slide-in 160ms var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.4;
+  }
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer__title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.drawer__subtitle {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.drawer__body {
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.drawer__note {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  line-height: var(--lh-base);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+/* ---------- 单个工具 ---------- */
+.toolitem {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.toolitem__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 11px 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.toolitem__head:hover {
+  background: var(--surface-hover);
+}
+
+.toolitem__title {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+
+.toolitem__name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.toolitem__desc {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  white-space: pre-wrap;
+}
+
+.toolitem__chevron {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.toolitem[data-open='true'] .toolitem__chevron {
+  transform: rotate(90deg);
+}
+
+.toolitem__body {
+  border-top: 1px solid var(--border);
+  padding: 11px 12px;
+  background: var(--code-bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* 参数表：名称 / 类型 / 必填 / 说明 */
+.schema-table {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.schema-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.5fr) minmax(60px, auto) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--fs-sm);
+}
+
+.schema-row__name {
+  font-family: var(--font-mono);
+  color: var(--accent-text);
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.schema-row__type {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.schema-row__desc {
+  color: var(--text-2);
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.schema-row__required {
+  color: var(--warn);
+}
+
+.toolitem__raw {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* 从对话区的工具卡片跳到抽屉里对应工具时的定位高亮 */
+.toolitem[data-highlight='true'] {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}

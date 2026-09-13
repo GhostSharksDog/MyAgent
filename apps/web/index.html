@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta
+      name="description"
+      content="JobPilot —— 求职/招聘 AI Agent 控制台：流式对话 + 工具调用过程可见"
+    />
+    <title>JobPilot · Agent 控制台</title>
+    <script>
+      /* 主题必须在**首次绘制之前**定下来，否则暗色页面会先闪一下白底。
+         这就是所谓 FOUC。放在 <head> 里的同步脚本是唯一可靠的做法 ——
+         React 挂载后再切主题永远晚了一帧。 */
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('jobpilot.theme') || 'system'
+          var light =
+            pref === 'light' ||
+            (pref === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: light)').matches)
+          document.documentElement.dataset.theme = light ? 'light' : 'dark'
+        } catch (e) {
+          /* localStorage 被禁用（隐私模式）时降级为暗色，不影响使用 */
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>这个控制台需要启用 JavaScript 才能连接后端 Agent 服务。</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

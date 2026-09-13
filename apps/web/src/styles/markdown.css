@@ -1,0 +1,225 @@
+/* ============================================================
+ * Markdown 渲染样式
+ * ============================================================
+ * 原则：**像文档，不像聊天**。
+ * 模型输出经常是带标题、表格、代码块的结构化内容，用聊天气泡那套
+ * 行高与字号渲染会非常挤。这里给足行高（1.75）与块间距，
+ * 表格允许横向滚动（而不是把列压成两行）。
+ */
+
+.md {
+  min-width: 0;
+}
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+/* 块之间的统一间距，比逐个元素写 margin 更好维护 */
+.md > * + * {
+  margin-top: 12px;
+}
+
+/* ---------- 标题 ---------- */
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: var(--lh-tight);
+  margin-top: 22px;
+}
+
+.md h1 {
+  font-size: var(--fs-2xl);
+}
+
+.md h2 {
+  font-size: var(--fs-xl);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.md h3 {
+  font-size: var(--fs-lg);
+}
+
+.md h4,
+.md h5,
+.md h6 {
+  font-size: var(--fs-base);
+  color: var(--text-2);
+}
+
+/* 标题后紧跟内容时，间距收一点，避免"标题孤零零" */
+.md h1 + *,
+.md h2 + *,
+.md h3 + * {
+  margin-top: 8px;
+}
+
+/* ---------- 段落 / 强调 ---------- */
+.md p {
+  margin: 0;
+}
+
+.md strong {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.md em {
+  font-style: italic;
+}
+
+.md del {
+  color: var(--text-3);
+}
+
+.md a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+
+.md a:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* ---------- 列表 ---------- */
+.md ul,
+.md ol {
+  padding-left: 22px;
+}
+
+.md li {
+  margin: 3px 0;
+}
+
+.md li::marker {
+  color: var(--text-3);
+}
+
+.md ul {
+  list-style: disc;
+}
+
+.md ul ul {
+  list-style: circle;
+}
+
+.md ol {
+  list-style: decimal;
+}
+
+.md li > ul,
+.md li > ol {
+  margin-top: 3px;
+}
+
+.md li > p {
+  margin: 0;
+}
+
+/* ---------- 代码 ---------- */
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  color: var(--inline-code);
+  white-space: break-spaces;
+  word-break: break-word;
+}
+
+.md pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+/* 代码块里的 code 要"退掉"行内样式，否则会出现双重边框与异常配色 */
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: pre;
+}
+
+/* ---------- 引用 ---------- */
+.md blockquote {
+  margin: 0;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--accent-border);
+  color: var(--text-2);
+}
+
+/* ---------- 分割线 ---------- */
+.md hr {
+  border: none;
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0;
+}
+
+/* ---------- 表格 ---------- */
+.md__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  /* 表格很宽时允许横向滚动，而不是把单元格挤成多行 */
+}
+
+.md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+.md th,
+.md td {
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  min-width: 0;
+}
+
+.md th {
+  background: var(--surface-2);
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.md tr:last-child td {
+  border-bottom: none;
+}
+
+.md tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+.md td code,
+.md th code {
+  white-space: nowrap;
+}
