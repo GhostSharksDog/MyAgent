@@ -167,6 +167,10 @@ class QueryResult(BaseModel):
 class EvalReport(BaseModel):
     eval_set: str
     retriever: str
+    # 管线配置必须随报告一起留档：否则过几天看到一份 JSON 报告，
+    # 根本不知道它是哪套配置跑出来的，消融对比也就无从谈起。
+    mode: str = ""
+    reranker: str = ""
     k: int
     chunk_count: int
     metrics: dict[str, float] = Field(default_factory=dict)
@@ -183,20 +187,33 @@ class EvalReport(BaseModel):
             f"NDCG@{self.k}={m.get('ndcg', 0):.3f}"
         )
 
+    def pipeline(self) -> str:
+        """管线标识，用于消融对比表的行名。"""
+        parts = [self.retriever, self.mode]
+        if self.reranker and self.reranker != "none":
+            parts.append(self.reranker)
+        return "+".join(p for p in parts if p)
 
-def evaluate(
+
+async def evaluate(
     retriever: Retriever,
     eval_set: EvalSet,
     *,
     k: int = 5,
 ) -> EvalReport:
-    """跑一遍完整评测。"""
+    """跑一遍完整评测。
+
+    **异步**是因为检索管线里可能挂着 `LLMReranker`（要走网络）。
+    纯本地的向量/BM25 路径本可以同步，但整条管线统一成异步，
+    调用方不必记住"哪一半是哪种"，也避免以后换重排器时改一堆调用点。
+    """
     corpus = retriever.chunks
+    stats = retriever.stats()
     results: list[QueryResult] = []
     failures: list[dict[str, Any]] = []
 
     for item in eval_set.queries:
-        hits = retriever.retrieve(item.query, k=k)
+        hits = await retriever.aretrieve(item.query, k=k)
         ranked = [h.chunk for h in hits]
 
         r = recall_at_k(ranked, item.gold, k, corpus)
@@ -254,7 +271,9 @@ def evaluate(
 
     return EvalReport(
         eval_set=eval_set.name,
-        retriever=retriever.stats().get("embedder", "unknown"),
+        retriever=str(stats.get("embedder", "unknown")),
+        mode=str(stats.get("mode", "")),
+        reranker=str(stats.get("reranker", "none")),
         k=k,
         chunk_count=len(corpus),
         metrics=metrics,

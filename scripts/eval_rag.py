@@ -1,6 +1,6 @@
 """RAG 检索质量评测脚本。
 
-三种用法：
+四种用法：
 
     # 1. 看清语料被切成了什么（写评测标注前必须先看这个）
     python scripts/eval_rag.py --inspect
@@ -8,9 +8,12 @@
     # 2. 校验评测集的标注是否合法（有没有标了却匹配不到任何块的条件）
     python scripts/eval_rag.py --validate
 
-    # 3. 跑评测，输出指标
-    python scripts/eval_rag.py --run
-    python scripts/eval_rag.py --run --k 8 --strategy fixed
+    # 3. 跑一次评测
+    python scripts/eval_rag.py --run --mode hybrid --rerank lexical
+
+    # 4. 跑完整消融阶梯，自动输出对比表（推荐）
+    python scripts/eval_rag.py --compare
+    python scripts/eval_rag.py --compare --with-llm      # 含 LLM 重排（会计费）
 
 为什么要先 --inspect 再写标注：评测标注必须与真实的切分结果对齐。
 凭想象写 gold 条件，很容易出现"标了一个语料里根本不存在的章节"，
@@ -20,8 +23,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,9 +36,11 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
+from app.core.config import get_settings  # noqa: E402
 from app.rag.chunker import ChunkStrategy  # noqa: E402
-from app.rag.evaluate import EvalSet, _is_relevant, evaluate  # noqa: E402
-from app.rag.retriever import Retriever  # noqa: E402
+from app.rag.evaluate import EvalReport, EvalSet, _is_relevant, evaluate  # noqa: E402
+from app.rag.rerank import LexicalReranker, LLMReranker, NoOpReranker, Reranker  # noqa: E402
+from app.rag.retriever import RetrievalMode, Retriever  # noqa: E402
 
 EVAL_SET_PUBLIC = ROOT / "services" / "api" / "seed" / "eval_set.json"
 EVAL_SET_LOCAL = ROOT / "data" / "eval_set.local.json"
@@ -55,6 +62,9 @@ def resolve_eval_set(use_sample: bool) -> Path:
     return EVAL_SET_PUBLIC
 
 
+# ============================================================
+# 语料自省
+# ============================================================
 def cmd_inspect(retriever: Retriever) -> int:
     stats = retriever.stats()
     print("=== 语料概况 ===")
@@ -62,6 +72,8 @@ def cmd_inspect(retriever: Retriever) -> int:
     print(f"  向量维度    : {stats['dim']}")
     print(f"  总字符数    : {stats['total_chars']}")
     print(f"  向量化器    : {stats['embedder']}")
+    print(f"  检索模式    : {stats['mode']}   重排器：{stats['reranker']}")
+    print(f"  BM25        : {stats['bm25']}")
     print(f"  按类型分布  : {stats['by_doc_type']}")
     print()
 
@@ -74,13 +86,14 @@ def cmd_inspect(retriever: Retriever) -> int:
         if len(preview) > 110:
             preview = preview[:110] + "…"
         print(f"  #{chunk.index:<2} [{chunk.section or '—':<8}] {len(chunk.text):>4}字  {preview}")
-
-        # 带出元数据，便于写元数据过滤类的评测用例
         if chunk.metadata:
             print(f"       元数据: {chunk.metadata}")
     return 0
 
 
+# ============================================================
+# 标注校验
+# ============================================================
 def cmd_validate(retriever: Retriever, eval_set: EvalSet) -> int:
     corpus = retriever.chunks
     print(f"评测集：{eval_set.name}（{len(eval_set.queries)} 条查询）")
@@ -108,22 +121,41 @@ def cmd_validate(retriever: Retriever, eval_set: EvalSet) -> int:
     return 0
 
 
-def cmd_run(retriever: Retriever, eval_set: EvalSet, k: int, json_out: Path | None) -> int:
-    report = evaluate(retriever, eval_set, k=k)
+# ============================================================
+# 单次评测
+# ============================================================
+async def cmd_run(
+    eval_set: EvalSet,
+    *,
+    args: argparse.Namespace,
+    json_out: Path | None = None,
+    quiet: bool = False,
+) -> EvalReport:
+    retriever = build_retriever(args)
+    report = await evaluate(retriever, eval_set, k=args.k)
 
-    print("=" * 72)
-    print(f"检索评测报告  |  评测集: {report.eval_set}  |  向量化器: {report.retriever}")
+    if quiet:
+        return report
+
+    print("=" * 76)
+    print(f"检索评测报告  |  评测集: {report.eval_set}  |  管线: {report.pipeline()}")
     print(f"语料: {report.chunk_count} 块  |  k = {report.k}")
-    print("=" * 72)
+    print("=" * 76)
     print()
     print(f"  {report.summary_line()}")
+
+    # 重排成本：LLM 重排的代价是每查询一次额外调用，必须量化出来
+    if "reranker_tokens" in retriever.stats():
+        tokens = retriever.stats()["reranker_tokens"]
+        n = max(len(eval_set.queries), 1)
+        print(f"  重排成本：{tokens} tokens / {n} 条查询 = {tokens / n:.0f} tokens/查询")
     print()
 
     print("--- 分难度 ---")
     for level, m in sorted(report.by_difficulty.items()):
         print(
             f"  {level:<8} n={int(m['count']):>2}  "
-            f"Recall@{k}={m['recall']:.3f}  MRR={m['mrr']:.3f}"
+            f"Recall@{args.k}={m['recall']:.3f}  MRR={m['mrr']:.3f}"
         )
     print()
 
@@ -131,7 +163,10 @@ def cmd_run(retriever: Retriever, eval_set: EvalSet, k: int, json_out: Path | No
     for r in report.per_query:
         mark = "✓" if r.hit_rank else "✗"
         rank = f"第{r.hit_rank}位" if r.hit_rank else "未命中"
-        print(f"  {mark} R={r.recall:.2f} P={r.precision:.2f} MRR={r.rr:.2f} NDCG={r.ndcg:.2f} ({rank})  {r.query}")
+        print(
+            f"  {mark} R={r.recall:.2f} P={r.precision:.2f} "
+            f"MRR={r.rr:.2f} NDCG={r.ndcg:.2f} ({rank})  {r.query}"
+        )
 
     if report.failures:
         print()
@@ -144,12 +179,147 @@ def cmd_run(retriever: Retriever, eval_set: EvalSet, k: int, json_out: Path | No
                 print(f"  备注: {f['note']}")
 
     if json_out:
-        json_out.write_text(
-            report.model_dump_json(indent=2), encoding="utf-8", newline="\n"
-        )
+        json_out.write_text(report.model_dump_json(indent=2), encoding="utf-8", newline="\n")
         print(f"\n[OK] 报告已写入 {json_out}")
 
+    return report
+
+
+# ============================================================
+# 消融阶梯对比
+# ============================================================
+@dataclass
+class LadderStep:
+    label: str
+    mode: RetrievalMode
+    reranker: str
+
+
+# 阶梯的顺序是刻意设计的：**先固定召回看重排的收益，再固定重排看召回的收益**。
+# 这样每一步的 Δ 都能干净地归因到单一组件上。
+#
+#   ① → ②  换召回器（向量 vs 稀疏）
+#   ① → ④  加重排（召回固定为向量）
+#   ④ → ⑤  在重排之上再换混合召回（隔离"混合"的边际贡献）
+#
+# 如果只报①和⑤，你无法回答"提升是哪一步带来的" —— 这是消融实验最常见的错误。
+_LADDER: list[LadderStep] = [
+    LadderStep("① 纯向量（基线）", RetrievalMode.DENSE, "none"),
+    LadderStep("② 纯 BM25", RetrievalMode.SPARSE, "none"),
+    LadderStep("③ 混合 RRF", RetrievalMode.HYBRID, "none"),
+    LadderStep("④ 向量 + 特征重排", RetrievalMode.DENSE, "lexical"),
+    LadderStep("⑤ 混合 + 特征重排", RetrievalMode.HYBRID, "lexical"),
+]
+
+
+async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
+    """跑完整消融阶梯，输出对比表。
+
+    【为什么必须做阶梯而不是只测"最终方案"】
+    只报最终方案的指标，你无法回答面试官最常追问的一句：
+    "**这个提升是哪一步带来的？**"
+    阶梯式消融让每一步的增量都可见，也避免把多步收益
+    错误归因到某一个组件上。
+    """
+    steps = list(_LADDER)
+    if args.with_llm:
+        steps.append(LadderStep("⑥ 混合 + LLM 重排", RetrievalMode.HYBRID, "llm"))
+
+    settings = get_settings()
+    if args.with_llm and not settings.llm.is_configured:
+        print("[!] 未配置 LLM_API_KEY，跳过 LLM 重排步骤。")
+        steps = [s for s in steps if s.reranker != "llm"]
+
+    print(f"评测集：{eval_set.name}（{len(eval_set.queries)} 条查询）")
+    print(f"k = {args.k}，min_size = {args.min_size}，strategy = {args.strategy}")
+    print()
+
+    rows: list[tuple[str, EvalReport]] = []
+    for step in steps:
+        step_args = argparse.Namespace(**vars(args))
+        step_args.mode = step.mode.value
+        step_args.rerank = step.reranker
+        report = await cmd_run(eval_set, args=step_args, quiet=True)
+        rows.append((step.label, report))
+        print(f"  完成 {step.label}: {report.summary_line()}")
+
+    print()
+    print("=" * 88)
+    print("消融对比（同一评测集、同一语料、同一 k）")
+    print("=" * 88)
+    header = (
+        f"{'管线':<22} {'Recall@k':>9} {'Δ':>7} {'MRR':>8} {'Δ':>7} "
+        f"{'NDCG@k':>9} {'Δ':>7} {'命中率':>8}"
+    )
+    print(header)
+    print("-" * 88)
+
+    base = rows[0][1].metrics
+    for label, report in rows:
+        m = report.metrics
+        d_recall = m["recall"] - base["recall"]
+        d_mrr = m["mrr"] - base["mrr"]
+        d_ndcg = m["ndcg"] - base["ndcg"]
+        print(
+            f"{label:<22} {m['recall']:>9.3f} {d_recall:>+7.3f} "
+            f"{m['mrr']:>8.3f} {d_mrr:>+7.3f} "
+            f"{m['ndcg']:>9.3f} {d_ndcg:>+7.3f} {m['hit_rate']:>8.3f}"
+        )
+
+    print()
+    print("读表提示：")
+    print("  - 看 Δ 列判断每一步的**增量贡献**，而不是只看最后一行有多高")
+    print("  - Recall 高但 MRR 低 => 答案在候选集里但排序差，该做重排")
+    print("  - Recall 本身就低 => 召回层问题，重排救不回来，该查切分与查询改写")
+
+    if args.json_out:
+        payload = [
+            {"label": label, "pipeline": r.pipeline(), "metrics": r.metrics}
+            for label, r in rows
+        ]
+        args.json_out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+        )
+        print(f"\n[OK] 对比结果已写入 {args.json_out}")
+
     return 0
+
+
+# ============================================================
+# 组装
+# ============================================================
+def build_reranker(kind: str) -> Reranker | None:
+    if kind == "none":
+        return None
+    if kind == "lexical":
+        return LexicalReranker()
+    if kind == "llm":
+        from app.llm.client import LLMClient
+
+        return LLMReranker(LLMClient(get_settings().llm))
+    raise ValueError(f"未知重排器：{kind}")
+
+
+def build_retriever(args: argparse.Namespace) -> Retriever:
+    weights = None
+    if getattr(args, "rrf_weights", None):
+        parts = [p.strip() for p in args.rrf_weights.split(",")]
+        if len(parts) != 2:
+            raise ValueError("--rrf-weights 需要两个逗号分隔的数字，例如 '1.0,0.3'")
+        weights = [float(parts[0]), float(parts[1])]
+
+    return Retriever.from_default_corpus(
+        strategy=ChunkStrategy(args.strategy),
+        size=args.size,
+        overlap=args.overlap,
+        min_size=args.min_size,
+        use_sample_resume=args.sample,
+        mode=RetrievalMode(args.mode),
+        reranker=build_reranker(args.rerank),
+        rrf_k=args.rrf_k,
+        rrf_weights=weights,
+        **({"fixed_recall_k": args.recall_k} if getattr(args, "recall_k", None) else {}),
+    )
 
 
 def main() -> int:
@@ -157,7 +327,9 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--inspect", action="store_true", help="打印语料切块结构")
     mode.add_argument("--validate", action="store_true", help="校验评测集标注")
-    mode.add_argument("--run", action="store_true", help="跑评测并输出指标")
+    mode.add_argument("--run", action="store_true", help="跑一次评测并输出指标")
+    mode.add_argument("--compare", action="store_true", help="跑消融阶梯并输出对比表")
+
     parser.add_argument("--k", type=int, default=5, help="检索条数，默认 5")
     parser.add_argument(
         "--strategy",
@@ -170,8 +342,34 @@ def main() -> int:
     parser.add_argument(
         "--min-size",
         type=int,
-        default=0,
-        help="小于此长度的块会被合并进相邻块（用于消除碎片化与模板头部吸引子）",
+        default=120,
+        help="小于此长度的块会被合并进相邻块（默认 120，消融证明的最优值）",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=[m.value for m in RetrievalMode],
+        default=RetrievalMode.HYBRID.value,
+        help="检索模式，默认 hybrid",
+    )
+    parser.add_argument(
+        "--rerank",
+        choices=["none", "lexical", "llm"],
+        default="lexical",
+        help="重排器。默认 lexical —— 它是消融实验里唯一稳定带来收益且零成本的选项",
+    )
+    parser.add_argument("--rrf-k", type=int, default=60, help="RRF 平滑常数，默认 60")
+    parser.add_argument(
+        "--recall-k",
+        type=int,
+        default=None,
+        help="召回阶段的候选数。默认 max(k*4, 20)；语料比它小时两路都会返回全量，"
+        "融合会退化成‘用更噪的信号重排’",
+    )
+    parser.add_argument(
+        "--rrf-weights",
+        type=str,
+        default=None,
+        help="两路 RRF 权重，格式 '向量,BM25'（如 '1.0,0.3'）。默认等权",
     )
     parser.add_argument("--json-out", type=Path, default=None, help="把报告写成 JSON")
     parser.add_argument(
@@ -179,16 +377,14 @@ def main() -> int:
         action="store_true",
         help="用可提交的示例简历与公开评测集（CI / 他人 clone 后应使用这个）",
     )
+    parser.add_argument(
+        "--with-llm",
+        action="store_true",
+        help="--compare 时额外包含 LLM 重排步骤（真实调用 API，会计费）",
+    )
     args = parser.parse_args()
 
-    strategy = ChunkStrategy(args.strategy)
-    retriever = Retriever.from_default_corpus(
-        strategy=strategy,
-        size=args.size,
-        overlap=args.overlap,
-        min_size=args.min_size,
-        use_sample_resume=args.sample,
-    )
+    retriever = build_retriever(args)
 
     if len(retriever.chunks) == 0:
         print("[x] 语料为空。请先准备数据：")
@@ -209,7 +405,11 @@ def main() -> int:
     if args.validate:
         return cmd_validate(retriever, eval_set)
 
-    return cmd_run(retriever, eval_set, args.k, args.json_out)
+    if args.compare:
+        return asyncio.run(cmd_compare(args, eval_set))
+
+    report = asyncio.run(cmd_run(eval_set, args=args, json_out=args.json_out))
+    return 0 if report else 1
 
 
 if __name__ == "__main__":

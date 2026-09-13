@@ -169,16 +169,22 @@ class TestMetaEndpoints:
         assert r.status_code == 200
         body = r.json()
         assert body["service"] == "jobpilot-api"
-        assert body["tool_count"] == 4
+        assert body["tool_count"] == 5
         assert body["max_steps"] >= 1
 
-    def test_tools_lists_four_with_schemas(self, client: TestClient) -> None:
+    def test_tools_lists_five_with_schemas(self, client: TestClient) -> None:
         r = client.get("/api/tools")
         assert r.status_code == 200
         tools = r.json()
-        assert len(tools) == 4
+        assert len(tools) == 5
         by_name = {t["name"]: t for t in tools}
-        assert set(by_name) == {"calculator", "get_current_time", "read_resume", "search_jobs"}
+        assert set(by_name) == {
+            "calculator",
+            "get_current_time",
+            "read_resume",
+            "search_jobs",
+            "search_knowledge",
+        }
         # 描述与参数结构必须完整，否则模型无法正确调用工具
         for t in tools:
             assert t["description"]
@@ -307,7 +313,7 @@ class TestWiring:
 
         注意本用例必须**在替换 agent 之前**断言，所以它用独立的一次装配检查。
         """
-        assert len(app.state.tools.names()) == 4
+        assert len(app.state.tools.names()) == 5
         assert app.state.settings is not None
         # app.state.agent 在本模块中可能已被其他用例替换，故只校验类型来源
         assert isinstance(app.state.agent, Agent | FakeAgent)

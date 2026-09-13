@@ -1,6 +1,6 @@
 """RAG 层测试。
 
-覆盖重点是**本次迭代修掉的真实缺陷**，而不是重复验证顺利路径：
+覆盖重点是**迭代中修掉的真实缺陷与新增能力的契约**，而不是重复验证顺利路径：
 
   1. 章节标题无正文时整节被丢弃 → 内容凭空消失（最危险：不报错、只是查不到）
   2. HTML 注释进了语料 → 元数据变成可检索噪声
@@ -8,6 +8,10 @@
   4. 纯标记碎片（`---`）参与相似度计算 → 3 字符的块拿到高分挤出真内容
   5. 短标题被"信息量过滤"误删 → 章节元数据丢失
   6. 中文用 sklearn 默认分词 → 整句被当成一个词，检索彻底失效
+  7. BM25 的 tf 不饱和 / IDF 为负 / 长度归一化失效
+  8. RRF 的权重校验与同分稳定性
+  9. LLM 重排返回非法输出时**绝不能中断检索**（重排是优化项，不是关键路径）
+ 10. 重排后 rank 必须重新编号（否则 UI 与日志自相矛盾）
 
 外加指标计算本身的正确性（Recall / MRR / NDCG 的边界情况）——
 **评测工具算错了，比被测系统错了更可怕**，因为它会给你虚假的信心。
@@ -15,7 +19,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from app.rag.bm25 import BM25
 from app.rag.chunker import (
     Chunk,
     ChunkStrategy,
@@ -36,8 +43,12 @@ from app.rag.evaluate import (
     recall_at_k,
     reciprocal_rank,
 )
+from app.rag.fusion import fuse_rankings, reciprocal_rank_fusion
 from app.rag.loaders import DocType, LoadedDocument, normalize_text
-from app.rag.store import VectorStore
+from app.rag.rerank import LexicalReranker, LLMReranker, NoOpReranker
+from app.rag.retriever import RetrievalMode, Retriever
+from app.rag.store import SearchHit, VectorStore
+from app.rag.tokenizer import tokenize, tokenize_query_filtered
 
 
 def _doc(text: str, name: str = "test.md", doc_type: DocType = DocType.RESUME) -> LoadedDocument:
@@ -449,7 +460,7 @@ class TestEvaluateHarness:
                 ),
             ],
         )
-        report = evaluate(r, eval_set, k=3)
+        report = asyncio.run(evaluate(r, eval_set, k=3))
         assert report.chunk_count > 0
         assert 0.0 <= report.metrics["recall"] <= 1.0
         assert 0.0 <= report.metrics["mrr"] <= 1.0
@@ -469,9 +480,421 @@ class TestEvaluateHarness:
                 )
             ],
         )
-        report = evaluate(r, eval_set, k=3)
+        report = asyncio.run(evaluate(r, eval_set, k=3))
         assert len(report.failures) == 1
         f = report.failures[0]
         assert "gold_conditions" in f
         assert "actually_retrieved" in f
         assert report.metrics["hit_rate"] == 0.0
+
+
+# ============================================================
+# 分词器
+# ============================================================
+class TestTokenizer:
+    def test_latin_words_lowercased_and_kept_whole(self) -> None:
+        assert tokenize("Kafka") == ["kafka"]
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["TCP/IP", "C++", "bge-small-zh-v1.5", "30-60K", "ClickHouse", "node.js"],
+    )
+    def test_technical_tokens_survive(self, raw: str) -> None:
+        """技术串必须整体保留。
+
+        若按标点切开，`30-60K` 会变成 `30` 与 `60k`，
+        检索"薪资 35-70K"就退化成数字匹配，语义全丢。
+        """
+        tokens = tokenize(raw)
+        assert raw.lower() in tokens, f"{raw} 被切碎了：{tokens}"
+
+    def test_cjk_produces_unigrams_and_bigrams(self) -> None:
+        tokens = tokenize("消息队列")
+        assert "消" in tokens and "息" in tokens  # 单字保召回
+        assert "消息" in tokens and "队列" in tokens  # 双字保精度
+
+    def test_mixed_text(self) -> None:
+        tokens = tokenize("熟悉 Kafka 消息队列")
+        assert "熟悉" in tokens
+        assert "kafka" in tokens
+        assert "消息" in tokens
+
+    def test_empty_and_punctuation_only(self) -> None:
+        assert tokenize("") == []
+        assert tokenize("，。！？") == []
+
+    def test_query_stopwords_filtered(self) -> None:
+        """疑问词对 BM25 是纯噪声：它们几乎不出现在语料里，只会稀释有效词。"""
+        assert "什么" not in tokenize_query_filtered("我熟悉什么技术")
+        assert "熟悉" in tokenize_query_filtered("我熟悉什么技术")
+
+    def test_query_filter_keeps_content_words(self) -> None:
+        tokens = tokenize_query_filtered("哪些岗位要求向量数据库")
+        assert "向量" in tokens
+        assert "数据" in tokens
+        # 注意：分词器产出的是单字与双字，三字词（"数据库"）不会作为单个词元出现。
+        # 这是刻意的取舍 —— 双字足以覆盖，而枚举所有长度会让词表爆炸。
+        assert "岗位" in tokens or "位要" in tokens
+
+
+# ============================================================
+# BM25
+# ============================================================
+class TestBM25:
+    @staticmethod
+    def _bm25() -> BM25:
+        bm = BM25()
+        bm.fit(
+            [
+                "我熟练掌握 Kafka 消息队列，理解分区与副本机制",
+                "我熟悉 Python 并发编程与异步 IO",
+                "使用 ClickHouse 做亿级数据的分析查询",
+            ]
+        )
+        return bm
+
+    def test_relevant_doc_scores_highest(self) -> None:
+        import numpy as np
+
+        scores = self._bm25().scores("消息队列")
+        assert int(np.argmax(scores)) == 0
+
+    def test_unseen_term_scores_zero_everywhere(self) -> None:
+        import numpy as np
+
+        scores = self._bm25().scores("外星语言量子纠缠")
+        assert np.allclose(scores, 0.0)
+
+    def test_empty_query_scores_zero(self) -> None:
+        import numpy as np
+
+        assert np.allclose(self._bm25().scores(""), 0.0)
+
+    def test_idf_is_never_negative(self) -> None:
+        """词出现在多数文档里时，标准 IDF 会变负导致"包含它反而扣分"。
+
+        BM25+ 的 +1 修正保证恒为正。语料很小时这个问题尤其突出。
+        """
+        bm = BM25()
+        bm.fit(["共同词 A", "共同词 B", "共同词 C"])  # 「共同」出现在 100% 文档
+        assert bm._idf("共同") > 0
+
+    def test_oov_term_idf_is_zero_not_negative(self) -> None:
+        bm = BM25()
+        bm.fit(["kafka"])
+        assert bm._idf("完全不存在的词") == 0.0
+
+    def test_frequency_saturates(self) -> None:
+        """tf 必须饱和：出现 10 次的得分不该是出现 1 次的 10 倍。
+
+        这是 BM25 相对朴素 TF-IDF 的核心改进 —— 第 10 次出现几乎没有新信息。
+        """
+        bm = BM25()
+        bm.fit(["kafka", "kafka kafka kafka kafka kafka kafka kafka kafka kafka kafka"])
+        scores = bm.scores("kafka")
+        assert scores[1] / scores[0] < 5, "tf 没有饱和，退化成朴素 TF 了"
+
+    def test_length_normalization_dampens_long_docs(self) -> None:
+        """长文档不该仅因为"词多"就无脑占优。"""
+        short = "kafka 消息队列"
+        long = "kafka 消息队列 " + "无关内容 " * 60
+        bm = BM25()
+        bm.fit([short, long])
+        scores = bm.scores("kafka 消息队列")
+        assert scores[0] > scores[1], "长度归一化失效，长文档占了便宜"
+
+    def test_b_zero_disables_length_norm(self) -> None:
+        bm = BM25(b=0.0)
+        bm.fit(["kafka", "kafka " + "噪声 " * 50])
+        # b=0 时长度不参与归一化，两侧 tf 相同时得分应接近
+        scores = bm.scores("kafka")
+        assert scores[1] / scores[0] > 0.9
+
+    def test_empty_corpus(self) -> None:
+        bm = BM25()
+        bm.fit([])
+        assert bm.scores("任何查询").size == 0
+
+    def test_vocab_size(self) -> None:
+        assert self._bm25().vocab_size > 0
+
+
+# ============================================================
+# RRF 融合
+# ============================================================
+class TestRRF:
+    def test_doc_in_both_lists_wins(self) -> None:
+        """在多路里都出现的文档应当胜出 —— 这是 RRF 的核心行为。"""
+        fused = fuse_rankings([["a", "b", "c"], ["b", "d", "e"]])
+        assert fused[0] == "b"
+
+    def test_rank_order_respected_within_single_list(self) -> None:
+        assert fuse_rankings([["x", "y", "z"]]) == ["x", "y", "z"]
+
+    def test_score_is_sum_of_reciprocals(self) -> None:
+        fused = dict(reciprocal_rank_fusion([["a"], ["a"]], k=60))
+        assert fused["a"] == pytest.approx(2 / 61)
+
+    def test_k_controls_flatness(self) -> None:
+        """k 越小，头部优势越极端。"""
+        small = dict(reciprocal_rank_fusion([["a", "b"]], k=1))
+        large = dict(reciprocal_rank_fusion([["a", "b"]], k=1000))
+        assert (small["a"] - small["b"]) > (large["a"] - large["b"])
+
+    def test_weights_validated(self) -> None:
+        with pytest.raises(ValueError, match="权重数量"):
+            reciprocal_rank_fusion([["a"], ["b"]], weights=[1.0])
+
+    def test_empty_input(self) -> None:
+        assert fuse_rankings([]) == []
+        assert fuse_rankings([[], []]) == []
+
+    def test_top_n(self) -> None:
+        assert fuse_rankings([["a", "b", "c"]], top_n=2) == ["a", "b"]
+
+    def test_deterministic_tie_break(self) -> None:
+        """同分时按 id 排序，保证结果可复现 —— 否则评测数字会抖动。"""
+        first = fuse_rankings([["b"], ["a"]])
+        second = fuse_rankings([["b"], ["a"]])
+        assert first == second
+
+
+# ============================================================
+# 重排
+# ============================================================
+def _hit(cid: str, text: str, section: str = "", score: float = 0.0) -> SearchHit:
+    return SearchHit(
+        chunk=Chunk(id=cid, doc_id="d", doc_type=DocType.NOTE, text=text, index=0, section=section),
+        score=score,
+        rank=0,
+    )
+
+
+class TestLexicalReranker:
+    @staticmethod
+    def _reranker() -> LexicalReranker:
+        return LexicalReranker()
+
+    async def test_promotes_high_coverage_candidate(self) -> None:
+        r = self._reranker()
+        hits = [
+            _hit("low", "我熟悉前端页面开发"),
+            _hit("high", "我熟练掌握 Kafka 消息队列与分区机制"),
+        ]
+        out = await r.rerank("Kafka 消息队列", hits, top_k=2)
+        assert out[0].chunk.id == "high"
+
+    async def test_section_name_is_a_signal(self) -> None:
+        """章节名是人工构造的强信号，却不参与向量/BM25 打分 —— 属于被浪费的信息。"""
+        r = self._reranker()
+        hits = [
+            _hit("plain", "一些无关的技术罗列内容文本", section="其他"),
+            _hit("titled", "一些无关的技术罗列内容文本", section="专业技能"),
+        ]
+        out = await r.rerank("专业技能有哪些", hits, top_k=2)
+        assert out[0].chunk.id == "titled"
+
+    def test_exact_phrase_bonus(self) -> None:
+        r = self._reranker()
+        phrase_hit = _hit("a", "我的实习经历包括哪些技术内容", section="")
+        scattered = _hit("b", "实习的经历，历实习，经历", section="")
+        assert r.score("实习经历", phrase_hit) > r.score("实习经历", scattered)
+
+    async def test_empty_input(self) -> None:
+        assert await self._reranker().rerank("q", [], top_k=5) == []
+
+    async def test_top_k_truncates(self) -> None:
+        hits = [_hit(f"c{i}", f"内容 {i}") for i in range(6)]
+        out = await self._reranker().rerank("内容", hits, top_k=3)
+        assert len(out) == 3
+
+    async def test_rank_is_renumbered(self) -> None:
+        """重排后 rank 必须与最终顺序一致，否则 UI 与日志会自相矛盾。"""
+        hits = [_hit(f"c{i}", f"内容 {i}") for i in range(4)]
+        out = await self._reranker().rerank("内容", hits, top_k=4)
+        assert [h.rank for h in out] == [0, 1, 2, 3]
+
+    async def test_no_candidates_lost(self) -> None:
+        hits = [_hit(f"c{i}", f"内容 {i}") for i in range(5)]
+        out = await self._reranker().rerank("内容", hits, top_k=5)
+        assert {h.chunk.id for h in out} == {h.chunk.id for h in hits}
+
+
+class TestNoOpReranker:
+    async def test_preserves_order(self) -> None:
+        hits = [_hit("a", "x", score=0.9), _hit("b", "y", score=0.1)]
+        out = await NoOpReranker().rerank("q", hits, top_k=2)
+        assert [h.chunk.id for h in out] == ["a", "b"]
+        assert [h.rank for h in out] == [0, 1]
+
+
+class _FakeLLM:
+    """假 LLM：返回脚本化的重排结果，不花一分钱。"""
+
+    def __init__(self, content: str, *, boom: bool = False) -> None:
+        self._content = content
+        self._boom = boom
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        from app.llm.types import ChatMessage, ChatResponse, Role, Usage
+
+        self.calls += 1
+        if self._boom:
+            raise RuntimeError("模拟 LLM 故障")
+        return ChatResponse(
+            message=ChatMessage(role=Role.ASSISTANT, content=self._content),
+            usage=Usage(prompt_tokens=100, completion_tokens=10, total_tokens=110),
+        )
+
+
+class TestLLMReranker:
+    async def test_reorders_per_model_output(self) -> None:
+        llm = _FakeLLM('{"order": [3, 1, 2]}')
+        hits = [_hit("a", "第一"), _hit("b", "第二"), _hit("c", "第三")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=3)
+        assert [h.chunk.id for h in out] == ["c", "a", "b"]
+
+    async def test_missing_candidates_appended(self) -> None:
+        """模型没排到的候选要补在后面，不能凭空丢结果。"""
+        llm = _FakeLLM('{"order": [2]}')
+        hits = [_hit("a", "第一"), _hit("b", "第二"), _hit("c", "第三")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=3)
+        assert out[0].chunk.id == "b"
+        assert {h.chunk.id for h in out} == {"a", "b", "c"}
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "not json at all",
+            '{"order": "abc"}',
+            '{"order": [99, 0, -1]}',  # 越界编号
+            "{}",
+        ],
+    )
+    async def test_bad_output_falls_back_to_original_order(self, raw: str) -> None:
+        """重排是优化项，不是关键路径 —— 它不该有能力搞垮整个检索。"""
+        llm = _FakeLLM(raw)
+        hits = [_hit("a", "第一"), _hit("b", "第二")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=2)
+        assert [h.chunk.id for h in out] == ["a", "b"]
+
+    async def test_duplicate_indices_deduplicated(self) -> None:
+        llm = _FakeLLM('{"order": [2, 2, 1]}')
+        hits = [_hit("a", "第一"), _hit("b", "第二")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=2)
+        assert [h.chunk.id for h in out] == ["b", "a"]
+
+    async def test_llm_failure_does_not_raise(self) -> None:
+        llm = _FakeLLM("", boom=True)
+        hits = [_hit("a", "第一"), _hit("b", "第二")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=2)
+        assert [h.chunk.id for h in out] == ["a", "b"]
+
+    async def test_json_in_code_fence_parsed(self) -> None:
+        """模型常把 JSON 包在 ```json 代码块里 —— 必须能从噪声中提取出来。"""
+        llm = _FakeLLM('好的，排序如下：\n```json\n{"order": [2, 1]}\n```')
+        hits = [_hit("a", "第一"), _hit("b", "第二")]
+        out = await LLMReranker(llm).rerank("q", hits, top_k=2)
+        assert [h.chunk.id for h in out] == ["b", "a"]
+
+    async def test_single_candidate_skips_llm_call(self) -> None:
+        """只有一个候选时排序毫无意义，不该浪费一次 API 调用。"""
+        llm = _FakeLLM('{"order": [1]}')
+        out = await LLMReranker(llm).rerank("q", [_hit("a", "唯一")], top_k=1)
+        assert llm.calls == 0
+        assert [h.chunk.id for h in out] == ["a"]
+
+    async def test_token_usage_tracked(self) -> None:
+        """重排成本必须可观测，否则"多一次 LLM 调用"的代价说不清。"""
+        llm = _FakeLLM('{"order": [2, 1]}')
+        reranker = LLMReranker(llm)
+        hits = [_hit("a", "第一"), _hit("b", "第二")]
+        await reranker.rerank("q", hits, top_k=2)
+        assert reranker.total_tokens == 110
+
+
+# ============================================================
+# 两段式管线
+# ============================================================
+class TestRetrieverPipeline:
+    @staticmethod
+    def _docs() -> list[LoadedDocument]:
+        return [
+            _doc("教育经历\n某某大学\n\n专业技能\n熟练掌握 Kafka、Flink、ClickHouse", "resume.md"),
+            LoadedDocument(
+                source="job-001 大模型工程师",
+                doc_type=DocType.JD,
+                text="岗位名称：大模型工程师\n\n任职要求\n熟悉 RAG 与向量数据库",
+            ),
+        ]
+
+    @pytest.mark.parametrize(
+        "mode", [RetrievalMode.DENSE, RetrievalMode.SPARSE, RetrievalMode.HYBRID]
+    )
+    async def test_all_modes_return_results(self, mode: RetrievalMode) -> None:
+        r = Retriever.from_documents(self._docs(), mode=mode)
+        hits = await r.aretrieve("Kafka 消息队列", k=3)
+        assert hits, f"{mode} 模式没有返回任何结果"
+        assert [h.rank for h in hits] == list(range(len(hits)))
+
+    async def test_sparse_mode_finds_exact_term(self) -> None:
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.SPARSE)
+        hits = await r.aretrieve("ClickHouse", k=3)
+        assert hits
+        assert "ClickHouse" in hits[0].chunk.text
+
+    async def test_hybrid_fuses_both_paths(self) -> None:
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
+        hits = await r.aretrieve("向量数据库", k=3)
+        assert hits
+        assert any("向量数据库" in h.chunk.text for h in hits[:2])
+
+    async def test_reranker_applied(self) -> None:
+        r = Retriever.from_documents(
+            self._docs(), mode=RetrievalMode.HYBRID, reranker=LexicalReranker()
+        )
+        assert r.stats()["reranker"] == "lexical"
+        hits = await r.aretrieve("专业技能", k=2)
+        assert hits
+
+    async def test_doc_type_filter(self) -> None:
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
+        hits = await r.aretrieve("技术", k=5, doc_types=[DocType.JD])
+        assert hits
+        assert all(str(h.chunk.doc_type) == "jd" for h in hits)
+
+    async def test_recall_k_wider_than_k(self) -> None:
+        """召回必须比最终结果宽 —— 重排只能重排它拿到的东西。"""
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
+        wide = await r.aretrieve("技术", k=1, recall_k=10)
+        narrow = await r.aretrieve("技术", k=1, recall_k=1)
+        assert len(wide) <= 1 and len(narrow) <= 1  # 最终都只返回 1 条
+
+    async def test_context_assembly_has_citations(self) -> None:
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
+        ctx = await r.aretrieve_context("Kafka", k=2)
+        assert "[1]" in ctx
+        assert "出处" in ctx
+
+    async def test_context_respects_char_budget(self) -> None:
+        r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
+        ctx = await r.aretrieve_context("技术", k=5, max_chars=100)
+        assert len(ctx) <= 400  # 至少第一块会被保留，但不会无限增长
+
+    async def test_empty_corpus(self) -> None:
+        from app.rag.embedder import TfidfEmbedder
+
+        emb = TfidfEmbedder()
+        emb.fit(["一些内容"])
+        r = Retriever([], emb)
+        assert await r.aretrieve("任何查询", k=3) == []
+
+    def test_stats_expose_pipeline(self) -> None:
+        r = Retriever.from_documents(
+            self._docs(), mode=RetrievalMode.HYBRID, reranker=NoOpReranker()
+        )
+        stats = r.stats()
+        assert stats["mode"] == "hybrid"
+        assert stats["reranker"] == "none"
+        assert "bm25" in stats

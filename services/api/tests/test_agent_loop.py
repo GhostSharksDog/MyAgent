@@ -165,7 +165,13 @@ class TestDirectAnswer:
         await collect(agent, "hi")
         assert fake.received_tools[0] is not None
         names = {s["function"]["name"] for s in fake.received_tools[0]}
-        assert names == {"calculator", "get_current_time", "read_resume", "search_jobs"}
+        assert names == {
+            "calculator",
+            "get_current_time",
+            "read_resume",
+            "search_jobs",
+            "search_knowledge",
+        }
 
     async def test_globally_empty_tools_sends_none(self) -> None:
         """没有工具时不应传 tools 字段（部分服务端对空数组报 400）。"""

@@ -169,7 +169,13 @@ class TestSecurity:
 class TestRegistry:
     def test_default_registry_has_expected_tools(self) -> None:
         registry = build_default_registry()
-        assert registry.names() == ["calculator", "get_current_time", "read_resume", "search_jobs"]
+        assert registry.names() == [
+            "calculator",
+            "get_current_time",
+            "read_resume",
+            "search_jobs",
+            "search_knowledge",
+        ]
 
     def test_schemas_are_openai_compatible(self) -> None:
         registry = build_default_registry()

@@ -305,4 +305,11 @@ def build_default_registry() -> ToolRegistry:
         _search_jobs,
     )
 
+    # 语义检索工具（RAG）。延迟 import 的理由：knowledge 模块会拉起 rag 层，
+    # 而 rag 层在导入时不做任何 I/O（索引是懒加载的），但让这条依赖
+    # 显式出现在装配点，比散落在模块顶层更容易看懂。
+    from app.tools.knowledge import KnowledgeSearchTool
+
+    registry.register(KnowledgeSearchTool())
+
     return registry

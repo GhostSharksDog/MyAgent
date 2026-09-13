@@ -67,9 +67,17 @@ class VectorStore:
         return len(chunks)
 
     def rebuild(self, chunks: list[Chunk]) -> int:
-        """清空重建。语料更新后必须重建——TF-IDF 的 IDF 权重依赖全语料。"""
+        """清空重建。语料更新后必须重建——TF-IDF 的 IDF 权重依赖全语料。
+
+        空语料必须优雅处理：上层（评测脚本、服务启动）依赖"先构造再检查
+        块数是否为 0"来决定要不要提示用户去准备数据。如果这里直接抛异常，
+        那条友好提示永远走不到，用户只会看到一个 tf-idf 的内部报错。
+        """
         self._chunks = []
         self._matrix = None
+        if not chunks:
+            logger.warning("语料为空，向量库已置空")
+            return 0
         self._embedder.fit([c.text for c in chunks])
         return self.add(chunks)
 
