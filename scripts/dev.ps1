@@ -29,6 +29,10 @@
 #   .\scripts\dev.ps1 record-demo  # 录一次真实对话的事件流（含 PII 闸门）
 #   .\scripts\dev.ps1 demo        # **离线演示模式**：重放录制的事件流，不调模型
 #   .\scripts\dev.ps1 verify-demo # 验证离线回放真的不需要网络
+#
+#   # ---- 发布 -  -
+#   .\scripts\dev.ps1 scan-pii  # 全历史 PII 扫描（推送前必跑）
+#   .\scripts\dev.ps1 push      # 扫描 + 推送到 GitHub
 
 [CmdletBinding()]
 param(
@@ -40,7 +44,7 @@ param(
     [ValidateSet(
         'setup', 'install', 'test', 'test-live', 'lint', 'fmt', 'check', 'cli', 'serve', 'tools',
         'rag', 'worker', 'serve-split', 'verify-split', 'loadtest',
-        'record-demo', 'demo', 'verify-demo', 'install-hooks', 'help'
+        'record-demo', 'demo', 'verify-demo', 'install-hooks', 'scan-pii', 'push', 'help'
     )]
     [string]$Task = 'help',
 
@@ -354,6 +358,35 @@ function Task-InstallHooks {
     & $VenvPython (Join-Path $PSScriptRoot 'install_hooks.py') @Extra
 }
 
+function Task-ScanPii {
+    Initialize-Environment
+    Assert-Venv
+    # 扫**所有提交的所有 blob**，而不是当前工作区 ——
+    # git 是只追加的，删掉文件不等于它从历史里消失。
+    & $VenvPython (Join-Path $PSScriptRoot 'scan_history_pii.py') @Extra
+}
+
+function Task-Push {
+    Initialize-Environment
+    Assert-Venv
+    # 【为什么把扫描和推送绑在一起】
+    # 这一步不该靠人记得。首次推送尤其关键：推出去之后历史就公开了，
+    # 收不回来 —— 而"我忘了先扫一遍"是唯一没有补救机会的错误。
+    Write-Host "=== 推送前全历史 PII 扫描 ===" -ForegroundColor Cyan
+    & $VenvPython (Join-Path $PSScriptRoot 'scan_history_pii.py')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n[!] 扫描有命中 —— 先确认是误报还是真泄漏。" -ForegroundColor Yellow
+        Write-Host "    已判定的误报来源：" -ForegroundColor Yellow
+        Write-Host "      · pnpm-lock.yaml 的 264 处'邮箱'：npm 包名的 @（aix-ppc64@0.28.2）" -ForegroundColor Yellow
+        Write-Host "      · resume.sample.md / test_rag.py：zhangsan@example.com、a@b.com" -ForegroundColor Yellow
+        Write-Host "      · 文档里的 AIVideo：你自己另一个公开项目名" -ForegroundColor Yellow
+        $ans = Read-Host "仍要继续推送吗？（输入 yes 继续）"
+        if ($ans -ne 'yes') { Write-Host "已取消"; return }
+    }
+    Write-Host "`n=== 推送 ===" -ForegroundColor Cyan
+    & $VenvPython (Join-Path $PSScriptRoot 'push_github.py') @Extra
+}
+
 function Task-Help {
     Get-Content $PSCommandPath | Select-String -Pattern '^#   \.' | ForEach-Object {
         $_.Line -replace '^#   ', ''
@@ -380,5 +413,7 @@ switch ($Task) {
     'demo'      { Task-Demo }
     'verify-demo' { Task-VerifyDemo }
     'install-hooks' { Task-InstallHooks }
+    'scan-pii'  { Task-ScanPii }
+    'push'      { Task-Push }
     default     { Task-Help }
 }
