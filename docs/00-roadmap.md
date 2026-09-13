@@ -184,28 +184,32 @@ graph LR
 | 13 | SSE 服务端实现与心跳 | **P1 已实践** | `services/api/app/api/routes.py:94-114`（`ping=15`）、`services/api/app/agent/events.py:55-57`（`to_sse`） | "SSE 和 WebSocket 怎么选？长连接被反向代理掐断怎么办？为什么用 POST 而不是 GET？" |
 | 14 | 异步 I/O、超时与取消传播 | **P1 已实践** | `services/api/app/tools/base.py:127`（`wait_for`）、`services/api/app/tools/base.py:132`（`CancelledError` 透传）、`services/api/cli.py:141`（`asyncio.to_thread(input)`） | "在 async 函数里直接调 `input()` 会发生什么？`CancelledError` 为什么必须透传？" |
 | 15 | 可重试 vs 不可重试的错误分类与退避策略 | **P1 已实践** | `services/api/app/llm/client.py:53-71`（异常体系）、`services/api/app/llm/client.py:156-200`（退避 + 抖动） | "429 和 401 该重试哪个？退避为什么必须加抖动？重试次数和超时怎么配合才不会拖死整个请求？" |
-| 16 | 短期记忆：滑动窗口 + 摘要压缩 | P2 | 计划 `services/api/app/agent/memory.py` | "单纯截断最早的消息有什么问题？摘要压缩丢的是什么信息？怎么判断该摘要了？" |
-| 17 | 上下文窗口与 token 预算 | P2 | 现状只有字符上限 `services/api/app/tools/base.py:46`；计划用已安装的 `tiktoken` | "8000 字符大约是多少 token？为什么不按字符控制预算？" |
-| 18 | Embedding 选型、归一化与相似度度量 | P2 | `docs/02-concepts/03-rag.md:201-360`；（代码待做） | "归一化后内积和余弦相似度等价吗？中文小模型选型的依据是什么？维度砍半会损失什么？" |
-| 19 | 向量索引：HNSW 与 IVF 的参数与权衡 | P2 | `docs/02-concepts/03-rag.md:361-467` | "`M` 和 `ef_search` 分别影响什么？HNSW 的召回率和内存怎么权衡？什么时候该用 IVF？" |
-| 20 | 混合检索与 RRF 融合 | P2 | `docs/02-concepts/03-rag.md:569-600` | "为什么招聘语料要混合检索？RRF 的 k 值语义是什么？为什么它比加权求和更省调参？" |
-| 21 | Rerank（cross-encoder）与阈值拒答 | P2 | `docs/02-concepts/03-rag.md:671-710`、`03-rag.md:1132` | "召回 30 条 rerank 到 5 条，延迟增加多少？为什么在求职场景下"拒答"比"编一个答案"更好？" |
-| 22 | RAG 评测指标与消融实验 | **P2（全项目最关键的一环）** | `docs/02-concepts/03-rag.md:750-901` | "Recall@k 和 MRR 分别衡量什么？怎么搭一个最小评测集？为什么必须包含"不可回答"的样本？" |
-| 23 | 缓存穿透 / 击穿 / 雪崩与 TTL 设计 | P3 | `.env.example:31-34`、`services/api/app/core/config.py:108-109`（配置已声明，代码待做） | "三者的区别是什么？各自怎么解？缓存和数据库的一致性你打算怎么保证？" |
-| 24 | Redis 数据结构选型 | P3 | 同上（待做） | "会话历史、限流计数、排行榜分别用什么结构？为什么不用一把 String 全塞 JSON？" |
-| 25 | 消息队列：至少一次语义、幂等、死信 | P4 | 待做（README.md:26 已规划） | "重复消费怎么保证幂等？消息消费失败重试几次后去哪？顺序性怎么保证？" |
-| 26 | 微服务拆分粒度与分布式事务 | P4 | `01-architecture.md` 的演进章节（计划） | "为什么按业务能力而不是按技术分层拆？拆完跨服务的两个写操作怎么保证一致？" |
-| 27 | 限流（令牌桶 / 滑动窗口）与熔断 | P4 | 待做 | "令牌桶和漏桶的区别？为什么要在网关而不是在每个服务里限流？LLM 上游挂了怎么降级？" |
-| 28 | 可观测：trace_id 贯穿与链路追踪 | P4 | 现状只有彩色文本日志 `services/api/app/core/logging.py:35-54`（`setup_logging` 的 docstring 提到 json 模式但未实现）；计划 OpenTelemetry | "一次请求要经过 HTTP→Agent→LLM→Tool 四跳，你怎么定位是哪一跳慢了？span 的粒度怎么设计？" |
-| 29 | 成本核算与归因 | P3 部分（usage 已埋）+ P4（折算与配额） | `services/api/app/llm/types.py:142-154`（`Usage.__add__`）、`services/api/app/agent/loop.py:118`（累计）、`services/api/app/llm/client.py:149-150`（`stream_options.include_usage`） | "流式调用怎么拿到 usage？一次多步 Agent 的 prompt 为什么随步数近似平方增长？单次对话成本怎么算？" |
-| 30 | 工具并发执行与失败隔离 | P3 | 现状串行：`services/api/app/agent/loop.py:155`；计划 `asyncio.gather` | "3 个互不依赖的工具串行 3T、并发 1T，那为什么不一上来就并发？并发后一个失败怎么办？" |
-| 31 | 工程规范：lint / 类型 / 测试分层 | **P0/P1 已实践** | `services/api/pyproject.toml:24-83`（ruff 规则集含 `ASYNC`、mypy `strict`、pytest markers `live`/`slow`）、`services/api/tests/` 三文件 70 用例 | "为什么要开 ruff 的 `ASYNC` 规则？`live` marker 的意义是什么？测试里怎么避免真的调用大模型？" |
+| 16 | 短期记忆：滑动窗口 + 摘要压缩 | **P2 已实践** | `services/api/app/agent/memory.py`（`ConversationMemory` 超限压缩+保留最近 N 轮、`LongTermMemory`）、`test_memory.py` | "单纯截断最早的消息有什么问题？摘要压缩丢的是什么信息？怎么判断该摘要了？" |
+| 17 | 上下文窗口与 token 预算 | P2 部分（**按字符近似，非精确**） | 现状：`tools/base.py` 8000 字符上限、`RAG_MAX_CONTEXT_CHARS=3000`；精确做法需引入 tokenizer | "8000 字符大约是多少 token？为什么不按字符控制预算？" |
+| 18 | Embedding 选型、归一化与相似度度量 | **P2 已实践（TF-IDF 基线）** | `services/api/app/rag/embedder.py`；神经 embedding 接口已留出但**未落地** | "归一化后内积和余弦相似度等价吗？中文小模型选型的依据是什么？维度砍半会损失什么？" |
+| 19 | 向量索引：HNSW 与 IVF 的参数与权衡 | **仅讲义，未落地** | `docs/02-concepts/03-rag.md:361-467`；本项目语料仅几十块，用 numpy 暴力检索 | "`M` 和 `ef_search` 分别影响什么？HNSW 的召回率和内存怎么权衡？什么时候该用 IVF？" |
+| 20 | 混合检索与 RRF 融合 | **P2 已实践** | `services/api/app/rag/{bm25,fusion,retriever}.py`；消融实测 Recall@5 +0.048 | "为什么招聘语料要混合检索？RRF 的 k 值语义是什么？为什么它比加权求和更省调参？" |
+| 21 | Rerank（cross-encoder）与阈值拒答 | **P2 已实践（词法重排）** | `services/api/app/rag/rerank.py`（`LexicalReranker` / `LLMReranker`）、`retriever.py` 相关性闸门；实测 MRR +0.084 | "召回 30 条 rerank 到 5 条，延迟增加多少？为什么在求职场景下"拒答"比"编一个答案"更好？" |
+| 22 | RAG 评测指标与消融实验 | **P2 已实践（全项目最关键的一环）** | `services/api/app/rag/evaluate.py`、`scripts/eval_rag.py --compare`、`tests/test_rag_regression.py`（回归门禁 0.74/0.60/0.64） | "Recall@k 和 MRR 分别衡量什么？怎么搭一个最小评测集？为什么必须包含"不可回答"的样本？" |
+| 23 | 缓存穿透 / 击穿 / 雪崩与 TTL 设计 | **仅讲义 + 已有项目经验** | 本项目会话层用 Redis String（`session/store.py`）但**未实现三兄弟的防护**；`AIVideo` 项目有 Cache Aside + Redisson 实战 | "三者的区别是什么？各自怎么解？缓存和数据库的一致性你打算怎么保证？" |
+| 24 | Redis 数据结构选型 | **P3 已实践** | `services/api/app/session/store.py`（String 存会话）、`tasks/redis_queue.py`（List + BRPOP） | "会话历史、限流计数、排行榜分别用什么结构？为什么不用一把 String 全塞 JSON？" |
+| 25 | 消息队列：至少一次语义、幂等、死信 | **P3/P4 已实践（含一个主动声明的缺口）** | `services/api/app/tasks/`（`queue.py` / `redis_queue.py` 模块文档写明"至多一次"缺口与升级路径）；`AIVideo` 有 RocketMQ 事务消息+死信经验 | "重复消费怎么保证幂等？消息消费失败重试几次后去哪？顺序性怎么保证？" |
+| 26 | 微服务拆分粒度与分布式事务 | **P4 已实践** | `docs/01-architecture.md` 6.2/6.3（计划 vs 实际、拆分顺序、代价表）、`services/api/app/rag/backend.py`（接口边界）、`docker-compose.yml` | "为什么按业务能力而不是按技术分层拆？拆完跨服务的两个写操作怎么保证一致？" |
+| 27 | 限流（令牌桶 / 滑动窗口）与熔断 | **P4 已实践** | `services/api/app/core/resilience.py`（`CircuitBreaker` + `TokenBucket`）、`tests/test_resilience.py`（26 例，断言真实耗时） | "令牌桶和漏桶的区别？为什么要在网关而不是在每个服务里限流？LLM 上游挂了怎么降级？" |
+| 28 | 可观测：trace_id 贯穿与链路追踪 | **P4 已实践** | `services/api/app/core/telemetry.py`（`ContextVar` + 计数器 + 直方图）、`api/metrics.py`、`main.py` trace 中间件；`scripts/verify_split.py` 验证跨服务透传 | "一次请求要经过 HTTP→Agent→LLM→Tool 四跳，你怎么定位是哪一跳慢了？span 的粒度怎么设计？" |
+| 29 | 成本核算与归因 | **P3 已完成 + P4 折算** | `services/api/app/llm/types.py`（`Usage.__add__`）、`loop.py`（逐步累加）、`client.py`（`include_usage`）；前端展示 token 用量 | "流式调用怎么拿到 usage？一次多步 Agent 的 prompt 为什么随步数近似平方增长？单次对话成本怎么算？" |
+| 30 | 工具并发执行与失败隔离 | **P3 部分（多 Agent 并发已做，主循环仍串行）** | `services/api/app/agent/multi.py`（`asyncio.gather` + `Semaphore`）；**ReAct 主循环同批多工具仍串行，是已知待办** | "3 个互不依赖的工具串行 3T、并发 1T，那为什么不一上来就并发？并发后一个失败怎么办？" |
+| 31 | 工程规范：lint / 类型 / 测试分层 | **P0–P4 持续实践** | `services/api/pyproject.toml`（ruff 含 `ASYNC`、mypy strict、`live`/`slow` markers）、`tests/` 18 文件 605 用例、`scripts/dev.ps1 check` | "为什么要开 ruff 的 `ASYNC` 规则？`live` marker 的意义是什么？测试里怎么避免真的调用大模型？" |
 
 ### 自检表的诚实用法
 
-- **能讲透的行**（#5 #6 #7 #9 #11 #13 #15 #31 等）：这些是 P1 的真实产出，简历和面试都可以往这里引导——**主动把话题引到自己有把握的地方，是面试里最重要的技巧之一**。
-- **只能讲概念的行**（#1 #2 #4 #18 #19 #20 #21）：`docs/02-concepts/` 已经有很扎实的讲义，但**没有代码落地**。面试时说"我系统读过并写了讲义，项目里还没落地"是加分的诚实；说"我用过 Milvus 做过千万级检索"就是自爆。
-- **完全空白的行**（#23 #24 #25 #26 #27 #28）：P3/P4 之前不要在简历上出现"微服务""消息队列""缓存"这些词——JD 第 4 条要求的是"了解"，但写进简历就等于承诺"实践过"。
+- **能讲透的行**（#5 #6 #7 #9 #10 #11 #12 #13 #14 #15 #16 #20 #21 #22 #24 #25 #26 #27 #28 #29 #31）：这些是 P1–P4 的真实产出，简历和面试都可以往这里引导——**主动把话题引到自己有把握的地方，是面试里最重要的技巧之一**。
+- **只能讲概念的行**（#1 #2 #4 #19）：`docs/02-concepts/` 已有讲义，但**没有代码落地**。面试时说"我系统读过并写了讲义，项目里还没落地"是加分的诚实；说"我用过 Milvus 做过千万级检索"就是自爆。
+- **部分落地的行**（#17 按字符近似而非精确 token、#18 用的是 TF-IDF 而非神经 embedding、#23 只有 Redis 使用经验没有三兄弟防护、#30 多 Agent 并发已做但 ReAct 主循环仍串行）：**这些最需要小心** —— 半懂最容易在追问下露怯。正确答法是主动划出边界："检索我落地了，但 embedding 用的是 TF-IDF 基线，神经 embedding 的接口留了没接"。
+- **完整逐题答案在** `docs/04-career/04-technical-qa.md`（31 题逐行 + 诚实标注 + 引导话术）。
+
+> **P5 之后这张表的状态**：#1–#4、#19 是仅讲义；#17、#18、#23 是部分落地；其余全部有真实代码与测试。
+> 这个划分就是简历上的可信边界 —— **写"实践过"的必须能指到代码，否则就是在给自己挖坑**。
 
 ---
 
