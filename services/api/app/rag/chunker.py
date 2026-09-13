@@ -63,10 +63,25 @@ class Chunk(BaseModel):
 
     @property
     def citation(self) -> str:
-        """人类可读的引用标识，用于最终回答里的出处标注。"""
-        if self.section:
-            return f"{self.doc_id} · {self.section}"
-        return f"{self.doc_id} · 第 {self.index + 1} 块"
+        """人类可读的引用标识，用于最终回答里的出处标注。
+
+        【为什么需要紧凑化】
+        合并小块之后，一个块可能横跨多个章节，`section` 会变成
+        「项目经历 / 专业技能 / 教育经历 / 竞赛荣誉」这样的复合串。
+        它是**准确**的（这些内容确实都在这块里），但直接拼进出处标注有两个问题：
+          1. 这段文字会进入提示词，冗长的出处是在浪费上下文预算
+          2. 界面上过长的出处会挤掉真正有用的信息
+
+        所以超过两节时压缩成「第一节 等 N 节」：
+        用户知道**主要来自哪里**，也知道这块还包含别的内容。
+        准确与可读之间的取舍点就在这里 —— 不是丢掉信息，而是标注出信息的密度。
+        """
+        sections = [s.strip() for s in self.section.split(" / ") if s.strip()]
+        if not sections:
+            return f"{self.doc_id} · 第 {self.index + 1} 块"
+        if len(sections) <= 2:
+            return f"{self.doc_id} · {' / '.join(sections)}"
+        return f"{self.doc_id} · {sections[0]} 等 {len(sections)} 节"
 
 
 def _make_id(doc_id: str, index: int, text: str) -> str:
@@ -267,36 +282,69 @@ def _merge_small_chunks(chunks: list[tuple[str, str]], min_size: int) -> list[tu
       1. 消除碎片化 —— 7 字的「年龄：21 岁」单独成块毫无意义
       2. 稀释模板化头部 —— 合并后泛化词的相对权重被正文冲淡
 
-    代价：合并跨越章节边界时，section 元数据会退化为第一个块的值，
-    引用标注的精度会下降。所以 min_size 不宜过大（经验值 100~200 字）。
+    【章节名必须一起合并 —— 一个真实踩过的坑】
+    初版合并时只保留**第一个**块的 section，后续块的章节名直接丢弃。
+    后果不只是评测标注匹配不上，更严重的是**用户可见的引用标注会出错**：
+
+        chunk.citation → f"{doc_id} · {section}"
+        用户在答案里看到"出处：resume.md · 张三"，
+        而那段内容其实来自「竞赛荣誉」和「教育经历」。
+
+    引用错了比没有引用更糟 —— 它给了用户一个可核对却核对不上来源，
+    会直接摧毁对整个系统的信任。所以合并时用 `_join_sections()` 把所有
+    章节名拼起来，引用标注因此变成「张三 / 教育经历 / 竞赛荣誉」这样的
+    复合来源，虽然长一点但准确。
+
+    代价：章节名变长会让引用标注不够简洁。所以 min_size 不宜过大
+    （经验值 100~200 字），合并层数越少，来源标注越精确。
     """
     if min_size <= 0:
         return chunks
 
     merged: list[tuple[str, str]] = []
-    buf_section, buf_text = "", ""
+    buf_sections: list[str] = []
+    buf_text = ""
 
     for section, text in chunks:
         if not buf_text:
-            buf_section, buf_text = section, text
+            buf_sections, buf_text = [section], text
             continue
 
         if len(buf_text) < min_size:
-            # 当前缓冲还不够大 → 把这一块并进来
+            # 当前缓冲还不够大 → 把这一块并进来（章节名也要并）
+            buf_sections.append(section)
             buf_text = f"{buf_text}\n{text}"
         else:
-            merged.append((buf_section, buf_text))
-            buf_section, buf_text = section, text
+            merged.append((_join_sections(buf_sections), buf_text))
+            buf_sections, buf_text = [section], text
 
     if buf_text:
         # 最后一个小尾巴并回上一块，避免产生一个孤立的短块
         if merged and len(buf_text) < min_size:
             prev_section, prev_text = merged[-1]
-            merged[-1] = (prev_section, f"{prev_text}\n{buf_text}")
+            merged[-1] = (
+                _join_sections([*prev_section.split(" / "), *buf_sections]),
+                f"{prev_text}\n{buf_text}",
+            )
         else:
-            merged.append((buf_section, buf_text))
+            merged.append((_join_sections(buf_sections), buf_text))
 
     return merged
+
+
+def _join_sections(sections: list[str]) -> str:
+    """把多个章节名合成一个来源标注。
+
+    去重且保持出现顺序：`["教育经历", "教育经历", "竞赛荣誉"]` →
+    `"教育经历 / 竞赛荣誉"`。重复的章节名（同一章节被切成多块后又合并回来）
+    会让标注冗长而无信息量。
+    """
+    seen: list[str] = []
+    for section in sections:
+        name = section.strip()
+        if name and name not in seen:
+            seen.append(name)
+    return " / ".join(seen)
 
 
 def chunk_document(
