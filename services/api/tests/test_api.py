@@ -19,7 +19,7 @@ app.api 或 app.main** —— 五个端点零覆盖。而 bug 恰恰就藏在那
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import pytest
@@ -124,26 +124,6 @@ def _collect_from_stream(content: str) -> list[dict[str, Any]]:
             continue
         events.append(json.loads(payload))  # 解析失败 = 契约被破坏
     return events
-
-
-@pytest.fixture(scope="module")
-def client() -> Iterator[TestClient]:
-    """整个模块共享一个 TestClient。
-
-    【为什么必须共享 —— 一个测试代码自身的坑】
-    TestClient 的 with 块会**启动一个新的 asyncio 事件循环**来跑 lifespan。
-    如果每个测试都新建一个，lifespan 就会重复装配 LLMClient，
-    而它的 httpx.AsyncClient（含连接池）绑定在**第一个**事件循环上；
-    后续测试再用它就会报：
-
-        RuntimeError: <asyncio.locks.Event ...> is bound to a different event loop
-
-    注意这是**测试代码的缺陷，不是被测代码的 bug**。分清这一点很重要，
-    否则会跑去改本来没问题的生产代码。模块级 fixture 让 lifespan 只跑一次，
-    与真实进程的生命周期也更接近。
-    """
-    with TestClient(app) as c:
-        yield c
 
 
 def _install(fake: Any) -> None:

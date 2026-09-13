@@ -24,9 +24,11 @@ from app import __version__
 from app.agent.factory import build_memories
 from app.agent.loop import Agent
 from app.api.routes import router
+from app.api.sessions import router as sessions_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.llm.client import LLMClient
+from app.session.factory import build_session_store
 from app.tools.builtin import build_default_registry
 
 logger = logging.getLogger(__name__)
@@ -61,20 +63,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         long_term=long_term,
     )
 
+    # 会话存储：`auto` 会优先连真 Redis，失败则降级到内存（并打 WARNING）
+    sessions = await build_session_store(settings)
+
     app.state.settings = settings
     app.state.llm = llm_client
     app.state.tools = tools
     app.state.agent = agent
     app.state.memory = short_memory
     app.state.long_term = long_term
+    app.state.sessions = sessions
 
     logger.info(
-        "装配完成：model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s",
+        "装配完成：model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话存储=%s",
         settings.llm.model,
         len(tools.names()),
         "、".join(tools.names()),
         settings.agent.max_steps,
         "开启" if short_memory else "关闭",
+        sessions.backend,
     )
 
     try:
@@ -84,6 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if long_term is not None:
             long_term.save()
             logger.info("长期记忆已落盘：%d 条", len(long_term))
+        await sessions.aclose()
         await llm_client.aclose()
         logger.info("HTTP 连接池已关闭，服务退出")
 
@@ -105,6 +113,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(sessions_router)
 
 
 if __name__ == "__main__":

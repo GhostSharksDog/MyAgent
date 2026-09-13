@@ -27,8 +27,17 @@ class HistoryMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000, description="用户本轮输入")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "会话 id。提供时服务端会从会话中恢复历史与记忆，"
+            "并把本轮结果写回会话；此时 `history` 被忽略。"
+            "不提供则退回无状态模式（历史完全由客户端提供）。"
+        ),
+    )
     history: list[HistoryMessage] = Field(
-        default_factory=list, description="之前轮次的消息（不含本轮），最近的在最后"
+        default_factory=list,
+        description="之前轮次的消息（不含本轮），最近的在最后。仅在无 session_id 时生效。",
     )
 
 
@@ -54,3 +63,34 @@ class MetaResponse(BaseModel):
     model: str
     max_steps: int
     tool_count: int
+    session_backend: str = ""
+
+
+# ============================================================
+# 会话
+# ============================================================
+class SessionSummaryModel(BaseModel):
+    """会话列表项。刻意不含对话内容（见 sessions.py 的说明）。"""
+
+    id: str
+    title: str
+    created_at: float
+    updated_at: float
+    turn_count: int
+    total_tokens: int
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionSummaryModel] = Field(default_factory=list)
+    # 把后端暴露给前端：`memory` 意味着刷新页面/换标签页可能丢历史，
+    # 界面上应该据此给出提示，而不是让用户自己撞上"历史不见了"
+    backend: str = "memory"
+
+
+class SessionDetail(BaseModel):
+    id: str
+    title: str
+    created_at: float
+    updated_at: float
+    total_tokens: int
+    turns: list[dict[str, str]] = Field(default_factory=list)

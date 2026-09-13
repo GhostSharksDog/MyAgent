@@ -85,6 +85,35 @@ class AgentSettings(BaseSettings):
     loop_guard: int = Field(default=3, ge=2, le=10)
 
 
+class SessionSettings(BaseSettings):
+    """会话存储配置。
+
+    【四个后端的适用场景 —— 选错会造成很难查的问题】
+
+    | backend | 用途 | 跨进程共享 |
+    |---|---|---|
+    | `memory` | 单元测试、单进程 demo | ❌ |
+    | `fake`   | 本地开发：走**真实 Redis 代码路径**但不需要 Docker | ❌ |
+    | `redis`  | 生产、多副本部署 | ✅ |
+    | `auto`   | 默认：能连上真 Redis 就用，否则降级到内存 | 视环境 |
+
+    `auto` 的降级必须**打醒目日志**：静默降级会让人以为"多进程共享生效了"，
+    实际上请求落到别的实例就读不到会话 —— 表现为"用户偶尔丢历史"，
+    这种间歇性故障极难定位。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SESSION_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    backend: str = "auto"  # auto | memory | fake | redis
+    ttl_seconds: int = Field(default=7 * 24 * 3600, gt=0)
+    max_sessions: int = Field(default=500, ge=1)
+
+
 class MemorySettings(BaseSettings):
     """记忆模块配置。
 
@@ -188,6 +217,7 @@ class Settings(BaseSettings):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     rag: RagSettings = Field(default_factory=RagSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    session: SessionSettings = Field(default_factory=SessionSettings)
 
     database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
     redis_url: str = "redis://127.0.0.1:6379/0"

@@ -102,6 +102,38 @@ class ConversationMemory:
     def add_turn(self, user: str, assistant: str) -> None:
         self._turns.append(Turn(user=user, assistant=assistant))
 
+    @classmethod
+    def from_turns(
+        cls,
+        turns: list[Turn],
+        *,
+        llm: object | None = None,
+        max_turns: int = 8,
+        keep_recent: int = 6,
+        max_summary_chars: int = 1200,
+        enable_summary: bool = True,
+    ) -> ConversationMemory:
+        """从已有轮次恢复记忆。
+
+        【为什么必须有这个方法】
+        会话存在 Redis / 数据库里，每次请求都要把历史装回记忆对象。
+        如果只能靠调用方反复 `add_turn` 重建，就会出现两种写法并存、
+        且都保证不了一致性（比如有人忘了传 max_turns）。
+
+        另外 `keep_recent` 在这里被夹到 `max_turns` 以内（构造函数里已经做了）。
+        若不夹紧，压缩后剩余的轮次反而比窗口还多，会造成"每轮都触发压缩"的抖动。
+        在构造处统一夹紧，比指望每个调用点都记得要可靠。
+        """
+        memory = cls(
+            llm=llm,
+            max_turns=max_turns,
+            keep_recent=keep_recent,
+            max_summary_chars=max_summary_chars,
+            enable_summary=enable_summary,
+        )
+        memory._turns = list(turns)
+        return memory
+
     def clear(self) -> None:
         self._turns.clear()
         self._summary = ""
