@@ -42,6 +42,10 @@ class EventType(StrEnum):
     PLAN_STEP = "plan_step"  # 某个步骤的状态变化（开始/完成/失败）
     REPLAN = "replan"  # 计划被修订（携带修订后的计划）
 
+    # ---------- 多 Agent 协作专用 ----------
+    DELEGATE = "delegate"  # 主管把任务派发给某个专家
+    DELEGATE_RESULT = "delegate_result"  # 专家返回结果（含成功/失败）
+
 
 class AgentEvent(BaseModel):
     """单一事件。字段是各类型的并集，未用到的字段保持默认值。"""
@@ -59,6 +63,9 @@ class AgentEvent(BaseModel):
     # 截断意味着模型看到的不是完整内容，如果 UI 和日志都不体现这一点，
     # 出现"模型漏答了文件后半部分"这类问题时根本无从定位。
     truncated: bool | None = None
+
+    # 多 Agent 协作：被派发的专家名（DELEGATE / DELEGATE_RESULT 携带）
+    specialist: str | None = None
 
     # 结束时的累计统计
     usage: Usage | None = None

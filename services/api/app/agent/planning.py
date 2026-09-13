@@ -415,7 +415,7 @@ class PlanAndExecuteAgent:
             )
 
             try:
-                result, usage, stopped_reason = await self._execute_step(step, plan)
+                result, usage, stopped_reason, error = await self._execute_step(step, plan)
                 total_usage = total_usage + usage
 
                 # 【关键】单步执行"没抛异常"不等于"成功了"。
@@ -427,7 +427,11 @@ class PlanAndExecuteAgent:
                 # 而实际结果里混着"（模型返回了空回复）"这类占位文本。
                 # 这种"看起来成功"的假象比直接报错更危险。
                 if stopped_reason != "finished":
-                    raise StepExecutionError(f"步骤未正常完成（{stopped_reason}）：{result[:200]}")
+                    # 把底层原因带出来 —— 只报 stopped_reason 的话，
+                    # 错误信息会退化成"未正常完成（error）："后面什么都没有，
+                    # 排查时完全无从下手
+                    detail = error or result or "（无更多信息）"
+                    raise StepExecutionError(f"步骤未正常完成（{stopped_reason}）：{detail[:300]}")
 
                 step.status = StepStatus.DONE
                 step.result = result
@@ -527,7 +531,7 @@ class PlanAndExecuteAgent:
 
     # ---------- 内部 ----------
 
-    async def _execute_step(self, step: PlanStep, plan: Plan) -> tuple[str, Usage, str]:
+    async def _execute_step(self, step: PlanStep, plan: Plan) -> tuple[str, Usage, str, str | None]:
         """用一次完整的 ReAct 循环执行单个步骤。
 
         复用 `Agent` 而不是自己写一遍循环：工具调用、参数校验、死循环护栏、
@@ -535,8 +539,10 @@ class PlanAndExecuteAgent:
         而且那时你无法判断差异来自"范式不同"还是"实现不同"。
 
         Returns:
-            (回答文本, 用量, 终止原因)。**终止原因必须一起返回** ——
-            `Agent` 把失败转成事件而不抛异常，调用方只能靠它判断成败。
+            (回答文本, 用量, 终止原因, 错误信息)。
+            **终止原因与错误信息都必须返回** —— `Agent` 把失败转成事件而不抛异常，
+            调用方只能靠它们判断成败，而 `error` 里才是真正的失败原因
+            （失败时 `answer` 往往是空的）。
         """
         context = plan.conclusion_digest()
         prompt = f"{self.STEP_PROMPT}\n\n整体目标：{plan.goal}"
@@ -553,7 +559,7 @@ class PlanAndExecuteAgent:
             f"当前步骤（{step.id}/{len(plan.steps)}）：{step.description}\n"
             f"完成标准：{step.expected or '给出这一步的结论'}"
         )
-        return result.answer, result.usage, result.stopped_reason
+        return result.answer, result.usage, result.stopped_reason, result.error
 
     def _planner_delta(self, before: Usage) -> Usage:
         """算出本轮规划新增的用量。

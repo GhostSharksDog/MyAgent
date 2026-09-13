@@ -127,8 +127,22 @@ class InMemorySessionStore(SessionStore):
         return session
 
     async def save(self, session: Session) -> None:
+        """持久化。
+
+        **刻意不在这里改 `updated_at`。**
+        初版在 save() 里做了 `session.updated_at = time.time()`，理由是
+        "保存意味着刚刚活跃过"。但它带来两个问题：
+
+        1. **双重所有权**：`Session.append_turn()` 也会设置 `updated_at`。
+           两处都写，谁生效取决于调用顺序 —— 而这类隐含依赖极难排查。
+        2. **不可测**：调用方（以及测试）无法显式指定时间戳，
+           因为一 save 就被覆盖。想测"按更新时间倒序"就只能靠 sleep
+           制造时间差，而那会撞上 `time.time()` 的分辨率（见下方说明）。
+
+        现在的分工是清晰的：**领域模型负责时间戳，存储只负责持久化**。
+        需要更新时间的调用方应该走 `append_turn()` 或显式设置字段。
+        """
         async with self._lock:
-            session.updated_at = time.time()
             self._sessions[session.id] = session
 
     async def list(self, *, limit: int = 20) -> list[SessionSummary]:
@@ -216,7 +230,12 @@ class RedisSessionStore(SessionStore):
             return None
 
     async def save(self, session: Session) -> None:
-        session.updated_at = time.time()
+        """持久化（不改动 `updated_at`，理由见内存实现的同名方法）。
+
+        写入两个结构：会话本体（带 TTL）与列表索引（ZSET）。
+        用 pipeline 合并为一次往返 —— 分成两次写入会留下
+        "本体已写、索引未更新"的中间状态窗口。
+        """
         payload = session.model_dump_json()
         pipe = self._redis.pipeline()  # type: ignore[attr-defined]
         pipe.set(self._key(session.id), payload, ex=self.ttl_seconds)
