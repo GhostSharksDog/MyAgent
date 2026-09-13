@@ -67,6 +67,47 @@ def git(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedPr
     )
 
 
+def _read_token_secretly() -> str:
+    """读令牌 —— 优先不回显，不回显不可用时降级并**明确告知**。
+
+    【为什么要做降级，而且降级时一定要说】
+
+    `getpass` 在 Windows 上走 `msvcrt.getwch()`，它需要进程真的挂在
+    **Windows 控制台**上。而 Git Bash / MSYS2 / MinTTY 用的是 pty 模拟，
+    进程并没有 Windows 控制台 —— getpass 可能抛异常，也可能**直接卡住**。
+
+    "卡住"比"报错"糟糕得多：用户会以为是脚本挂了，反复重试，
+    却不知道其实只要在别处运行就行。
+
+    所以这里主动降级到 `input()` 并**明确打印警告**：
+    输入会显示在屏幕上。看得见的输入 + 一句提醒，
+    好过一个看起来死掉的进程。**降级必须可见，否则就是静默降级。**
+    """
+    try:
+        return getpass.getpass("粘贴令牌（输入不回显）：").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return ""
+    except Exception as exc:
+        # 这里刻意捕获宽泛的异常：getpass 在不同终端环境下抛出的异常类型
+        # 五花八门（OSError、ImportError、msvcrt 相关的各种），
+        # 逐一定点捕获既不现实也会漏。**这个位置的目标是"绝不卡住"** ——
+        # 无论发生什么都要降级到可见输入，而不是让用户面对一个假死的进程。
+        print(
+            f"\n[!] 不回显输入不可用（{type(exc).__name__}: {exc}）。\n"
+            f"    当前终端可能是 Git Bash / MinTTY —— 它没有 Windows 控制台。\n"
+            f"    降级为**可见输入**（令牌会显示在屏幕上）：\n"
+            f"    如果不希望这样，请改用环境变量：\n"
+            f"        read -s GITHUB_TOKEN && export GITHUB_TOKEN\n"
+            f"        python scripts/push_github.py\n"
+        )
+        try:
+            return input("粘贴令牌（可见）：").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n已取消")
+            return ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="推送到 GitHub（令牌不落盘）")
     ap.add_argument("--branch", default=BRANCH)
@@ -101,6 +142,17 @@ def main() -> int:
 
     # ---------- 取令牌 ----------
     token = os.environ.get("GITHUB_TOKEN", "").strip()
+
+    if not token and not sys.stdin.isatty():
+        print(
+            "\n[x] 没有令牌，且当前 stdin 不是终端 —— 无法交互式输入。\n"
+            "    请改用环境变量：\n"
+            "        GITHUB_TOKEN=ghp_xxx python scripts/push_github.py\n"
+            "    （Git Bash 里可用 `read -s GITHUB_TOKEN` 输入后再 export，"
+            "避免进 shell 历史）"
+        )
+        return 1
+
     if not token:
         print(
             "\n需要一个 **Personal Access Token**（不能用账号密码："
@@ -109,11 +161,8 @@ def main() -> int:
             "  · 经典令牌：勾选 repo 权限\n"
             "  · 细粒度令牌：选 MyAgent 仓库，Contents 设为 Read and write\n"
         )
-        try:
-            token = getpass.getpass("粘贴令牌（输入不回显）：").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n已取消")
-            return 1
+        token = _read_token_secretly()
+
     if not token:
         print("[x] 没有令牌，退出")
         return 1
@@ -144,8 +193,7 @@ def main() -> int:
     #
     # 注意 URL 里的名字部分会被 git 当作用户名，所以这里要放真实用户名。
     auth_url = (
-        f"https://{quote(OWNER, safe='')}:{quote(token, safe='')}"
-        f"@github.com/{OWNER}/{REPO}.git"
+        f"https://{quote(OWNER, safe='')}:{quote(token, safe='')}@github.com/{OWNER}/{REPO}.git"
     )
 
     env = dict(os.environ)
