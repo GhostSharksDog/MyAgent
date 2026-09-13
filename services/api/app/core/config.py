@@ -85,6 +85,37 @@ class AgentSettings(BaseSettings):
     loop_guard: int = Field(default=3, ge=2, le=10)
 
 
+class TaskSettings(BaseSettings):
+    """异步任务队列配置。
+
+    | backend | 用途 | 跨进程 | 投递语义 |
+    |---|---|---|---|
+    | `memory` | 单进程、本地开发、测试 | ❌ | 恰好一次（同进程内） |
+    | `redis`  | 多副本部署 | ✅ | **至多一次**（worker 崩溃会丢任务） |
+    | `auto`   | 默认：能连上 Redis 就用，否则降级 | 视环境 | — |
+
+    **投递语义的差别是这里最重要的一点**：内存实现下任务与进程同生共死，
+    不存在"投递丢失"；Redis 实现是至多一次，worker 崩溃会让任务永久消失。
+    要升级成至少一次需要 Redis Streams + 消费者组，属于 P4 的范围
+    （详见 app/tasks/redis_queue.py 的模块文档）。
+
+    `worker_count` 默认 1：处理器会把 CPU 密集的活丢线程池，
+    多开 worker 只会让线程数相乘，收益有限而上下文切换成本上升。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="TASK_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    backend: str = "auto"  # auto | memory | redis
+    worker_count: int = Field(default=1, ge=1, le=16)
+    max_tasks: int = Field(default=200, ge=1)
+    ttl_seconds: int = Field(default=24 * 3600, gt=0)
+
+
 class SessionSettings(BaseSettings):
     """会话存储配置。
 
@@ -218,6 +249,7 @@ class Settings(BaseSettings):
     rag: RagSettings = Field(default_factory=RagSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
+    tasks: TaskSettings = Field(default_factory=TaskSettings)
 
     database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
     redis_url: str = "redis://127.0.0.1:6379/0"

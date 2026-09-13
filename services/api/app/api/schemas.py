@@ -94,3 +94,36 @@ class SessionDetail(BaseModel):
     updated_at: float
     total_tokens: int
     turns: list[dict[str, str]] = Field(default_factory=list)
+
+
+# ============================================================
+# 异步任务
+# ============================================================
+class TaskSubmitRequest(BaseModel):
+    type: str = Field(
+        min_length=1,
+        description="任务类型：reindex（重建索引）/ ingest_resume（解析文档）/ batch_match（批量匹配）",
+    )
+    payload: dict[str, Any] = Field(default_factory=dict, description="任务参数，随类型而定")
+    session_id: str | None = Field(default=None, description="触发该任务的会话（可选）")
+
+
+class TaskStatusModel(BaseModel):
+    id: str
+    type: str
+    status: str
+    progress: int = 0
+    message: str = ""
+    created_at: float
+    started_at: float | None = None
+    finished_at: float | None = None
+    duration_ms: int | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskListResponse(BaseModel):
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    backend: str = "memory"
+    known_types: list[str] = Field(default_factory=list)
