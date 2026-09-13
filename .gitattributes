@@ -1,0 +1,23 @@
+# 统一换行符，避免跨平台协作时整个文件被标记为"已修改"。
+# 原理：仓库内部一律存 LF，检出到 Windows 时由 Git 决定是否转 CRLF。
+* text=auto eol=lf
+
+# Windows 专有脚本必须保留 CRLF，否则部分环境执行报错
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件不做任何换行符转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.docx binary
+
+# 锁文件在 diff/merge 时噪音大，标记为生成物
+pnpm-lock.yaml linguist-generated=true
+uv.lock linguist-generated=true

@@ -1,0 +1,53 @@
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+credentials*.yaml
+
+# ---- Python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Node / Frontend ----
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+*.local
+.vite/
+coverage/
+
+# ---- Data / artifacts ----
+data/
+uploads/
+logs/
+*.log
+artifacts/
+
+# ---- 本机特定的构建/安装缓存 ----
+# pip 的默认缓存在 %LOCALAPPDATA% 下；本机因沙箱限制把它重定向到了项目内，
+# 属于纯缓存产物，绝不能进版本库。
+.pip-cache/
+.cache/
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

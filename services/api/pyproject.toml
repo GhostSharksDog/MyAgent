@@ -1,0 +1,83 @@
+[project]
+name = "jobpilot-api"
+version = "0.1.0"
+description = "JobPilot 求职/招聘 AI Agent —— 手写内核的 Agent 服务"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "sse-starlette>=2.1",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "redis>=5.2",
+    "scikit-learn>=1.5",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8", "mypy>=1.13"]
+
+# ============================================================
+# Ruff：lint + format（比 flake8+isort+black 快一个数量级）
+# ============================================================
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort：import 排序
+    "B",        # bugbear：常见逻辑陷阱
+    "UP",       # pyupgrade：用新语法
+    "ASYNC",    # 异步反模式（在 async 函数里用阻塞调用）
+    "RUF",
+]
+ignore = [
+    "E501",     # 行长交给 formatter 处理
+    # RUF001/2/3 会把中文全角标点（，。「」）当作"易混淆 Unicode 字符"报错。
+    # 本项目的文档与注释是中文，全角标点是正确写法，属于误报，直接关闭。
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # 测试里允许 assert False 风格
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ============================================================
+# mypy：类型检查。对 Agent 项目尤其重要——
+# 工具参数是动态 JSON，类型错了运行时才炸。
+# ============================================================
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "tiktoken.*"]
+ignore_missing_imports = true
+
+# ============================================================
+# pytest
+# ============================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "live: 需要真实调用大模型 API 的测试（默认跳过，用 -m live 显式开启）",
+    "slow: 耗时较长的测试",
+]
