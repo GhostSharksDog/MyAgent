@@ -44,8 +44,19 @@ logger = logging.getLogger(__name__)
 
 
 def _call_signature(call: ToolCall) -> str:
-    """工具调用的指纹，用于死循环检测。"""
-    payload = json.dumps([call.name, call.arguments], sort_keys=True, ensure_ascii=False)
+    """工具调用的指纹，用于死循环检测。
+
+    【踩坑修正】最初只对已解析的 `call.arguments` 做哈希。问题是模型吐出
+    非法 JSON 时 `arguments` 会退化成空 dict，于是**参数完全不同的非法调用
+    会得到同一个指纹**，被误判成"反复调同一个工具"而提前中止——
+    本该触发模型自我修正的场景，反而变成了硬失败。
+
+    修正：解析成功时用规范化 JSON（键顺序无关），失败时退回原始字符串。
+    """
+    if call.arguments:
+        payload = json.dumps([call.name, call.arguments], sort_keys=True, ensure_ascii=False)
+    else:
+        payload = f"{call.name}|{call.raw_arguments.strip()}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
@@ -112,7 +123,13 @@ class Agent:
             except Exception as exc:
                 logger.exception("第 %d 步模型调用失败", step)
                 yield AgentEvent(type=EventType.ERROR, step=step, content=str(exc))
-                yield AgentEvent(type=EventType.DONE, step=step, steps_used=step, usage=total_usage)
+                yield AgentEvent(
+                    type=EventType.DONE,
+                    step=step,
+                    steps_used=step,
+                    usage=total_usage,
+                    stopped_reason="error",
+                )
                 return
 
             total_usage = total_usage + accumulator.usage
@@ -130,7 +147,13 @@ class Agent:
                 if not answer.strip():
                     answer = "（模型返回了空回复，请重试或换一种问法）"
                 yield AgentEvent(type=EventType.FINAL, step=step, content=answer)
-                yield AgentEvent(type=EventType.DONE, step=step, steps_used=step, usage=total_usage)
+                yield AgentEvent(
+                    type=EventType.DONE,
+                    step=step,
+                    steps_used=step,
+                    usage=total_usage,
+                    stopped_reason="finished",
+                )
                 return
 
             # ---------- 3. 死循环检测 ----------
@@ -147,11 +170,22 @@ class Agent:
                     logger.warning(msg)
                     yield AgentEvent(type=EventType.ERROR, step=step, content=msg)
                     yield AgentEvent(
-                        type=EventType.DONE, step=step, steps_used=step, usage=total_usage
+                        type=EventType.DONE,
+                        step=step,
+                        steps_used=step,
+                        usage=total_usage,
+                        stopped_reason="loop_detected",
                     )
                     return
 
-            # ---------- 4. 执行工具 ----------
+            # ---------- 4. 预算检查：最后一步的工具调用没有意义 ----------
+            # 工具的执行结果只能通过"回灌给模型"产生价值。如果这一步已经是最后一步，
+            # 观察结果永远不会被消费，执行它纯属浪费（读大文件、调外部 API 都可能很贵）。
+            # 提前 break 到预算耗尽分支，既省钱又能给出更准确的终止原因。
+            if step >= self._s.max_steps:
+                break
+
+            # ---------- 5. 执行工具 ----------
             for call in tool_calls:
                 yield AgentEvent(
                     type=EventType.TOOL_CALL,
@@ -179,6 +213,7 @@ class Agent:
                     tool_ok=result.ok,
                     content=result.content,
                     duration_ms=result.duration_ms,
+                    truncated=result.truncated,
                 )
 
                 # 关键：把观察结果作为 role=tool 的消息回灌，并用 tool_call_id 配对
@@ -198,7 +233,12 @@ class Agent:
         )
         logger.warning(msg)
         yield AgentEvent(type=EventType.ERROR, content=msg, steps_used=self._s.max_steps)
-        yield AgentEvent(type=EventType.DONE, steps_used=self._s.max_steps, usage=total_usage)
+        yield AgentEvent(
+            type=EventType.DONE,
+            steps_used=self._s.max_steps,
+            usage=total_usage,
+            stopped_reason="max_steps",
+        )
 
     # ============================================================
     # 主入口 B：非流式（给程序调用 / 测试用）
@@ -230,10 +270,14 @@ class Agent:
                     tool_calls.append({"name": event.tool_name, "args": event.tool_args})
                 case EventType.ERROR:
                     error = event.content
-                    stopped = "error"
+                    # 注意：这里**不**设置 stopped_reason。
+                    # 步数耗尽与死循环也会发 ERROR 事件，但它们不是故障。
+                    # 以 DONE 事件上的 stopped_reason 为权威来源，
+                    # 否则指标统计会把"正常预算终止"算成"错误"。
                 case EventType.DONE:
                     steps_used = event.steps_used
                     usage = event.usage or Usage()
+                    stopped = event.stopped_reason
 
         return AgentRunResult(
             answer="".join(answer_parts),

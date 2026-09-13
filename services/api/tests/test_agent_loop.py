@@ -23,7 +23,7 @@ from app.agent.events import AgentRunResult, EventType
 from app.agent.loop import Agent
 from app.agent.prompts import SYSTEM_PROMPT
 from app.core.config import AgentSettings
-from app.llm.types import ChatMessage, StreamDelta, Usage
+from app.llm.types import ChatMessage, StreamDelta, ToolCall, Usage
 from app.tools.base import Tool, ToolRegistry, ToolResult
 from app.tools.builtin import CalculatorParams, build_default_registry
 from app.tools.errors import ToolError
@@ -52,13 +52,15 @@ def tool_turn(name: str, args: dict[str, Any], call_id: str = "call_1") -> list[
     mid = max(1, len(raw) // 2)
     return [
         StreamDelta(
-            tool_call_delta={
-                "index": 0,
-                "id": call_id,
-                "function": {"name": name, "arguments": raw[:mid]},
-            }
+            tool_call_deltas=[
+                {
+                    "index": 0,
+                    "id": call_id,
+                    "function": {"name": name, "arguments": raw[:mid]},
+                }
+            ]
         ),
-        StreamDelta(tool_call_delta={"index": 0, "function": {"arguments": raw[mid:]}}),
+        StreamDelta(tool_call_deltas=[{"index": 0, "function": {"arguments": raw[mid:]}}]),
         StreamDelta(
             finish_reason="tool_calls",
             usage=Usage(prompt_tokens=50, completion_tokens=20, total_tokens=70),
@@ -424,6 +426,165 @@ class TestEmptyResponse:
         events = await collect(agent, "hi")
         final = next(e for e in events if e.type == EventType.FINAL)
         assert "空回复" in final.content
+
+
+# ============================================================
+# 场景 8：终止原因必须是准确的（回归测试）
+# ============================================================
+class TestStoppedReason:
+    """四个终止原因都必须可区分。
+
+    曾经的 bug：`AgentRunResult` 声明了 finished/max_steps/loop_detected/error
+    四个取值，但实现里 max_steps 与 loop_detected 都只发 ERROR 事件，
+    `run()` 一律归为 "error"，导致**后两个取值永远不可达**。
+    后果是按 stopped_reason 做指标统计时，"正常的预算终止"被算成"故障"。
+    """
+
+    async def test_finished(self) -> None:
+        agent, _ = make_agent([text_turn("答案")])
+        assert (await agent.run("问")).stopped_reason == "finished"
+
+    async def test_max_steps(self) -> None:
+        turns = [
+            tool_turn("calculator", {"expression": f"{i}+1"}, call_id=f"c{i}") for i in range(10)
+        ]
+        agent, _ = make_agent(turns, max_steps=3)
+        result = await agent.run("无限循环")
+        assert result.stopped_reason == "max_steps"
+        assert result.error is not None  # 仍然要给出可读的失败说明
+
+    async def test_loop_detected(self) -> None:
+        same = tool_turn("calculator", {"expression": "1+1"})
+        agent, _ = make_agent([same, same, same, same], loop_guard=3)
+        result = await agent.run("卡住")
+        assert result.stopped_reason == "loop_detected"
+
+    async def test_error(self) -> None:
+        agent = Agent(
+            ExplodingLLM(),  # type: ignore[arg-type]
+            build_default_registry(),
+            AgentSettings(),
+        )
+        assert (await agent.run("hi")).stopped_reason == "error"
+
+    async def test_done_event_carries_reason(self) -> None:
+        """事件层也要带原因，前端才能区分"做完了"和"被预算掐断"。"""
+        turns = [
+            tool_turn("calculator", {"expression": f"{i}+1"}, call_id=f"c{i}") for i in range(10)
+        ]
+        agent, _ = make_agent(turns, max_steps=2)
+        events = await collect(agent, "x")
+        assert events[-1].type == EventType.DONE
+        assert events[-1].stopped_reason == "max_steps"
+
+
+# ============================================================
+# 场景 9：死循环指纹的正确性（回归测试）
+# ============================================================
+class TestCallSignature:
+    """指纹必须"参数相同才相同"。
+
+    曾经的 bug：只哈希已解析的 `arguments`。模型吐出非法 JSON 时它会退化成
+    空 dict，于是**参数完全不同的非法调用拿到同一个指纹**，被误判成死循环而
+    提前中止 —— 本该让模型自我修正的场景，反而变成硬失败。
+    """
+
+    def test_malformed_args_get_distinct_signatures(self) -> None:
+        from app.agent.loop import _call_signature
+
+        c1 = ToolCall.from_wire(
+            {"id": "1", "function": {"name": "calculator", "arguments": "{'expr': broken1"}}
+        )
+        c2 = ToolCall.from_wire(
+            {"id": "2", "function": {"name": "calculator", "arguments": "{'expr': broken2"}}
+        )
+        # 两者的 arguments 都解析失败、都是空 dict
+        assert c1.arguments == {} and c2.arguments == {}
+        # 但指纹必须不同，否则会被误判成重复调用
+        assert _call_signature(c1) != _call_signature(c2)
+
+    def test_key_order_does_not_change_signature(self) -> None:
+        from app.agent.loop import _call_signature
+
+        a = ToolCall.from_wire(
+            {"id": "1", "function": {"name": "f", "arguments": '{"a": 1, "b": 2}'}}
+        )
+        b = ToolCall.from_wire(
+            {"id": "2", "function": {"name": "f", "arguments": '{"b": 2, "a": 1}'}}
+        )
+        # 键顺序不同但语义相同，必须视为同一次调用
+        assert _call_signature(a) == _call_signature(b)
+
+    def test_different_values_differ(self) -> None:
+        from app.agent.loop import _call_signature
+
+        a = ToolCall.from_wire({"id": "1", "function": {"name": "f", "arguments": '{"a": 1}'}})
+        b = ToolCall.from_wire({"id": "2", "function": {"name": "f", "arguments": '{"a": 2}'}})
+        assert _call_signature(a) != _call_signature(b)
+
+    async def test_malformed_args_do_not_falsely_trigger_loop_guard(self) -> None:
+        """三次参数不同的非法调用不应被当成死循环，模型应有机会自我修正。"""
+        bad_turns = [
+            [
+                StreamDelta(
+                    tool_call_deltas=[
+                        {
+                            "index": 0,
+                            "id": f"c{i}",
+                            "function": {"name": "calculator", "arguments": f"{{'expr': broken{i}"},
+                        }
+                    ]
+                ),
+                StreamDelta(finish_reason="tool_calls"),
+            ]
+            for i in range(3)
+        ]
+        agent, _ = make_agent([*bad_turns, text_turn("我换个写法。")], loop_guard=3)
+        result = await agent.run("算")
+        assert result.stopped_reason == "finished"
+        assert result.answer == "我换个写法。"
+
+
+# ============================================================
+# 场景 10：预算耗尽的最后一步不应再执行工具（回归测试）
+# ============================================================
+class TestLastStepEconomy:
+    async def test_tools_not_executed_on_final_step(self) -> None:
+        """第 max_steps 步的工具调用结果永远无法被模型消费，执行它纯属浪费。
+
+        读大文件、调外部 API 的工具可能有真实成本，所以这一步必须省掉。
+        """
+        counted = {"n": 0}
+
+        class CountingTool(Tool):
+            name = "counter"
+            description = "计数"
+            params_model = CalculatorParams
+
+            async def run(self, params: BaseModel) -> ToolResult:
+                counted["n"] += 1
+                return ToolResult.success("ok")
+
+        registry = ToolRegistry()
+        registry.register(CountingTool())
+
+        turns = [tool_turn("counter", {"expression": f"{i}+1"}, call_id=f"c{i}") for i in range(10)]
+        agent, _ = make_agent(turns, tools=registry, max_steps=3)
+        result = await agent.run("x")
+
+        assert result.stopped_reason == "max_steps"
+        # 前两步的工具被执行（结果能被消费），第三步不执行
+        assert counted["n"] == 2
+
+    async def test_final_step_still_calls_model(self) -> None:
+        """省钱不能省到"少调一次模型"——模型必须有机会给出最终答案。"""
+        agent, fake = make_agent(
+            [tool_turn("calculator", {"expression": "1+1"}), text_turn("2")],
+            max_steps=2,
+        )
+        result = await agent.run("x")
+        assert result.stopped_reason == "finished"
+        assert len(fake.received) == 2
 
 
 @pytest.mark.live

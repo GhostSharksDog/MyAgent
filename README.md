@@ -46,29 +46,61 @@ P1 单体                    P3 拆分                    P4 微服务化
 
 ## 快速开始
 
-```bash
-# 1. 激活虚拟环境（已预置）
-.venv\Scripts\activate
+> **Windows 用户注意**：本机环境的三个坑已固化进 `scripts/dev.ps1`（自动处理
+> `PIP_TARGET` 导致的 venv 失效、pip 缓存被拒、控制台 GBK 编码），建议全程用它。
 
-# 2. 配置模型密钥
-copy .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+```powershell
+# 1. 一键建环境（复用 Anaconda 的 Python 3.12，建 .venv 并装依赖）
+.\scripts\dev.ps1 setup
 
-# 3. 命令行体验 Agent（含工具调用过程可见）
-python services/api/cli.py
+# 2. 配置模型密钥（写入 .env，.env 已被 gitignore）
+$env:LLM_API_KEY = 'sk-你的密钥'
+python scripts\bootstrap_env.py --force
 
-# 4. 启动 API 服务
-uvicorn app.main:app --reload --app-dir services/api
-# 打开 http://127.0.0.1:8000/docs
+# 3. 可选：把你的简历 PDF 解析进项目（也可跳过，会用内置示例简历）
+python scripts\ingest.py "D:\path\你的简历.pdf" --type resume
+
+# 4. 命令行体验 Agent（含工具调用过程可见）
+.\scripts\dev.ps1 cli
+
+# 5. 启动 API 服务，打开 http://127.0.0.1:8000/docs
+.\scripts\dev.ps1 serve
+
+# 6. 查看模型实际看到的工具描述
+.\scripts\dev.ps1 tools
 ```
+
+提交前跑一遍门禁（格式化 + 静态检查 + 测试）：
+
+```powershell
+.\scripts\dev.ps1 check
+```
+
+## 检索质量评测
+
+```powershell
+python scripts\eval_rag.py --inspect              # 看语料实际切块结构
+python scripts\eval_rag.py --validate             # 校验评测标注
+python scripts\eval_rag.py --run --k 5 --min-size 120   # 跑评测出指标
+```
+
+当前基线（TF-IDF 字符 n-gram，22 块 → 15 块）：
+
+| 配置 | Recall@5 | MRR@5 | NDCG@5 | Recall@10 |
+|---|---|---|---|---|
+| 基线（不合并小块） | 0.611 | 0.412 | 0.494 | 0.816 |
+| **min_size=120（当前最优）** | **0.644** | **0.519** | **0.566** | **0.900** |
+
+诊断结论：Recall@10 高而 MRR 低 → **瓶颈在排序层**，下一步应做重排而非继续调切分。
+详见 [`docs/03-journal/2026-09-13-P2-检索基线评测.md`](docs/03-journal/2026-09-13-P2-检索基线评测.md)。
 
 ## 当前进度
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| **P0** | 工程基座：环境、配置、文档、CI | 🔄 进行中 |
-| **P1** | Agent 内核：LLM 客户端、Tool Use、ReAct 循环、SSE 流式 | ⏳ |
-| **P2** | 记忆与 RAG：短期/长期记忆、向量检索链路 | ⏳ |
+| **P0** | 工程基座：环境、配置、文档、lint/test 工具链 | ✅ 完成 |
+| **P1** | Agent 内核：手写 LLM 客户端、Tool Use、ReAct 循环、SSE 流式、103 个测试 | ✅ 完成 |
+| **P2** | RAG：文档解析、切分、检索与评测链路 | 🔄 检索基线与评测已完成（含消融）；记忆模块、重排、混合检索待做 |
 | **P3** | 全栈化：React 界面、Redis 会话、异步任务、Planning | ⏳ |
 | **P4** | 架构纵深：微服务拆分、可观测、评测回归 | ⏳ |
 | **P5** | 求职转化：简历条目、STAR 故事、技术深挖问答 | ⏳ |
@@ -77,10 +109,15 @@ uvicorn app.main:app --reload --app-dir services/api
 
 ## 文档地图
 
-- [`docs/00-roadmap.md`](docs/00-roadmap.md) — 阶段路线图与招聘要求对照
-- [`docs/01-architecture.md`](docs/01-architecture.md) — 架构设计与关键决策（ADR）
-- `docs/02-concepts/` — 原理讲义：大模型、Agent 循环、RAG
-- `docs/03-journal/` — 开发日志：每天踩的坑与决策记录
+- [`docs/00-roadmap.md`](docs/00-roadmap.md) — 阶段路线图、招聘要求对照、面试自检清单
+- [`docs/01-architecture.md`](docs/01-architecture.md) — 架构设计、12 条 ADR、技术债清单
+- `docs/02-concepts/` — 原理讲义：
+  - `01-llm-basics.md` — 大模型原理与推理部署（KV Cache 显存手算、vLLM/Ollama 选型）
+  - `02-agent-loop.md` — Agent 原理与 ReAct 循环实现（Tool Use 协议、流式分片、护栏）
+  - `03-rag.md` — RAG 全链路（切分、embedding、索引、混合检索、评测）
+- `docs/03-journal/` — 开发日志：
+  - `2026-09-13-P0P1-搭建记录.md` — 6 个真实踩坑与排查过程
+  - `2026-09-13-P2-检索基线评测.md` — 检索指标、消融实验与瓶颈诊断
 
 ## 为什么值得一看
 

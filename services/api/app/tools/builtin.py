@@ -168,15 +168,45 @@ def _safe_resolve(base: Path, relative: str) -> Path:
 
 
 def _read_resume(params: BaseModel) -> ToolResult:
-    resume = _DATA_DIR / "resume.md"
-    if not resume.exists():
-        return ToolResult.failure(
-            f"未找到简历文件。请把简历保存为 Markdown 到 {resume}（支持 .md / .txt 文本）。"
+    """读取简历原文。
+
+    【为什么需要示例回退】
+    `read_resume` 依赖 `data/resume.md`，而 `data/` 被 .gitignore 排除
+    （真实简历含手机号、邮箱等个人信息，绝不能进版本库）。
+    结果就是：**新克隆的仓库跑起来第一步就失败** —— 典型的
+    "开发机上一切正常，别人拿到就跑不起来"问题。
+
+    解法是双轨：
+      - 有 `data/resume.md` → 读用户真实简历
+      - 没有 → 回退到可提交的 `seed/resume.sample.md`，并**明确告诉模型**
+        这是示例数据
+
+    最后那一步很关键：如果不声明，模型会把示例简历当成用户的真实经历
+    来分析和提建议，用户会收到完全对不上号的"专业意见"。
+    数据来源的诚实性，是 Agent 可信度的底线。
+    """
+    real_resume = _DATA_DIR / "resume.md"
+    if real_resume.exists():
+        text = real_resume.read_text(encoding="utf-8", errors="replace")
+        if text.strip():
+            return ToolResult.success(f"# 简历原文（{real_resume.name}，{len(text)} 字）\n\n{text}")
+        return ToolResult.failure("简历文件存在但内容为空，请检查 data/resume.md")
+
+    sample = _SEED_DIR / "resume.sample.md"
+    if sample.exists():
+        text = sample.read_text(encoding="utf-8", errors="replace")
+        return ToolResult.success(
+            "⚠️ 重要：当前读到的是**项目内置的示例简历，不是该用户的真实简历**。\n"
+            f"用户的真实简历尚未提供（应放在 {real_resume}）。\n"
+            "你可以演示分析能力，但**必须明确告知用户这是示例数据**，"
+            "不要把它当作该用户的真实经历来评价或给建议。\n\n"
+            f"# 示例简历原文（{sample.name}，{len(text)} 字）\n\n{text}"
         )
-    text = resume.read_text(encoding="utf-8", errors="replace")
-    if not text.strip():
-        return ToolResult.failure("简历文件为空")
-    return ToolResult.success(f"# 简历原文（{resume.name}，{len(text)} 字）\n\n{text}")
+
+    return ToolResult.failure(
+        f"未找到简历文件。请把简历保存为 Markdown 到 {real_resume}，"
+        f"或运行：python scripts/ingest.py <你的简历.pdf> --type resume"
+    )
 
 
 # ============================================================

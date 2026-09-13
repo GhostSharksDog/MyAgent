@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import pytest
 from app.llm.types import ToolCall
 from app.tools.base import ToolRegistry, ToolResult
@@ -17,7 +20,7 @@ from app.tools.builtin import (
     _safe_resolve,
     build_default_registry,
 )
-from app.tools.errors import ToolPermissionError
+from app.tools.errors import ToolError, ToolPermissionError
 from pydantic import BaseModel
 
 
@@ -262,3 +265,128 @@ class TestSearchJobs:
     def test_calculator_params_requires_expression(self) -> None:
         with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError
             CalculatorParams()  # type: ignore[call-arg]
+
+
+# ============================================================
+# 失败路径的可观测性（回归测试）
+# ============================================================
+class TestFailureObservability:
+    """失败也必须记录耗时。
+
+    曾经的 bug：`Tool.execute` 只在成功路径计算 duration_ms，阶段 1（参数校验）
+    与阶段 2（超时/异常）都提前 return，导致**失败路径的耗时恒为 0**。
+    一个跑了 30 秒才超时的工具在 trace 里显示 0ms，排查超时问题会被假数据带偏。
+    """
+
+    async def test_timeout_records_elapsed_time(self) -> None:
+        registry = ToolRegistry()
+
+        async def slow(params: BaseModel) -> ToolResult:
+            await asyncio.sleep(5)
+            return ToolResult.success("never")
+
+        registry.register_fn("slow", "慢工具", ReadResumeParams, slow, timeout=0.15)
+        result = await registry.execute(_call("slow"))
+
+        assert not result.ok
+        assert "超时" in result.content
+        assert result.duration_ms >= 100, f"超时耗时未记录：{result.duration_ms}ms"
+
+    async def test_tool_error_records_elapsed_time(self) -> None:
+        registry = ToolRegistry()
+
+        async def failing(params: BaseModel) -> ToolResult:
+            await asyncio.sleep(0.1)
+            raise ToolError("boom")
+
+        registry.register_fn("failing", "会失败", ReadResumeParams, failing)
+        result = await registry.execute(_call("failing"))
+
+        assert not result.ok
+        assert result.duration_ms >= 80, f"失败耗时未记录：{result.duration_ms}ms"
+
+    async def test_internal_error_still_stamps_duration(self) -> None:
+        registry = ToolRegistry()
+
+        def boom(params: BaseModel) -> ToolResult:
+            raise KeyError("内部 bug")
+
+        registry.register_fn("boom", "会炸", ReadResumeParams, boom)
+        result = await registry.execute(_call("boom"))
+        assert not result.ok
+        assert isinstance(result.duration_ms, int)  # 字段必须被填充，不能是 None
+
+
+# ============================================================
+# 同步工具不能阻塞事件循环（回归测试）
+# ============================================================
+class TestSyncToolDoesNotBlockLoop:
+    """同步工具必须在线程池里跑。
+
+    曾经的 bug：`FunctionTool.run` 直接调用同步函数（内置的 calculator /
+    read_resume / search_jobs 全是同步的），在事件循环线程内执行。
+    asyncio 的取消是在 await 点注入的，**一个不含 await 的同步函数会一路跑完，
+    期间整个事件循环被阻塞** —— asyncio.wait_for 的超时形同虚设，
+    其他请求、心跳、定时器全部停摆。
+
+    验证方法：跑一个同步阻塞工具的同时，起一个每 20ms 自增的心跳协程。
+    若事件循环被阻塞，心跳次数会是 0。
+    """
+
+    async def test_heartbeat_keeps_ticking_during_sync_tool(self) -> None:
+        registry = ToolRegistry()
+
+        def blocking(params: BaseModel) -> ToolResult:
+            time.sleep(0.3)  # 纯同步阻塞，不含任何 await
+            return ToolResult.success("done")
+
+        registry.register_fn("blocking", "同步阻塞工具", ReadResumeParams, blocking)
+
+        ticks = 0
+
+        async def heartbeat() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        beat = asyncio.create_task(heartbeat())
+        try:
+            result = await registry.execute(_call("blocking"))
+        finally:
+            beat.cancel()
+
+        assert result.ok
+        # 0.3s / 0.02s ≈ 15 次；即使调度有抖动也应远大于 3
+        assert ticks >= 5, f"事件循环被同步工具阻塞了，心跳只跑了 {ticks} 次"
+
+    async def test_async_tool_still_works(self) -> None:
+        """修同步路径不能把异步路径改坏。"""
+        registry = ToolRegistry()
+
+        async def async_tool(params: BaseModel) -> ToolResult:
+            await asyncio.sleep(0.01)
+            return ToolResult.success("async ok")
+
+        registry.register_fn("async_tool", "异步工具", ReadResumeParams, async_tool)
+        result = await registry.execute(_call("async_tool"))
+        assert result.ok
+        assert result.content == "async ok"
+
+    async def test_sync_tool_timeout_is_enforced(self) -> None:
+        """放进线程池后超时才能真正生效（否则 wait_for 拦不住同步代码）。"""
+        registry = ToolRegistry()
+
+        def very_slow(params: BaseModel) -> ToolResult:
+            time.sleep(2.0)
+            return ToolResult.success("never")
+
+        registry.register_fn("very_slow", "极慢同步工具", ReadResumeParams, very_slow, timeout=0.1)
+        start = time.monotonic()
+        result = await registry.execute(_call("very_slow"))
+        elapsed = time.monotonic() - start
+
+        assert not result.ok
+        assert "超时" in result.content
+        # 关键：不应等满 2 秒。线程池化后 wait_for 能及时返回。
+        assert elapsed < 1.0, f"超时未生效，实际等待 {elapsed:.2f}s"

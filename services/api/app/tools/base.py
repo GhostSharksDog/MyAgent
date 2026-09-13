@@ -104,8 +104,19 @@ class Tool(ABC):
         }
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        """带校验、超时、异常兜底的执行入口。Agent 循环只调用这个方法。"""
+        """带校验、超时、异常兜底的执行入口。Agent 循环只调用这个方法。
+
+        【为什么所有 return 都要经过 _stamp()】
+        最初实现只在成功路径计算耗时，导致**失败路径的 duration_ms 恒为 0**——
+        一个跑了 30 秒才超时的工具，在 trace 里显示 0ms，可观测数据完全失真。
+        排查超时问题时会被这个假数据带偏，所以失败路径的耗时同样必须记录。
+        """
         started = asyncio.get_running_loop().time()
+
+        def stamp(result: ToolResult) -> ToolResult:
+            return result.model_copy(
+                update={"duration_ms": int((asyncio.get_running_loop().time() - started) * 1000)}
+            )
 
         # ---- 阶段 1：参数校验 ----
         try:
@@ -115,32 +126,35 @@ class Tool(ABC):
             detail = "; ".join(
                 f"字段 {'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
             )
-            return ToolResult.failure(
-                f"参数校验失败（{self.name}）：{detail}。"
-                f"请按此 Schema 重新调用：{json.dumps(self.params_model.model_json_schema().get('properties', {}), ensure_ascii=False)}"
+            schema_hint = json.dumps(
+                self.params_model.model_json_schema().get("properties", {}), ensure_ascii=False
+            )
+            return stamp(
+                ToolResult.failure(
+                    f"参数校验失败（{self.name}）：{detail}。请按此 Schema 重新调用：{schema_hint}"
+                )
             )
         except Exception as exc:
-            return ToolResult.failure(f"参数解析失败（{self.name}）：{exc}")
+            return stamp(ToolResult.failure(f"参数解析失败（{self.name}）：{exc}"))
 
         # ---- 阶段 2：执行 + 超时 ----
         try:
             result = await asyncio.wait_for(self.run(params), timeout=self.timeout)
         except TimeoutError:
-            return ToolResult.failure(f"工具 {self.name} 执行超时（>{self.timeout}s）")
+            return stamp(ToolResult.failure(f"工具 {self.name} 执行超时（>{self.timeout}s）"))
         except ToolError as exc:
-            return ToolResult.failure(str(exc))
+            return stamp(ToolResult.failure(str(exc)))
         except asyncio.CancelledError:
             raise  # 取消是控制流，必须透传
         except Exception as exc:
             logger.exception("工具 %s 执行异常", self.name)
-            return ToolResult.failure(f"工具 {self.name} 内部错误：{type(exc).__name__}: {exc}")
+            return stamp(
+                ToolResult.failure(f"工具 {self.name} 内部错误：{type(exc).__name__}: {exc}")
+            )
 
         # ---- 阶段 3：输出裁剪 ----
-        duration_ms = int((asyncio.get_running_loop().time() - started) * 1000)
         content, truncated = _truncate(result.content)
-        return result.model_copy(
-            update={"duration_ms": duration_ms, "truncated": truncated, "content": content}
-        )
+        return stamp(result.model_copy(update={"truncated": truncated, "content": content}))
 
 
 def _truncate(text: str, limit: int = MAX_OBSERVATION_CHARS) -> tuple[str, bool]:
@@ -174,12 +188,31 @@ class FunctionTool(Tool):
         self.params_model = params_model
         self.timeout = timeout
         self._fn = fn
+        self._is_async = inspect.iscoroutinefunction(fn)
 
     async def run(self, params: BaseModel) -> ToolResult:
-        out = self._fn(params)
-        if inspect.isawaitable(out):
-            return await out
-        return out
+        """执行工具函数。
+
+        【关键：同步函数必须丢到线程池，不能用 asyncio.wait_for 硬等】
+        `asyncio.wait_for` 只能"放弃等待"协程，**无法中断正在执行的同步代码**：
+        asyncio 的取消是在 await 点注入的，一个不含 await 的同步函数会一路跑完，
+        期间整个事件循环被阻塞，其他请求、心跳、定时器全部停摆。
+
+        本项目内置的 calculator / read_resume / search_jobs 都是同步函数，
+        读一个大文件或做重计算时就会阻塞整个服务。
+
+        解法与 cli.py 里处理 input() 一致：用 asyncio.to_thread 把同步调用
+        移到线程池。这样 wait_for 超时能真正生效（线程会被放弃等待），
+        事件循环也始终保持可调度。
+        """
+        if self._is_async:
+            return await self._fn(params)  # type: ignore[misc,return-value]
+
+        result = await asyncio.to_thread(self._fn, params)
+        if inspect.isawaitable(result):
+            # 极少数情况：同步函数返回协程（如包装了 functools.partial）
+            return await result
+        return result  # type: ignore[return-value]
 
 
 class ToolRegistry:

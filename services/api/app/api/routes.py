@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
 from app import __version__
-from app.agent.events import EventType
+from app.agent.events import AgentEvent, EventType
 from app.agent.loop import Agent
 from app.api.schemas import (
     ChatRequest,
@@ -107,8 +107,16 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
             async for event in agent.run_stream(payload.message, _to_history(payload.history)):
                 yield event.to_sse()
         except Exception as exc:
-            # 流已经开始后无法改 HTTP 状态码，只能以事件形式告知前端
+            # 流已经开始后无法改 HTTP 状态码，只能以事件形式告知前端。
+            #
+            # 【踩坑修正】初版用 f-string + repr() 手拼 JSON：
+            #     f'{{"type":"error","content":{exc!r}}}'
+            # 这不是合法 JSON —— Python 的 repr 用单引号，且不会转义内容里的
+            # 引号与换行。异常信息里只要出现引号（如 KeyError('a"b')），
+            # 前端 JSON.parse 就会抛异常，而这时流已经开始了，
+            # 用户看到的是"连接中断"而不是真正的错误原因。
+            # 正确做法是复用 AgentEvent 自己的序列化 —— 单一事实来源。
             logger.exception("流式对话异常")
-            yield {"event": str(EventType.ERROR), "data": f'{{"type":"error","content":{exc!r}}}'}
+            yield AgentEvent(type=EventType.ERROR, content=f"服务内部错误：{exc}").to_sse()
 
     return EventSourceResponse(event_generator(), ping=15)

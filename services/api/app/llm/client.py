@@ -324,11 +324,13 @@ class LLMClient:
                 total_tokens=raw.get("total_tokens", 0) or 0,
             )
 
-        tc_delta = (delta.get("tool_calls") or [None])[0]
+        # 取**全部**分片而不是第一个：协议允许一个 chunk 携带多个 tool_calls，
+        # 只取 [0] 会静默丢弃其余调用（见 StreamDelta 的说明）。
+        tc_deltas = list(delta.get("tool_calls") or [])
 
         return StreamDelta(
             content=delta.get("content") or "",
-            tool_call_delta=tc_delta,
+            tool_call_deltas=tc_deltas,
             finish_reason=choice.get("finish_reason"),
             usage=usage,
         )
@@ -357,12 +359,13 @@ class StreamAccumulator:
         if delta.content:
             self.content_parts.append(delta.content)
 
-        if delta.tool_call_delta:
-            idx = delta.tool_call_delta.get("index", 0)
+        # 遍历全部内容：一个 chunk 可能同时携带多个工具调用的分片
+        for tc_delta in delta.tool_call_deltas:
+            idx = tc_delta.get("index", 0)
             slot = self._tool_parts.setdefault(idx, {"id": "", "name": "", "arguments": ""})
-            if tc_id := delta.tool_call_delta.get("id"):
+            if tc_id := tc_delta.get("id"):
                 slot["id"] = tc_id
-            fn = delta.tool_call_delta.get("function") or {}
+            fn = tc_delta.get("function") or {}
             if name := fn.get("name"):
                 slot["name"] = name
             if args := fn.get("arguments"):

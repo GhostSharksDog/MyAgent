@@ -19,7 +19,7 @@ def _tc_delta(index: int, **fn: object) -> StreamDelta:
     if "id" in fn:
         payload["id"] = fn["id"]
     payload["function"] = {k: v for k, v in fn.items() if k != "id"}
-    return StreamDelta(tool_call_delta=payload)
+    return StreamDelta(tool_call_deltas=[payload])
 
 
 class TestStreamAccumulator:
@@ -137,8 +137,46 @@ class TestChunkParsing:
                 ]
             }
         )
-        assert delta.tool_call_delta is not None
-        assert delta.tool_call_delta["id"] == "c1"
+        assert len(delta.tool_call_deltas) == 1
+        assert delta.tool_call_deltas[0]["id"] == "c1"
+
+    def test_multiple_tool_calls_in_one_chunk(self) -> None:
+        """协议允许一个 chunk 携带多个 tool_calls 分片。
+
+        曾经的 bug：解析层只取 `tool_calls[0]`，其余被静默丢弃，
+        表现为"模型要调两个工具却只执行了一个"。这个用例专门守住它。
+        """
+        delta = LLMClient._parse_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "a",
+                                    "function": {"name": "f1", "arguments": ""},
+                                },
+                                {
+                                    "index": 1,
+                                    "id": "b",
+                                    "function": {"name": "f2", "arguments": ""},
+                                },
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        assert len(delta.tool_call_deltas) == 2
+        assert [d["id"] for d in delta.tool_call_deltas] == ["a", "b"]
+
+        # 聚合器必须把两个调用都还原出来
+        acc = StreamAccumulator()
+        acc.feed(delta)
+        calls = acc.tool_calls()
+        assert calls is not None
+        assert [c.name for c in calls] == ["f1", "f2"]
 
 
 class TestToolCallWire:

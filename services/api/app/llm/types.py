@@ -185,9 +185,14 @@ class StreamDelta(BaseModel):
       - content 是字符串，直接累加
       - tool_calls 是"分片"的：第一次出现的分片带 index 和 name，
         后续分片只带 index 和 arguments 的片段，必须按 index 聚合
+
+    【为什么这里是 list 而不是单个对象】
+    协议允许一个 chunk 里携带**多个** tool_calls 元素（模型同时发起多个调用时，
+    服务端可能把它们塞进同一个事件）。只取第一个会让其余调用被静默丢弃，
+    表现为"模型明明要调两个工具，却只执行了一个"——静默丢数据是最难查的 bug。
     """
 
     content: str = ""
-    tool_call_delta: dict[str, Any] | None = None
+    tool_call_deltas: list[dict[str, Any]] = Field(default_factory=list)
     finish_reason: str | None = None
     usage: Usage | None = None

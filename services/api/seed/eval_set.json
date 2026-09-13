@@ -1,0 +1,104 @@
+{
+  "name": "jobpilot-retrieval-public",
+  "description": "可提交的公开评测集：锚点全部取自同样可提交的 seed/resume.sample.md 与 seed/jobs.json，不含任何个人隐私信息，且保证任何人都能 clone 后直接跑通。用户自己的评测集应放在 data/eval_set.local.json（已被 .gitignore 排除），脚本会优先使用它。",
+  "queries": [
+    {
+      "query": "我是哪个学校毕业的，什么专业",
+      "gold": [{ "doc_id_contains": "resume", "text_contains": "某某大学" }],
+      "difficulty": "easy",
+      "note": "直命中。这一行曾经因为『标题被吞』而在切分阶段整体丢失，属于回归用例。"
+    },
+    {
+      "query": "我在哪些公司工作过",
+      "gold": [{ "doc_id_contains": "resume", "section_contains": "工作经历" }],
+      "difficulty": "easy",
+      "note": "章节名与查询意图高度一致"
+    },
+    {
+      "query": "我获得过哪些竞赛奖项",
+      "gold": [{ "doc_id_contains": "resume", "section_contains": "竞赛荣誉" }],
+      "difficulty": "easy",
+      "note": "最简单的一类：查询词与章节名几乎逐字相同"
+    },
+    {
+      "query": "我的联系方式是什么",
+      "gold": [{ "doc_id_contains": "resume", "section_contains": "个人信息" }],
+      "difficulty": "easy",
+      "note": "查询用『联系方式』，而正文只有电话号码与邮箱地址，没有任何『联系方式』字样 —— 典型的需要靠章节名与上下文推断的鸿沟。"
+    },
+    {
+      "query": "我熟悉哪些数据库技术",
+      "gold": [{ "doc_id_contains": "resume", "text_contains": "MySQL" }],
+      "difficulty": "normal",
+      "note": "『数据库』在正文中确实出现，但也考验能否与 Redis/SQL 等内容一起召回"
+    },
+    {
+      "query": "我做过哪些完整的项目",
+      "gold": [{ "doc_id_contains": "resume", "section_contains": "项目经历" }],
+      "difficulty": "normal",
+      "note": "项目经历通常会被切成多块，考验 recall 的分母计算是否正确"
+    },
+    {
+      "query": "我有多少年开发经验",
+      "gold": [{ "doc_id_contains": "resume", "text_contains": "年" }],
+      "difficulty": "hard",
+      "note": "信息藏在『个人简介』的一句话里，查询词与正文表达差异大。TF-IDF 类方法在此类查询上表现明显偏弱。"
+    },
+    {
+      "query": "我适合的做法是投后端还是 AI 方向",
+      "gold": [
+        { "doc_id_contains": "resume", "text_contains": "求职意向" }
+      ],
+      "difficulty": "hard",
+      "note": "需要定位求职意向字段。开放式提问，考察能否召回高信息密度的短块。"
+    },
+    {
+      "query": "哪些岗位要求消息队列或者分布式系统的能力",
+      "gold": [
+        { "doc_id_contains": "job-002", "text_contains": "消息队列" },
+        { "doc_id_contains": "job-005", "text_contains": "分布式" }
+      ],
+      "difficulty": "normal",
+      "note": "跨两个岗位的 OR 语义。gold 条件之间是 OR，同一条件内的多个字段之间是 AND。"
+    },
+    {
+      "query": "有哪些大模型应用方向的岗位",
+      "gold": [
+        { "doc_id_contains": "job-001", "text_contains": "大模型" },
+        { "doc_id_contains": "job-003", "text_contains": "大模型" }
+      ],
+      "difficulty": "normal",
+      "note": "标题含『大模型』，但正文分布在不同块"
+    },
+    {
+      "query": "北京有哪些岗位在招人",
+      "gold": [
+        { "doc_id_contains": "job-001", "text_contains": "北京" },
+        { "doc_id_contains": "job-005", "text_contains": "北京" }
+      ],
+      "difficulty": "normal",
+      "note": "城市信息只出现在每个岗位的第一个块里，属于元数据型检索"
+    },
+    {
+      "query": "有没有要求向量数据库的岗位",
+      "gold": [{ "doc_id_contains": "job-003", "text_contains": "向量数据库" }],
+      "difficulty": "normal",
+      "note": "精确术语命中，基线应该能拿到高分"
+    },
+    {
+      "query": "AI 应用开发工程师这个岗位都有哪些要求",
+      "gold": [{ "doc_id_contains": "job-001", "section_contains": "任职要求" }],
+      "difficulty": "hard",
+      "note": "需要把『岗位名』与『任职要求』关联起来 —— 岗位名在第一个块，要求在后一个块，是典型的跨块关联。"
+    },
+    {
+      "query": "哪些岗位的薪资比较有竞争力",
+      "gold": [
+        { "doc_id_contains": "job-003", "text_contains": "30-60K" },
+        { "doc_id_contains": "job-005", "text_contains": "35-70K" }
+      ],
+      "difficulty": "hard",
+      "note": "考验对数值范围的语义理解（『有竞争力』≈ 高薪资），TF-IDF 基本无能为力 —— 这是留给语义 embedding 的对照用例。"
+    }
+  ]
+}

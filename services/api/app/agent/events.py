@@ -47,10 +47,19 @@ class AgentEvent(BaseModel):
     tool_args: dict[str, Any] | None = None
     tool_ok: bool | None = None
     duration_ms: int | None = None
+    # 观察结果是否被截断。必须下发到事件流：
+    # 截断意味着模型看到的不是完整内容，如果 UI 和日志都不体现这一点，
+    # 出现"模型漏答了文件后半部分"这类问题时根本无从定位。
+    truncated: bool | None = None
 
     # 结束时的累计统计
     usage: Usage | None = None
     steps_used: int = 0
+    # 终止原因：finished | max_steps | loop_detected | error
+    # 仅 DONE 事件携带。单独一个字段而不是靠"有没有 ERROR 事件"推断：
+    # "步数耗尽"和"死循环"是**可预期的预算终止**，而"模型调用失败"是故障。
+    # 三者混在一起会让指标统计失真——例如"错误率"会把正常的预算耗尽也算进去。
+    stopped_reason: str = "finished"
 
     def to_sse(self) -> dict[str, str]:
         """转成 SSE 事件（sse-starlette 的 ServerSentEvent 参数形式）。"""
