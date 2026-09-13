@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -66,12 +67,26 @@ class TestInMemoryStore:
         assert s.title == "第一个问题"
 
     async def test_list_sorted_by_updated_at_desc(self) -> None:
+        """列表按更新时间倒序。
+
+        【为什么不靠 sleep 制造时间差】
+        `time.time()` 在 Windows 上的实际分辨率约 15ms，而 `asyncio.sleep(0.01)`
+        只有 10ms —— 两次更新可能拿到**完全相同的时间戳**。
+        Redis 的 ZSET 在分数相同时按成员名排序，而成员是随机 uuid，
+        顺序于是变成随机的；内存实现下则依赖插入顺序。
+
+        初版测试正是这样写的，表现为"大部分时候通过、偶尔失败"的 flaky。
+        显式指定 updated_at 让测试与**时钟分辨率**解耦 ——
+        它测的是排序逻辑，不该被计时器精度影响。
+        """
         store = InMemorySessionStore()
         a = await store.create()
         b = await store.create()
-        await store.append_turn(a.id, "先问的", "答")
-        await asyncio.sleep(0.01)
-        await store.append_turn(b.id, "后问的", "答")
+        # 用"相对当下"的时间而不是 1000.0 这样的绝对值：
+        # 后者是 1970 年，会被惰性过期判定为过期，列表直接空掉。
+        now = time.time()
+        a.updated_at = now - 100
+        b.updated_at = now
 
         listed = await store.list()
         assert [s.id for s in listed] == [b.id, a.id]
@@ -192,11 +207,19 @@ class TestRedisStore:
         assert f"jobpilot:session:{session.id}" in keys
 
     async def test_index_used_for_listing(self, store: RedisSessionStore) -> None:
+        """列表按 ZSET 索引的分数（updated_at）倒序。
+
+        与内存实现同理：显式指定 updated_at，不依赖 `time.time()` 的分辨率。
+        Windows 上它的粒度约 15ms，靠 sleep 制造时间差会 flaky；
+        更麻烦的是 ZSET 在分数相同时按成员名排序，而成员是随机 uuid。
+        """
         a = await store.create()
         b = await store.create()
-        await store.append_turn(a.id, "先", "答")
-        await asyncio.sleep(0.01)
-        await store.append_turn(b.id, "后", "答")
+        now = time.time()
+        a.updated_at = now - 100
+        b.updated_at = now
+        await store.save(a)
+        await store.save(b)
 
         listed = await store.list()
         assert [s.id for s in listed] == [b.id, a.id]

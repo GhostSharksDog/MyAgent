@@ -90,6 +90,7 @@ async def get_session(request: Request, session_id: str) -> SessionDetail:
         created_at=session.created_at,
         updated_at=session.updated_at,
         total_tokens=session.total_tokens,
+        turn_count=session.turn_count,
         turns=_interleave(session),
     )
 

@@ -93,6 +93,10 @@ class SessionDetail(BaseModel):
     created_at: float
     updated_at: float
     total_tokens: int
+    # 与列表项 SessionSummaryModel 保持一致。客户端虽然能从
+    # `len(turns) / 2` 推出来，但"同一个概念在两个接口里形状不同"
+    # 会让前端不得不同时维护两种算法 —— 而两种算法迟早会不一致。
+    turn_count: int = 0
     turns: list[dict[str, str]] = Field(default_factory=list)
 
 

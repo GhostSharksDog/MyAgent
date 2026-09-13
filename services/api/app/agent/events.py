@@ -31,8 +31,16 @@ class EventType(StrEnum):
     TOOL_CALL = "tool_call"  # 模型请求调用工具
     TOOL_RESULT = "tool_result"  # 工具执行完毕（含成功/失败）
     FINAL = "final"  # 最终答案（完整文本）
-    ERROR = "error"  # 出错，正常终止
+    ERROR = "error"  # 出错，**非**正常终止
     DONE = "done"  # 流结束哨兵，携带累计用量
+
+    # ---------- Plan-and-Execute 专用 ----------
+    # 这几个事件只在规划型 Agent 上出现。ReAct 的消费者看不见它们，
+    # 因此新增事件类型不会破坏既有前端 —— 这也是"事件模型作为契约"的
+    # 好处：扩展是加法，而不是修改既有语义。
+    PLAN = "plan"  # 完整计划已产出（一次，在开头）
+    PLAN_STEP = "plan_step"  # 某个步骤的状态变化（开始/完成/失败）
+    REPLAN = "replan"  # 计划被修订（携带修订后的计划）
 
 
 class AgentEvent(BaseModel):
@@ -61,6 +69,13 @@ class AgentEvent(BaseModel):
     # 三者混在一起会让指标统计失真——例如"错误率"会把正常的预算耗尽也算进去。
     stopped_reason: str = "finished"
 
+    # 计划载荷（仅 PLAN / PLAN_STEP / REPLAN 携带）。
+    # 每个计划相关事件都带**完整的计划快照**而不是增量 diff：
+    # 前端渲染一个计划面板需要完整状态，而 diff 要求前端自己维护
+    # 一份可变状态并保证与后端一致 —— 那是 bug 的温床。
+    # 计划最多 5 步，快照的代价可以忽略。
+    plan: dict[str, Any] | None = None
+
     def to_sse(self) -> dict[str, str]:
         """转成 SSE 事件（sse-starlette 的 ServerSentEvent 参数形式）。"""
         return {"event": str(self.type), "data": self.model_dump_json(exclude_none=True)}
@@ -75,3 +90,7 @@ class AgentRunResult(BaseModel):
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     stopped_reason: str = "finished"  # finished | max_steps | loop_detected | error
     error: str | None = None
+    # 规划型 Agent 的最终计划（含各步骤状态与结论）。
+    # 放在返回值里而不是让调用方从事件流里自己攒：
+    # 一次非流式调用之后，"这个计划最后执行到哪一步"是最常被问的问题。
+    plan: dict[str, Any] | None = None
