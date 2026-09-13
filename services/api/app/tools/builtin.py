@@ -265,12 +265,17 @@ def _search_jobs(params: BaseModel) -> ToolResult:
 # ============================================================
 # 注册入口
 # ============================================================
-def build_default_registry() -> ToolRegistry:
-    """构造 P1 阶段的默认工具集。
+def build_default_registry(long_term_memory: object | None = None) -> ToolRegistry:
+    """构造默认工具集。
 
     注意每个 description 的写法：**它同时是"给模型的 API 文档"**。
     要写清：什么时候用它、参数含义、边界情况。
     描述含糊是 Agent 表现差的第一大原因，比换模型有效得多。
+
+    Args:
+        long_term_memory: 传入 `LongTermMemory` 时会额外注册 `remember_fact`
+            工具。用依赖注入而不是在模块内自建实例，是因为记忆必须与
+            Agent 共用同一个对象 —— 否则工具"记住"的东西 Agent 读不到。
     """
     registry = ToolRegistry()
 
@@ -311,5 +316,15 @@ def build_default_registry() -> ToolRegistry:
     from app.tools.knowledge import KnowledgeSearchTool
 
     registry.register(KnowledgeSearchTool())
+
+    # 长期记忆工具：仅在提供了记忆实例时注册。
+    # 不提供就不注册 —— 而不是注册一个会报错的空工具。
+    # "工具存在但永远失败"比"工具不存在"更糟：模型会反复尝试调用它。
+    if long_term_memory is not None:
+        from app.agent.memory import LongTermMemory
+        from app.tools.memory_tool import RememberFactTool
+
+        if isinstance(long_term_memory, LongTermMemory):
+            registry.register(RememberFactTool(long_term_memory))
 
     return registry

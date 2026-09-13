@@ -12,7 +12,7 @@ import time
 
 import pytest
 from app.llm.types import ToolCall
-from app.tools.base import ToolRegistry, ToolResult
+from app.tools.base import Tool, ToolRegistry, ToolResult
 from app.tools.builtin import (
     CalculatorParams,
     ReadResumeParams,
@@ -396,3 +396,108 @@ class TestSyncToolDoesNotBlockLoop:
         assert "超时" in result.content
         # 关键：不应等满 2 秒。线程池化后 wait_for 能及时返回。
         assert elapsed < 1.0, f"超时未生效，实际等待 {elapsed:.2f}s"
+
+
+# ============================================================
+# run 的同步/异步分派（回归测试）
+# ============================================================
+class TestToolDispatch:
+    """Tool 子类把 `run` 写成同步方法时也必须能正常工作。
+
+    【一次真实的 E2E 事故】
+    基类把 `run` 声明为 `async def`，但子类很容易写成同步的
+    `def run(...)` —— 尤其当工具只是写个文件、查个内存表时，
+    写 async 看起来是多余的。此时 `await self.run(params)` 会抛：
+        TypeError: object ToolResult can't be used in 'await' expression
+
+    更糟的是**副作用已经执行了**（同步体跑完才轮到 await 报错），
+    于是模型看到"失败"并重试，副作用被执行了两遍。
+
+    而直接调用 `tool.run()` 的单元测试完全正常 ——
+    只有走 `Tool.execute` 的真实路径才暴露。这就是为什么
+    "单元测试全绿"不能替代端到端验证。
+    """
+
+    async def test_sync_run_works_through_execute(self) -> None:
+        class SyncTool(Tool):
+            name = "sync_tool"
+            description = "同步实现的工具"
+            params_model = ReadResumeParams
+
+            def run(self, params: BaseModel) -> ToolResult:  # type: ignore[override]
+                return ToolResult.success("同步执行成功")
+
+        registry = ToolRegistry()
+        registry.register(SyncTool())
+        result = await registry.execute(_call("sync_tool"))
+        assert result.ok
+        assert result.content == "同步执行成功"
+
+    async def test_sync_run_does_not_block_event_loop(self) -> None:
+        """同步实现必须走线程池 —— 否则它和同步函数一样阻塞事件循环。"""
+
+        class BlockingSyncTool(Tool):
+            name = "blocking_sync"
+            description = "同步阻塞工具"
+            params_model = ReadResumeParams
+
+            def run(self, params: BaseModel) -> ToolResult:  # type: ignore[override]
+                time.sleep(0.3)
+                return ToolResult.success("done")
+
+        registry = ToolRegistry()
+        registry.register(BlockingSyncTool())
+
+        ticks = 0
+
+        async def heartbeat() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        beat = asyncio.create_task(heartbeat())
+        try:
+            result = await registry.execute(_call("blocking_sync"))
+        finally:
+            beat.cancel()
+
+        assert result.ok
+        assert ticks >= 5, f"事件循环被同步实现的工具阻塞了，心跳只跑了 {ticks} 次"
+
+    async def test_sync_run_timeout_enforced(self) -> None:
+        class SlowSyncTool(Tool):
+            name = "slow_sync"
+            description = "慢的同步工具"
+            params_model = ReadResumeParams
+            timeout = 0.1
+
+            def run(self, params: BaseModel) -> ToolResult:  # type: ignore[override]
+                time.sleep(2.0)
+                return ToolResult.success("never")
+
+        registry = ToolRegistry()
+        registry.register(SlowSyncTool())
+
+        start = time.monotonic()
+        result = await registry.execute(_call("slow_sync"))
+        elapsed = time.monotonic() - start
+
+        assert not result.ok
+        assert "超时" in result.content
+        assert elapsed < 1.0, f"同步路径的超时未生效，实际等待 {elapsed:.2f}s"
+
+    async def test_sync_run_exception_becomes_observation(self) -> None:
+        class FailingSyncTool(Tool):
+            name = "failing_sync"
+            description = "会抛异常的同步工具"
+            params_model = ReadResumeParams
+
+            def run(self, params: BaseModel) -> ToolResult:  # type: ignore[override]
+                raise ValueError("同步实现内部错误")
+
+        registry = ToolRegistry()
+        registry.register(FailingSyncTool())
+        result = await registry.execute(_call("failing_sync"))
+        assert not result.ok
+        assert "ValueError" in result.content

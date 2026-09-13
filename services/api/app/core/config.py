@@ -85,6 +85,43 @@ class AgentSettings(BaseSettings):
     loop_guard: int = Field(default=3, ge=2, le=10)
 
 
+class MemorySettings(BaseSettings):
+    """记忆模块配置。
+
+    【默认值的取舍】
+    - `max_turns=8` / `keep_recent=6`：超出 8 轮就压缩，但保留最近 6 轮原文。
+      摘要是有损的，越近的上下文越需要保真，所以 `keep_recent` 不能太小。
+    - `enable_summary=True`：开启后**每超出窗口一次**多一次 LLM 调用
+      （不是每轮），换来的是"旧信息不丢失"。关掉则退化为截断 ——
+      便宜，但会突然失忆。
+    - `max_facts=200`：长期记忆超过后淘汰最早的。生产环境应改为按访问时间
+      淘汰，或让模型判断重要性；前者需要记录访问，后者需要额外调用。
+    - `enabled=False`：默认关闭。记忆会让每轮多出记忆装配与召回的开销，
+      而且**它的价值应该被度量而不是被假设** —— 与检索消融实验同样的方法论。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MEMORY_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = False
+    max_turns: int = Field(default=8, ge=2, le=100)
+    keep_recent: int = Field(default=6, ge=1, le=50)
+    enable_summary: bool = True
+    max_summary_chars: int = Field(default=1200, gt=0)
+    max_facts: int = Field(default=200, ge=1)
+    # 长期记忆的落盘位置。相对路径按项目根目录解析。
+    facts_path: str = "data/memory/facts.json"
+
+    @property
+    def facts_file(self) -> Path:
+        p = Path(self.facts_path)
+        return p if p.is_absolute() else PROJECT_ROOT / p
+
+
 class RagSettings(BaseSettings):
     """RAG 检索管线配置。
 
@@ -150,6 +187,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     rag: RagSettings = Field(default_factory=RagSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
 
     database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
     redis_url: str = "redis://127.0.0.1:6379/0"

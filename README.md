@@ -21,9 +21,11 @@
 |---|---|---|
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 | 异步优先，全链路类型安全 |
 | Agent 内核 | **手写**（httpx + 自研循环） | 见 `docs/02-concepts/`，理解原理而非调 API |
+| 检索 | 手写 BM25 + RRF 融合 + 两级重排 | 零依赖，全链路可评测 |
+| 记忆 | 短期窗口+LLM 摘要压缩 · 长期事实向量召回 | 默认关闭，价值需被度量 |
 | 前端 | React 19 · TypeScript · Vite | 流式对话 + 工具调用可视化 |
 | 存储 | SQLite(dev) → PostgreSQL + pgvector | 会话、简历、向量 |
-| 缓存/队列 | Redis · BullMQ 风格任务队列 | 会话缓存、限流、异步长任务 |
+| 缓存/队列 | Redis · 任务队列 | 会话缓存、限流、异步长任务 |
 | 部署 | Docker Compose | 服务编排与可观测 |
 | 大模型 | DeepSeek（OpenAI 兼容协议） | 也支持任意兼容端点 |
 
@@ -120,7 +122,7 @@ python scripts\eval_rag.py --compare --with-llm          # 含 LLM 重排（真�
 |---|---|---|
 | **P0** | 工程基座：环境、配置、文档、lint/test 工具链 | ✅ 完成 |
 | **P1** | Agent 内核：手写 LLM 客户端、Tool Use、ReAct 循环、SSE 流式 | ✅ 完成 |
-| **P2** | RAG：解析 → 切分 → 两段式检索 → 评测与消融；检索接入 Agent 工具 | ✅ 检索链路完成；记忆模块待做 |
+| **P2** | RAG + 记忆：解析/切分/两段式检索/评测消融；检索接入 Agent 工具；短期窗口+摘要、长期事实记忆 | ✅ 完成 |
 | **P3** | 全栈化：React 界面、Redis 会话、异步任务、Planning | ⏳ |
 | **P4** | 架构纵深：微服务拆分、可观测、评测回归 | ⏳ |
 | **P5** | 求职转化：简历条目、STAR 故事、技术深挖问答 | ⏳ |

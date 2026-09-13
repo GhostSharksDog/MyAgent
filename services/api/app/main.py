@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.agent.factory import build_memories
 from app.agent.loop import Agent
 from app.api.routes import router
 from app.core.config import get_settings
@@ -45,25 +46,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     llm_client = LLMClient(settings.llm)
-    tools = build_default_registry()
-    agent = Agent(llm_client, tools, settings.agent)
+
+    # 记忆要先于工具表构造：`remember_fact` 工具需要与 Agent 共享同一个
+    # 长期记忆实例，否则工具"记住"的东西 Agent 读不到 —— 这是
+    # 依赖注入顺序上最容易踩的坑。
+    short_memory, long_term = build_memories(settings, llm=llm_client)
+
+    tools = build_default_registry(long_term_memory=long_term)
+    agent = Agent(
+        llm_client,
+        tools,
+        settings.agent,
+        memory=short_memory,
+        long_term=long_term,
+    )
 
     app.state.settings = settings
     app.state.llm = llm_client
     app.state.tools = tools
     app.state.agent = agent
+    app.state.memory = short_memory
+    app.state.long_term = long_term
 
     logger.info(
-        "装配完成：model=%s，工具 %d 个（%s），max_steps=%d",
+        "装配完成：model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s",
         settings.llm.model,
         len(tools.names()),
         "、".join(tools.names()),
         settings.agent.max_steps,
+        "开启" if short_memory else "关闭",
     )
 
     try:
         yield
     finally:
+        # 退出前落盘长期记忆：Agent 在交互中积累的事实不该因重启而丢失
+        if long_term is not None:
+            long_term.save()
+            logger.info("长期记忆已落盘：%d 条", len(long_term))
         await llm_client.aclose()
         logger.info("HTTP 连接池已关闭，服务退出")
 

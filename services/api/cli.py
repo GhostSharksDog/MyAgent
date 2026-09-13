@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.agent.events import EventType
+from app.agent.factory import build_memories
 from app.agent.loop import Agent
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
@@ -183,6 +184,9 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description="JobPilot 命令行客户端")
     parser.add_argument("-q", "--question", help="单次提问后退出（非交互模式）")
     parser.add_argument("--show-raw", action="store_true", help="打印原始事件，便于排查")
+    parser.add_argument(
+        "--memory", action="store_true", help="强制启用记忆模块（覆盖 MEMORY_ENABLED 配置）"
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -194,7 +198,17 @@ async def main() -> int:
         return 2
 
     llm = LLMClient(settings.llm)
-    agent = Agent(llm, build_default_registry(), settings.agent)
+
+    if args.memory and not settings.memory.enabled:
+        # 用 model_copy 覆盖而不是改全局配置：命令行开关不该影响进程外的东西
+        settings = settings.model_copy(
+            update={"memory": settings.memory.model_copy(update={"enabled": True})}
+        )
+
+    # 记忆要先于工具表构造：remember_fact 工具必须与 Agent 共享同一个实例
+    short_memory, long_term = build_memories(settings, llm=llm)
+    tools = build_default_registry(long_term_memory=long_term)
+    agent = Agent(llm, tools, settings.agent, memory=short_memory, long_term=long_term)
     cli = CLI(agent, settings, show_raw=args.show_raw)
 
     try:
@@ -203,6 +217,9 @@ async def main() -> int:
         else:
             await cli.repl()
     finally:
+        if long_term is not None:
+            long_term.save()
+            print(f"{DIM}长期记忆已保存（{len(long_term)} 条）{RESET}")
         await llm.aclose()
     return 0
 

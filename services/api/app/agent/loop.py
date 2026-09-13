@@ -34,6 +34,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 
 from app.agent.events import AgentEvent, AgentRunResult, EventType
+from app.agent.memory import ConversationMemory, LongTermMemory
 from app.agent.prompts import SYSTEM_PROMPT
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
@@ -75,11 +76,20 @@ class Agent:
         settings: AgentSettings,
         *,
         system_prompt: str = SYSTEM_PROMPT,
+        memory: ConversationMemory | None = None,
+        long_term: LongTermMemory | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tools
         self._s = settings
         self._system_prompt = system_prompt
+
+        # ---------- 记忆（可选） ----------
+        # 不传就保持 P1 的无状态行为（历史由调用方传入）。
+        # 这样既向后兼容，也让"有记忆/无记忆"成为可对比的实验条件 ——
+        # 记忆的价值同样应该被度量，而不是默认它有用。
+        self._memory = memory
+        self._long_term = long_term
 
     # ============================================================
     # 主入口 A：流式（给 UI 用）
@@ -95,10 +105,27 @@ class Agent:
         工具调用消息不会写回 history —— 它们是"思考过程"，
         对后续轮次没有价值，留着只会持续消耗 token。
         """
-        # 组装上下文：系统提示 + 历史 + 本轮输入
+        # 组装上下文：系统提示 + 长期记忆 + 短期记忆 + 本轮输入
+        #
+        # 【顺序为什么是这个顺序】
+        # 1. 系统提示必须在最前（角色设定优先于一切）
+        # 2. 长期记忆（跨会话的事实/偏好）紧随其后：它是稳定的背景，不是对话内容
+        # 3. 短期记忆（近期对话或摘要）：越接近当前的问题，模型越应该参考
+        # 4. 本轮输入在最后
         messages: list[ChatMessage] = [ChatMessage.system(self._system_prompt)]
-        if history:
+
+        if self._long_term is not None:
+            if recalled := self._long_term.as_context(user_input, k=3):
+                messages.append(
+                    ChatMessage.system(f"【关于该用户的已知信息（长期记忆）】\n{recalled}")
+                )
+
+        if self._memory is not None:
+            # 有短期记忆时，历史由记忆模块统一提供（它内部做了窗口与摘要）
+            messages.extend(await self._memory.abuild_context())
+        elif history:
             messages.extend(history)
+
         messages.append(ChatMessage.user(user_input))
 
         total_usage = Usage()
@@ -146,6 +173,13 @@ class Agent:
                 answer = accumulator.content
                 if not answer.strip():
                     answer = "（模型返回了空回复，请重试或换一种问法）"
+
+                # 只把**成功的最终回答**写入短期记忆。
+                # 被预算掐断或死循环中止的轮次不写：它们不是有效上下文，
+                # 写进去只会让后续对话基于半成品推理。
+                if self._memory is not None:
+                    self._memory.add_turn(user_input, answer)
+
                 yield AgentEvent(type=EventType.FINAL, step=step, content=answer)
                 yield AgentEvent(
                     type=EventType.DONE,

@@ -103,6 +103,30 @@ class Tool(ABC):
             },
         }
 
+    async def _invoke(self, params: BaseModel) -> ToolResult:
+        """按 `run` 的实际形态分派：协程直接等，同步函数丢线程池。
+
+        【为什么需要这一层 —— 一次真实的 E2E 事故】
+        基类把 `run` 声明为 `async def`，但子类很容易写成同步的
+        `def run(...)`（尤其当工具只是写个文件、查个内存表时，
+        写 async 看起来是多余的）。此时 `await self.run(params)` 会抛
+        `TypeError: object ToolResult can't be used in 'await' expression`。
+
+        更糟的是**副作用已经执行了**（同步体跑完了才轮到 await 报错），
+        于是模型看到"失败"并重试，实际却把副作用又执行了一遍。
+        这类问题的隐蔽之处在于：直接调用 `tool.run()` 的单元测试完全正常，
+        只有走 `Tool.execute` 的真实路径才会暴露 ——
+        这也说明为什么"单元测试全绿"不能替代端到端验证。
+
+        修正方式是把分派逻辑统一放在基类：
+          - `run` 是协程函数 → 直接 await
+          - `run` 是同步函数 → `asyncio.to_thread` 执行，
+            既不阻塞事件循环，`asyncio.wait_for` 的超时也才能真正生效
+        """
+        if inspect.iscoroutinefunction(self.run):
+            return await self.run(params)
+        return await asyncio.to_thread(self.run, params)
+
     async def execute(self, call: ToolCall) -> ToolResult:
         """带校验、超时、异常兜底的执行入口。Agent 循环只调用这个方法。
 
@@ -139,7 +163,7 @@ class Tool(ABC):
 
         # ---- 阶段 2：执行 + 超时 ----
         try:
-            result = await asyncio.wait_for(self.run(params), timeout=self.timeout)
+            result = await asyncio.wait_for(self._invoke(params), timeout=self.timeout)
         except TimeoutError:
             return stamp(ToolResult.failure(f"工具 {self.name} 执行超时（>{self.timeout}s）"))
         except ToolError as exc:
