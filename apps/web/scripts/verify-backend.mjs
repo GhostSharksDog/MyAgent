@@ -189,6 +189,15 @@ async function main() {
   // ---------- 7. 清理 ----------
   await fetch(`${BASE}/api/sessions/${session.id}`, { method: 'DELETE' })
 
+  // ---------- 8. 三种 Agent 形态 ----------
+  //
+  // 【为什么这一段不能省】
+  // 规划型与多 Agent 在实现完成后**一度无法从 API 触发** —— 它们只存在于
+  // Python 模块里，HTTP 入口永远走默认的 ReAct。前端于是永远看不到
+  // plan / delegate 事件，那些面板也就永远不显示。
+  // 这是"功能实现了但没有被接上"的典型：单元测试全绿，端到端却走不到。
+  await checkModes()
+
   section('结果')
   if (failures === 0) {
     console.log('✓ 全部检查通过：前后端契约一致')
@@ -196,6 +205,73 @@ async function main() {
   }
   console.log(`✗ ${failures} 项检查失败`)
   process.exit(1)
+}
+
+/** 每种形态的"特征事件"——它必须出现，否则说明该形态没被真正走到。 */
+const MODE_SIGNATURES = {
+  react: [],
+  plan: ['plan', 'plan_step'],
+  multi: ['delegate', 'delegate_result'],
+}
+
+async function checkModes() {
+  section('8. 三种 Agent 形态（同一请求体，只改 mode）')
+
+  const meta = await (await fetch(`${BASE}/api/meta`)).json()
+  check('后端声明了可用形态', Array.isArray(meta.agent_modes), (meta.agent_modes ?? []).join(', '))
+
+  const question = '我的简历里有没有大数据相关的经验？请一句话回答。'
+
+  for (const [mode, signatures] of Object.entries(MODE_SIGNATURES)) {
+    const response = await fetch(`${BASE}/api/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: question, mode }),
+    })
+
+    if (response.status !== 200) {
+      check(`${mode} 形态返回 200`, false, `status=${response.status}`)
+      continue
+    }
+
+    // 同样复用前端的真实解析器与归约器
+    let turn = emptyTurn('connecting')
+    const types = []
+    for await (const event of streamAgentEvents(response)) {
+      types.push(event.type)
+      turn = applyEvent(turn, event)
+    }
+
+    const missing = signatures.filter((s) => !types.includes(s))
+    check(
+      `${mode} 形态产出特征事件`,
+      missing.length === 0,
+      missing.length ? `缺少 ${missing.join(', ')}` : signatures.join(' + ') || '（默认形态，无特有事件）',
+    )
+    check(
+      `${mode} 形态正常结束`,
+      types.at(-1) === 'done',
+      `phase=${turn.phase} reason=${turn.stoppedReason} code=${types.at(-1)}`,
+    )
+
+    // 形态特有的归约结果 —— 这才是"前端真的能渲染它"的证据
+    if (mode === 'plan') {
+      const steps = turn.plan?.steps ?? []
+      check('计划快照被前端正确归约', steps.length > 0, `${steps.length} 步`)
+      check(
+        '计划步骤都到达终态',
+        steps.length > 0 && steps.every((s) => ['done', 'failed', 'skipped'].includes(s.status)),
+        steps.map((s) => s.status).join(','),
+      )
+    }
+    if (mode === 'multi') {
+      check(
+        '专家派发被前端正确配对',
+        turn.delegations.length > 0 && turn.delegations.every((d) => d.status !== 'running'),
+        turn.delegations.map((d) => `${d.name}:${d.status}`).join(' '),
+      )
+    }
+  }
 }
 
 main().catch((err) => {

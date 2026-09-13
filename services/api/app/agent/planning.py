@@ -341,7 +341,25 @@ class PlanAndExecuteAgent:
 
     # ---------- 主入口 ----------
 
-    async def run_stream(self, user_input: str) -> AsyncIterator[AgentEvent]:
+    async def run_stream(
+        self, user_input: str, history: Sequence[ChatMessage] | None = None
+    ) -> AsyncIterator[AgentEvent]:
+        """执行一轮。
+
+        `history` 参数是为了与 `Agent.run_stream` **保持接口一致**才存在的 ——
+        三种 Agent 形态共用同一个路由入口，签名不一致会逼调用方到处写分支。
+
+        **当前实现不使用会话历史**：规划型 Agent 每次把用户输入当作一个
+        独立的完整任务来规划。把历史并进规划上下文是可行的（拼进 goal 描述里），
+        但那会让计划更长更贵，而且历史里的无关内容会污染任务边界。
+        这里选择显式记录一条日志，而不是静默忽略 ——
+        "参数收下了但没用"是最容易被误认为已生效的情况。
+        """
+        if history:
+            logger.info(
+                "规划型 Agent 收到 %d 条会话历史但当前不使用（本轮按独立任务处理）",
+                len(history),
+            )
         total_usage = Usage()
         yield AgentEvent(type=EventType.START, content=user_input)
 
@@ -499,7 +517,9 @@ class PlanAndExecuteAgent:
             stopped_reason="finished" if plan.done_count else "error",
         )
 
-    async def run(self, user_input: str) -> AgentRunResult:
+    async def run(
+        self, user_input: str, history: Sequence[ChatMessage] | None = None
+    ) -> AgentRunResult:
         answer = ""
         steps_used = 0
         usage = Usage()
@@ -507,7 +527,7 @@ class PlanAndExecuteAgent:
         stopped = "finished"
         plan_payload: dict | None = None
 
-        async for event in self.run_stream(user_input):
+        async for event in self.run_stream(user_input, history):
             if event.type is EventType.FINAL:
                 answer = event.content
             elif event.type is EventType.DONE:

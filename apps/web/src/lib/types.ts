@@ -15,6 +15,33 @@
 // SSE 事件
 // ============================================================
 
+/** 终止原因。仅 DONE 事件携带。
+ *
+ *  刻意分开 `finished` 与其余三种：前三者是"可预期的预算终止"，
+ *  只有 `error` 才是故障。UI 上也据此用不同颜色，而不是把所有
+ *  非正常结束都画成红色 —— 那会让"步数耗尽"这种正常保护看起来像崩溃。 */
+export type StoppedReason = 'finished' | 'max_steps' | 'loop_detected' | 'error'
+
+/**
+ * Agent 形态。三种形态针对不同的**任务结构**，不是"哪个更高级"：
+ *
+ *   react  想一步做一步     → 探索型任务（不知道下一步会看到什么）
+ *   plan   先出完整计划再执行 → 结构型任务；计划对用户可见，可解释性最好
+ *   multi  主管路由到多位专家 → 跨领域提问；各专家独立作答后由协调者取舍
+ *
+ * 类型的值是**从后端契约镜像**过来的。前端不硬编码"有哪些形态"的展示逻辑，
+ * 而是拿 `/api/meta` 的 `agent_modes` 去渲染 —— 后端新增形态时前端无需改代码。
+ * 这里的联合类型只用于编译期约束，不用于运行时枚举。
+ */
+export type AgentMode = 'react' | 'plan' | 'multi'
+
+/** 每种形态的展示信息。键与后端 `agent_modes` 的取值对应。 */
+export const AGENT_MODE_META: Record<AgentMode, { label: string; hint: string }> = {
+  react: { label: '自动推理', hint: '边想边做，适合不确定下一步要查什么的探索型问题' },
+  plan: { label: '先规划', hint: '先给出完整计划再逐步执行，过程对可见、便于中途纠偏' },
+  multi: { label: '多专家', hint: '按专长路由到多位专家并发作答，适合跨领域的综合问题' },
+}
+
 /** 事件类型。与后端 `EventType` 一一对应。 */
 export type AgentEventType =
   | 'start'
@@ -25,13 +52,51 @@ export type AgentEventType =
   | 'final'
   | 'error'
   | 'done'
+  // Plan-and-Execute 专用（后端 app/agent/planning.py）
+  | 'plan'
+  | 'plan_step'
+  | 'replan'
+  // 多 Agent 专用（后端 app/agent/multi.py）
+  | 'delegate'
+  | 'delegate_result'
 
-/** 终止原因。仅 DONE 事件携带。
- *
- *  刻意分开 `finished` 与其余三种：前三者是"可预期的预算终止"，
- *  只有 `error` 才是故障。UI 上也据此用不同颜色，而不是把所有
- *  非正常结束都画成红色 —— 那会让"步数耗尽"这种正常保护看起来像崩溃。 */
-export type StoppedReason = 'finished' | 'max_steps' | 'loop_detected' | 'error'
+// ============================================================
+// 计划（Plan-and-Execute）
+// ============================================================
+
+export type PlanStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+
+export interface PlanStepPayload {
+  id: number
+  description: string
+  /** 这一步的完成标准。用于让用户判断"算不算做完了"。 */
+  expected?: string
+  status: PlanStepStatus
+  /** 完成后的结论。注意它是**结论**而不是过程 —— 后端只把结论传给下一步。 */
+  result?: string
+  error?: string | null
+}
+
+export interface PlanPayload {
+  goal: string
+  steps: PlanStepPayload[]
+  /** 为什么这样拆分。排查"拆得不对"时这是唯一的线索。 */
+  reasoning?: string
+}
+
+// ============================================================
+// 多 Agent 协作
+// ============================================================
+
+export interface DelegationView {
+  /** 被派发的专家名。 */
+  name: string
+  /** 派发时后端给出的说明（来自专家描述）。 */
+  brief: string
+  status: 'running' | 'ok' | 'failed'
+  /** 专家返回的结论（可能被截断）。 */
+  output: string
+}
 
 export interface Usage {
   prompt_tokens: number
@@ -57,6 +122,16 @@ export interface AgentEvent {
   usage?: Usage
   steps_used?: number
   stopped_reason?: StoppedReason | (string & {})
+  /**
+   * 计划快照。plan / plan_step / replan 三类事件都携带**完整快照**而非增量 diff。
+   *
+   * 这一点直接决定了前端实现：快照语义 = 直接替换状态，不需要自己维护
+   * 一份可变计划并保证与后端一致（那是 bug 的温床）。计划最多 5 步，
+   * 快照的传输代价可以忽略。
+   */
+  plan?: PlanPayload
+  /** 被派发的专家名。delegate / delegate_result 携带。 */
+  specialist?: string
 }
 
 // ============================================================
@@ -126,6 +201,15 @@ export interface ApiMeta {
   max_steps: number
   tool_count: number
   session_backend: string
+  /**
+   * 后端支持的 Agent 形态。
+   *
+   * 声明为宽松的 `string[]` 而不是 `AgentMode[]`：这是**运行时发现**的数据，
+   * 后端可能返回前端还不认识的新形态。收紧成联合类型会逼前端在解析处做断言，
+   * 而断言一旦不成立就是运行时崩溃。宽松声明 + `AGENT_MODE_META` 过滤
+   * 才能在"后端先行升级"时不把前端搞挂。
+   */
+  agent_modes?: string[]
 }
 
 /** GET /api/tools —— 这里是完整定义，含 JSON Schema。 */
@@ -181,6 +265,15 @@ export interface AssistantTurnState {
   /** ERROR 事件的内容。注意它不等于"故障"：步数耗尽也会走这里。 */
   error: string | null
   phase: TurnPhase
+  /**
+   * 当前计划（Plan-and-Execute）。为 null 表示这一轮不是规划型 Agent。
+   *
+   * 后端每个计划事件都带完整快照，所以这里**直接整体替换**即可 ——
+   * 不需要 diff 合并逻辑，也就不可能出现"前端状态与后端不一致"这类 bug。
+   */
+  plan: PlanPayload | null
+  /** 被派发过的专家（多 Agent）。按派发顺序排列。 */
+  delegations: DelegationView[]
 }
 
 /** 对话区的一条消息。 */

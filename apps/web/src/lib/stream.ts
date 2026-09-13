@@ -44,6 +44,8 @@
 import type {
   AgentEvent,
   AssistantTurnState,
+  DelegationView,
+  PlanPayload,
   StepView,
   StoppedReason,
   ToolCallView,
@@ -64,6 +66,8 @@ export function emptyTurn(phase: TurnPhase = 'connecting'): AssistantTurnState {
     stoppedReason: null,
     error: null,
     phase,
+    plan: null,
+    delegations: [],
   }
 }
 
@@ -206,9 +210,91 @@ export function applyEvent(turn: AssistantTurnState, event: AgentEvent): Assista
       }
     }
 
+    // ---------- 计划（Plan-and-Execute） ----------
+    //
+    // plan / plan_step / replan 三类事件都携带**完整计划快照**，
+    // 所以这里一律直接整体替换 —— 不做 diff 合并。
+    // 这不是偷懒：diff 要求前端自己维护一份可变状态并与后端保持一致，
+    // 一旦漏掉某个字段的更新就会静默显示过期信息，而且极难复现。
+    // 计划最多 5 步，快照的代价可以忽略。
+    case 'plan':
+    case 'plan_step':
+    case 'replan': {
+      const plan = readPlan(event)
+      if (!plan) return turn
+      return { ...turn, plan, phase: turn.answer ? turn.phase : 'thinking' }
+    }
+
+    // ---------- 多 Agent 协作 ----------
+    case 'delegate': {
+      const name = event.specialist ?? '(未命名专家)'
+      // 同一位专家可能被派发多次（重试/不同子任务），每次都记一条 ——
+      // UI 上它们是两次独立的工作，合并显示会掩盖"重试"这个事实。
+      const delegation: DelegationView = {
+        name,
+        brief: event.content ?? '',
+        status: 'running',
+        output: '',
+      }
+      return { ...turn, delegations: [...turn.delegations, delegation] }
+    }
+
+    case 'delegate_result': {
+      const name = event.specialist ?? '(未命名专家)'
+      const status = event.tool_ok === false ? 'failed' : 'ok'
+      const output = event.content ?? ''
+
+      // 【配对方向与 tool_result 相反，这是刻意的】
+      //
+      // 工具用"从后往前找最近一个同名 running"（LIFO）：后端**串行**执行工具，
+      // 第 1 个调用返回时第 2 个还没发生，所以最近的那个 running 正是它。
+      //
+      // 专家用"从前往后找第一个同名 running"（FIFO）：后端**并发**派发，
+      // 所有 delegate 先一次性发出，结果按**完成顺序**回来 ——
+      // 此时"最近一个"是最后派发的那位，把先到的结果配给它就错了。
+      //
+      // 已知的固有歧义：同名专家被派发两次时，事件里只有名字、没有序号，
+      // 前端无法真正分辨谁是谁，只能按到达顺序填充。要彻底解决需要后端
+      // 在 delegate / delegate_result 里带一个 correlation id。
+      // 当前后端对专家名做了去重（见 SupervisorAgent._route），
+      // 所以这个场景不会出现 —— 这里保留确定性行为作为兜底。
+      const index = turn.delegations.findIndex((d) => d.name === name && d.status === 'running')
+
+      if (index === -1) {
+        // 没有配对的 delegate：补一条出来而不是丢弃。
+        // 可见的异常远好过"少了一张卡片却没人知道"。
+        return {
+          ...turn,
+          delegations: [...turn.delegations, { name, brief: '', status, output }],
+        }
+      }
+
+      return {
+        ...turn,
+        delegations: turn.delegations.map((d, i) =>
+          i === index ? { ...d, status, output } : d,
+        ),
+      }
+    }
+
     default:
       return turn
   }
+}
+
+/**
+ * 读取事件里的计划快照。
+ *
+ * 做一层结构校验而不是直接 `event.plan as PlanPayload`：
+ * 事件类型放宽成 string 是为了向后兼容，代价就是拿到的 `plan` 字段
+ * 在类型上是不受信的。非法结构直接当作"没有计划"处理，
+ * 让 UI 退回普通渲染，而不是让整个归约过程崩掉。
+ */
+function readPlan(event: AgentEvent): PlanPayload | null {
+  const plan = event.plan
+  if (!plan || typeof plan !== 'object') return null
+  if (typeof plan.goal !== 'string' || !Array.isArray(plan.steps)) return null
+  return plan
 }
 
 function lastStepIndex(steps: StepView[]): number {

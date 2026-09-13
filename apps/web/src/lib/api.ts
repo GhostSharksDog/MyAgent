@@ -13,6 +13,7 @@
  */
 
 import type {
+  AgentMode,
   ApiMeta,
   DeleteResponse,
   HealthStatus,
@@ -163,6 +164,8 @@ export function deleteSession(id: string, signal?: AbortSignal): Promise<DeleteR
 export interface ChatStreamRequest {
   message: string
   sessionId?: string | null
+  /** Agent 形态。不传由后端用默认值（react）。 */
+  mode?: AgentMode
 }
 
 /**
@@ -181,9 +184,13 @@ export async function openChatStream(
   payload: ChatStreamRequest,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const body: { message: string; session_id?: string } = { message: payload.message }
+  const body: { message: string; session_id?: string; mode?: string } = {
+    message: payload.message,
+  }
   // 不传 session_id 就是无状态模式（后端会忽略 history），这是契约里的合法用法
   if (payload.sessionId) body.session_id = payload.sessionId
+  // 不传 mode 时后端用默认值 —— 前端不必硬编码"默认是 react"这个知识
+  if (payload.mode) body.mode = payload.mode
 
   let response: Response
   try {

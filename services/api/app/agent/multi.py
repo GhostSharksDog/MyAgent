@@ -43,7 +43,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 
 from pydantic import BaseModel
 
@@ -186,7 +186,18 @@ class SupervisorAgent:
 
     # ---------- 主入口 ----------
 
-    async def run_stream(self, user_input: str) -> AsyncIterator[AgentEvent]:
+    async def run_stream(
+        self, user_input: str, history: Sequence[ChatMessage] | None = None
+    ) -> AsyncIterator[AgentEvent]:
+        """执行一轮。
+
+        `history` 为接口一致性而存在（理由同 planning.py）。
+        **当前不使用会话历史**：每位专家都拿完整请求**独立**作答 ——
+        这正是"多专家"成立的前提。若各专家带一份不同的历史，
+        它们就不再是"针对同一个问题的不同视角"了。
+        """
+        if history:
+            logger.info("多 Agent 收到 %d 条会话历史但当前不使用（各专家独立作答）", len(history))
         total_usage = Usage()
         yield AgentEvent(type=EventType.START, content=user_input)
 
@@ -288,7 +299,9 @@ class SupervisorAgent:
             stopped_reason="finished" if results else "error",
         )
 
-    async def run(self, user_input: str) -> AgentRunResult:
+    async def run(
+        self, user_input: str, history: Sequence[ChatMessage] | None = None
+    ) -> AgentRunResult:
         answer = ""
         steps_used = 0
         usage = Usage()
@@ -296,7 +309,7 @@ class SupervisorAgent:
         stopped = "finished"
         delegated: list[dict[str, object]] = []
 
-        async for event in self.run_stream(user_input):
+        async for event in self.run_stream(user_input, history):
             if event.type is EventType.FINAL:
                 answer = event.content
             elif event.type is EventType.DONE:

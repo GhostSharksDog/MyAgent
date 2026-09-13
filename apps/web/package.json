@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node --test --test-isolation=none test/sse.test.mjs test/stream.test.mjs test/markdown.test.mjs test/styles.test.mjs"
+    "test": "node --test --test-isolation=none \"test/**/*.test.mjs\""
   },
   "pnpm": {
     "//": "pnpm 10 默认拦截依赖的构建脚本。esbuild 的 postinstall 负责落位平台二进制，必须放行，否则 vite build 会报找不到 esbuild。",

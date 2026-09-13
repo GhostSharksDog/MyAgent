@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
@@ -27,6 +28,8 @@ from app import __version__
 from app.agent.events import AgentEvent, EventType
 from app.agent.loop import Agent
 from app.agent.memory import ConversationMemory
+from app.agent.multi import SupervisorAgent
+from app.agent.planning import PlanAndExecuteAgent
 from app.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -61,19 +64,43 @@ def _to_history(items: list[HistoryMessage]) -> list[ChatMessage]:
 # ============================================================
 # 会话模式的解析
 # ============================================================
-async def _resolve(request: Request, payload: ChatRequest) -> tuple[Agent, Session | None]:
+async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session | None]:
     """决定这次请求用哪个 Agent。
 
-    带 `session_id` 时**新建一个绑定该会话记忆的 Agent**，而不是复用
-    `app.state.agent`。理由：Agent 自身是无状态的，状态在它持有的 memory 上；
-    会话模式下每个会话都需要独立的记忆实例，复用共享实例会让不同会话串上下文 ——
-    这类 bug 表现为"用户 A 看到了用户 B 的历史"，属于最严重的一类问题。
+    两个维度是**正交**的：**形态**（react / plan / multi）× **是否带会话**。
 
+    【形态】三种形态共用同一套工具与护栏，只是循环结构不同。
+    刻意不让它们各自实现一遍工具调用 —— 两套实现迟早不一致，
+    而那时你无法判断差异来自"范式不同"还是"实现不同"。
+
+    【会话】带 `session_id` 时新建一个绑定该会话记忆的 Agent，
+    而不是复用 `app.state.agent`。理由：Agent 自身是无状态的，状态在它持有的
+    memory 上；复用共享实例会让不同会话串上下文 ——
+    表现为"用户 A 看到了用户 B 的历史"，属于最严重的一类问题。
     新建 Agent 的成本可以忽略：它只持有几个引用，
     真正的重活（HTTP 连接池、向量索引、工具表）都是共享的。
     """
+    settings = request.app.state.settings
+
+    # ---------- 形态 ----------
+    if payload.mode == "plan":
+        agent: Any = PlanAndExecuteAgent(
+            request.app.state.llm,
+            request.app.state.tools,
+            settings.agent,
+        )
+    elif payload.mode == "multi":
+        agent = SupervisorAgent(
+            request.app.state.llm,
+            request.app.state.tools,
+            settings.agent,
+        )
+    else:
+        agent = _get_agent(request)
+
+    # ---------- 会话 ----------
     if not payload.session_id:
-        return _get_agent(request), None
+        return agent, None
 
     store = _get_store(request)
     session = await store.get(payload.session_id)
@@ -86,27 +113,29 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Agent, Sessi
             ),
         )
 
-    settings = request.app.state.settings
-    memory = ConversationMemory.from_turns(
-        session.turns,
-        llm=request.app.state.llm,  # 摘要压缩需要 LLM
-        max_turns=settings.memory.max_turns,
-        keep_recent=settings.memory.keep_recent,
-        max_summary_chars=settings.memory.max_summary_chars,
-        # 会话模式下**强制开启摘要**：会话要跨请求延续，
-        # 退化成"截断丢历史"会让用户莫名其妙地失去上下文，
-        # 而 MEMORY_ENABLED=false 的默认值本意是省掉"记忆装配"的开销，
-        # 不是要丢掉会话历史。
-        enable_summary=True,
-    )
-
-    agent = Agent(
-        request.app.state.llm,
-        request.app.state.tools,
-        settings.agent,
-        memory=memory,
-        long_term=request.app.state.long_term,
-    )
+    # 只有 react 形态需要把会话历史装进记忆；plan/multi 不使用历史，
+    # 它们的 run_stream 会打日志说明这一点（见各自 docstring）。
+    # 这里不传历史也不会静默失效 —— 后端会记录日志。
+    if payload.mode == "react":
+        memory = ConversationMemory.from_turns(
+            session.turns,
+            llm=request.app.state.llm,  # 摘要压缩需要 LLM
+            max_turns=settings.memory.max_turns,
+            keep_recent=settings.memory.keep_recent,
+            max_summary_chars=settings.memory.max_summary_chars,
+            # 会话模式下**强制开启摘要**：会话要跨请求延续，
+            # 退化成"截断丢历史"会让用户莫名其妙地失去上下文，
+            # 而 MEMORY_ENABLED=false 的默认值本意是省掉"记忆装配"的开销，
+            # 不是要丢掉会话历史。
+            enable_summary=True,
+        )
+        agent = Agent(
+            request.app.state.llm,
+            request.app.state.tools,
+            settings.agent,
+            memory=memory,
+            long_term=request.app.state.long_term,
+        )
     return agent, session
 
 

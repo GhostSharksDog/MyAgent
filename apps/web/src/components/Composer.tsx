@@ -14,6 +14,8 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent } from 'react'
 
+import { AGENT_MODE_META } from '../lib/types'
+import type { AgentMode } from '../lib/types'
 import { IconArrowUp, IconStop } from './Icons'
 
 export interface ComposerProps {
@@ -23,6 +25,10 @@ export interface ComposerProps {
   onStop: () => void
   streaming: boolean
   disabled?: boolean
+  /** 可用的 Agent 形态。**由后端 `/api/meta` 提供**，不是前端硬编码的列表。 */
+  modes: AgentMode[]
+  current: AgentMode
+  onModeChange: (mode: AgentMode) => void
 }
 
 const MAX_HEIGHT = 220
@@ -34,6 +40,9 @@ export function Composer({
   onStop,
   streaming,
   disabled = false,
+  modes,
+  current,
+  onModeChange,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   // 输入法组合状态：true 表示用户正在用拼音/日文等输入法选词
@@ -83,6 +92,29 @@ export function Composer({
           </span>
           {value.length > 0 ? ` · ${value.length} 字` : ''}
         </span>
+
+        {/* 形态选择器。放在输入区而不是顶栏：它是**每次发送时**的一个选择，
+            与"当前会话"同级，而不是全局设置。 */}
+        {modes.length > 1 ? (
+          <div className="modes" role="group" aria-label="Agent 形态">
+            {modes.map((mode) => {
+              const meta = AGENT_MODE_META[mode]
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`modes__item${mode === current ? ' modes__item--active' : ''}`}
+                  onClick={() => onModeChange(mode)}
+                  disabled={streaming}
+                  title={meta?.hint ?? mode}
+                  aria-pressed={mode === current}
+                >
+                  {meta?.label ?? mode}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
 
         {streaming ? (
           <button type="button" className="btn composer__stop" onClick={onStop}>

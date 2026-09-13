@@ -1,0 +1,428 @@
+/* ============================================================
+ * 计划面板 与 专家派发面板
+ * ============================================================
+ *
+ * 这两块都是"过程可见"的一部分，但**层次比工具卡片高**：
+ *   计划   = 整体意图（打算怎么做）
+ *   专家   = 职责分工（谁在想这个问题）
+ *   工具卡 = 具体动作（查了什么）
+ *
+ * 所以视觉上刻意分层：计划用左侧竖线标出"这是主干"，
+ * 专家用并列的块表示"平级分工"，工具卡用紧凑横条表示"细节"。
+ * 三者的容器宽度、缩进、留白都不同 —— 用户扫一眼就知道读到哪一层了。
+ */
+
+/* ============================================================
+ * 形态选择器（输入区右侧）
+ * ============================================================
+ *
+ * 放在输入区而不是顶栏：它是**每次发送时**的一个选择，
+ * 与"当前会话"同级，而不是全局设置。放在顶栏会被当成应用配置，
+ * 而它实际上只是"这一次想用哪种方式回答"。
+ */
+.modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.modes__item {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+
+.modes__item:hover:not(:disabled) {
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+
+.modes__item--active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.modes__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+ * 计划面板
+ * ============================================================ */
+.plan {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.plan__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+}
+
+.plan__head:hover {
+  background: var(--surface-hover);
+}
+
+.plan__chevron {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform 0.14s ease;
+}
+
+.plan__chevron--open {
+  transform: rotate(90deg);
+}
+
+.plan__title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent-text);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.plan__goal {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan__progress {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__failed-count {
+  color: var(--danger);
+}
+
+.plan__live {
+  color: var(--accent);
+}
+
+.plan__body {
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.plan__reasoning {
+  margin: var(--space-3) 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-faint);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.55;
+}
+
+.plan__reasoning-label {
+  display: inline-block;
+  margin-right: var(--space-2);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.plan__steps {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plan__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+}
+
+/* 正在执行的步骤给一点强调：这是用户当下唯一需要关注的那一行 */
+.plan__step[data-status='running'] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.plan__step[data-status='failed'] {
+  border-color: var(--danger-border);
+}
+
+/* 已跳过的用中性呈现，**不要**用警告色：
+   预算保护生效是设计如此，画成黄色会让用户以为系统出了问题。 */
+.plan__step[data-status='skipped'] {
+  opacity: 0.6;
+}
+
+.plan__dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--text-3);
+}
+
+.plan__dot--running {
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  background: transparent;
+  color: var(--accent);
+}
+
+.plan__dot--done {
+  background: var(--success);
+}
+
+.plan__dot--failed {
+  background: var(--danger);
+}
+
+.plan__dot--pending {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+.plan__dot--skipped {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+}
+
+.plan__step-id {
+  flex-shrink: 0;
+  min-width: 14px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.plan__step-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan__step-desc {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.plan__step-expected {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 结论区：强调"这是结论而不是过程"—— 后端传给下一步的也正是它 */
+.plan__step-result {
+  margin-top: var(--space-2);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--success-border);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.plan__step-error {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.plan__step-hint {
+  margin-top: 4px;
+  color: var(--text-3);
+}
+
+.plan__step-skipped-note {
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ============================================================
+ * 专家派发面板
+ * ============================================================ */
+.experts {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.experts__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.experts__title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent-text);
+  letter-spacing: 0.02em;
+}
+
+.experts__count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.experts__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.expert {
+  border-bottom: 1px solid var(--border);
+}
+
+.expert:last-child {
+  border-bottom: 0;
+}
+
+.expert[data-status='running'] {
+  background: var(--accent-soft);
+}
+
+.expert__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+}
+
+.expert__head:hover {
+  background: var(--surface-hover);
+}
+
+.expert__status {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.expert__name {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 职责范围：截断显示，完整内容放在 title 里 */
+.expert__brief {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expert__toggle {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.expert__body {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.expert__pre {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.expert__pre--error {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.expert__empty {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 说明"上面的结论 ≠ 最终答案"。这条不写清楚，用户会以为
+   专家结论就是结论，从而误解下方答案的来历。 */
+.experts__footnote {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: var(--surface-faint);
+  border-top: 1px solid var(--border);
+}

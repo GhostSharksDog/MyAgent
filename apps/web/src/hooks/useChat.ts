@@ -27,7 +27,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, openChatStream } from '../lib/api'
 import { streamAgentEvents } from '../lib/sse'
 import { applyEvent, emptyTurn } from '../lib/stream'
-import type { AssistantTurnState, ChatItem, SessionTurn } from '../lib/types'
+import type { AgentMode, AssistantTurnState, ChatItem, SessionTurn } from '../lib/types'
 
 function createId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -58,7 +58,7 @@ export interface UseChatResult {
   isStreaming: boolean
   /** 顶部/底部的临时提示（例如"已停止生成"）。 */
   notice: string | null
-  send: (text: string, sessionId: string | null) => Promise<void>
+  send: (text: string, sessionId: string | null, mode?: AgentMode) => Promise<void>
   abort: () => void
   clear: () => void
   /** 载入某个会话的历史（来自 GET /api/sessions/{id}）。 */
@@ -124,7 +124,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
   }, [])
 
   const send = useCallback(
-    async (text: string, sessionId: string | null) => {
+    async (text: string, sessionId: string | null, mode?: AgentMode) => {
       const message = text.trim()
       if (message === '' || streamingRef.current) return
 
@@ -150,7 +150,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
       let sawDone = false
 
       try {
-        const response = await openChatStream({ message, sessionId }, controller.signal)
+        const response = await openChatStream({ message, sessionId, mode }, controller.signal)
 
         for await (const event of streamAgentEvents(response, { signal: controller.signal })) {
           if (event.type === 'done') sawDone = true

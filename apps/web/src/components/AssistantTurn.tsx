@@ -20,8 +20,10 @@ import { computeTurnView } from '../lib/stream'
 import { formatCompact, formatNumber } from '../lib/format'
 import type { AssistantTurnState, ChatItem } from '../lib/types'
 import type { ReactNode } from 'react'
+import { DelegationPanel } from './DelegationPanel'
 import { IconAlert, IconCoins, IconInfo, IconLayers } from './Icons'
 import { Markdown } from './Markdown'
+import { PlanPanel } from './PlanPanel'
 import { ThinkingTimeline } from './ThinkingTimeline'
 
 type AssistantItem = Extract<ChatItem, { kind: 'assistant' }>
@@ -143,6 +145,16 @@ export function AssistantTurn({ item }: AssistantTurnProps) {
           </span>
         ) : null}
       </header>
+
+      {/* 渲染顺序 = 抽象层次由高到低：
+       *   计划（整体意图） → 专家（职责分工） → 时间线（具体动作） → 答案
+       * 这个顺序让用户先看到"它打算怎么做"，再看"它做了什么"，
+       * 最后才是结论 —— 与人类理解一个复杂任务的过程一致。 */}
+      {state.plan ? <PlanPanel plan={state.plan} streaming={streaming} /> : null}
+
+      {state.delegations.length > 0 ? (
+        <DelegationPanel delegations={state.delegations} streaming={streaming} />
+      ) : null}
 
       {view.timeline.length > 0 ? (
         <ThinkingTimeline steps={view.timeline} activeStep={activeStep} streaming={streaming} />

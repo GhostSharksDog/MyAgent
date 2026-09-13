@@ -27,6 +27,15 @@ class HistoryMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000, description="用户本轮输入")
+    mode: Literal["react", "plan", "multi"] = Field(
+        default="react",
+        description=(
+            "Agent 形态。三种形态针对不同的任务结构，不是「哪个更高级」："
+            "react（默认）= 想一步做一步，适合探索型任务；"
+            "plan = 先出完整计划再逐步执行，适合结构型任务且计划对用户可见；"
+            "multi = 主管路由到多位专家并发作答，适合跨领域提问。"
+        ),
+    )
     session_id: str | None = Field(
         default=None,
         description=(
@@ -64,6 +73,9 @@ class MetaResponse(BaseModel):
     max_steps: int
     tool_count: int
     session_backend: str = ""
+    # 支持的 Agent 形态。前端据此渲染模式选择器 —— 让 UI 从后端**发现**能力，
+    # 而不是在前端硬编码一份可能过期的列表（新增形态时前端无需改代码）。
+    agent_modes: list[str] = Field(default_factory=lambda: ["react", "plan", "multi"])
 
 
 # ============================================================

@@ -28,7 +28,9 @@
  * 并给出新建会话的入口 —— 让架构上的两种模式都能被看见。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AGENT_MODE_META } from './lib/types'
+import type { AgentMode } from './lib/types'
 
 import { Composer } from './components/Composer'
 import { EmptyState } from './components/EmptyState'
@@ -60,6 +62,29 @@ export default function App() {
   const [draft, setDraft] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow())
+
+  /**
+   * Agent 形态。
+   *
+   * 可选列表**来自后端**（`/api/meta` 的 `agent_modes`）而不是前端硬编码：
+   * 后端新增一种形态时，前端不改代码就能渲染出对应按钮。
+   * 后端还没返回时用 react 兜底 —— 它始终是默认形态。
+   */
+  const availableModes = useMemo<AgentMode[]>(() => {
+    const raw = server.meta?.agent_modes
+    if (!Array.isArray(raw) || raw.length === 0) return ['react']
+    return raw.filter((m): m is AgentMode => m in AGENT_MODE_META)
+  }, [server.meta])
+
+  const [mode, setMode] = useState<AgentMode>('react')
+
+  // 后端声明里没有当前形态时（例如后端降级/换版本），回退到第一个可用形态，
+  // 否则用户会停在一个"选了但发出去后端不认识"的状态上
+  useEffect(() => {
+    if (availableModes.length > 0 && !availableModes.includes(mode)) {
+      setMode(availableModes[0] as AgentMode)
+    }
+  }, [availableModes, mode])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // 依赖整个 items 数组：流式时它每个 token 都会换新引用，从而触发黏底滚动
@@ -99,8 +124,8 @@ export default function App() {
     if (text === '' || chat.isStreaming) return
     setDraft('')
     // 没有会话时传 null：后端会走无状态模式（忽略 history、不落库）
-    void chat.send(text, sessions.activeId)
-  }, [chat, draft, sessions.activeId])
+    void chat.send(text, sessions.activeId, mode)
+  }, [chat, draft, sessions.activeId, mode])
 
   const handleRefresh = useCallback(() => {
     void server.reload()
@@ -230,6 +255,9 @@ export default function App() {
                 onStop={chat.abort}
                 streaming={chat.isStreaming}
                 disabled={offline}
+                modes={availableModes}
+                current={mode}
+                onModeChange={setMode}
               />
 
               {!offline && sessions.activeId === null ? (
