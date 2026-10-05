@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 会话存储：`auto` 会优先连真 Redis，失败则降级到内存（并打 WARNING）
     sessions = await build_session_store(settings)
+    # SQL 后端的建引擎是惰性的 —— 不主动连一次，"驱动没装 / 路径不可写"
+    # 会等到第一个用户请求才炸，而那时它看起来像业务 bug。
+    # 启动时暴露：一条清晰的失败，位置也正确（还没开始接流量）。
+    ensure_ready = getattr(sessions, "ensure_ready", None)
+    if ensure_ready is not None:
+        await ensure_ready()
 
     # 任务队列：注册处理器 → 启动 worker（顺序不能反，见 factory 的说明）
     # `run_workers_in_api=false` 时本进程只投递、不消费（配合独立 worker 进程）

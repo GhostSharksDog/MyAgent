@@ -339,14 +339,22 @@ class TaskSettings(BaseSettings):
 class SessionSettings(BaseSettings):
     """会话存储配置。
 
-    【四个后端的适用场景 —— 选错会造成很难查的问题】
+    【五个后端的适用场景 —— 选错会造成很难查的问题】
 
-    | backend | 用途 | 跨进程共享 |
-    |---|---|---|
-    | `memory` | 单元测试、单进程 demo | ❌ |
-    | `fake`   | 本地开发：走**真实 Redis 代码路径**但不需要 Docker | ❌ |
-    | `redis`  | 生产、多副本部署 | ✅ |
+    | backend | 用途 | 跨进程共享 | 活过重启 |
+    |---|---|---|---|
+    | `memory` | 单元测试、单进程 demo | ❌ | ❌ |
+    | `fake`   | 本地开发：走**真实 Redis 代码路径**但不需要 Docker | ❌ | ❌ |
+    | `sql`    | 单机持久化：用 `DATABASE_URL`（SQLite 文件） | ❌ | ✅ |
+    | `redis`  | 生产、多副本部署 | ✅ | ✅ |
     | `auto`   | 默认：能连上真 Redis 就用，否则降级到内存 | 视环境 |
+
+    `sql` 补的是"本地开发"那一格：不想装 Redis，又不想重启一次就把聊过的
+    内容丢掉。（`sqlite` 也接受，只是 `sql` 的别名。）
+
+    **`auto` 不会自动选 `sql`**：它的语义是"探测环境"，不是"挑一个我喜欢的"。
+    悄悄开始写 `data/legacy.db` 会让"我只是启动一下"变成"多了个数据库文件"，
+    而持久化是一个明确的意图，就该明确写出来。
 
     `auto` 的降级必须**打醒目日志**：静默降级会让人以为"多进程共享生效了"，
     实际上请求落到别的实例就读不到会话 —— 表现为"用户偶尔丢历史"，
@@ -360,7 +368,7 @@ class SessionSettings(BaseSettings):
         extra="ignore",
     )
 
-    backend: str = "auto"  # auto | memory | fake | redis
+    backend: str = "auto"  # auto | memory | fake | sql | sqlite | redis
     ttl_seconds: int = Field(default=7 * 24 * 3600, gt=0)
     max_sessions: int = Field(default=500, ge=1)
 
@@ -560,7 +568,41 @@ class Settings(BaseSettings):
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
 
+    # 数据库地址（SQLAlchemy URL）。目前被 `SESSION_BACKEND=sql` 使用。
     database_url: str = "sqlite+aiosqlite:///./data/legacy.db"
+
+    @field_validator("database_url")
+    @classmethod
+    def _resolve_sqlite_path(cls, value: str) -> str:
+        """把 SQLite 的**相对**路径解析成项目根目录下的绝对路径。
+
+        【为什么必须做这件事】
+        默认值是 `sqlite+aiosqlite:///./data/legacy.db` —— 那个 `./` 是相对
+        **当前工作目录**的。于是同一个配置会落到不同的文件：
+
+            cd services/api && python -m app.worker_main   → services/api/data/legacy.db
+            cd 仓库根        && python ...                 → <root>/data/legacy.db
+
+        表现是"我的历史怎么没了"—— 而两个文件都真实存在、都写成功了。
+        这个项目在文件路径上一直用"相对 `__file__`"而不是相对 CWD，
+        理由就在这里：**CWD 是运行方式的偶然产物，不是配置的一部分。**
+
+        只处理 SQLite 的相对路径；绝对路径与其它方言（postgresql://…）
+        原样返回 —— 那些地址的含义本来就是由服务端解释的。
+        """
+        prefix = "sqlite"
+        if not value.startswith(prefix):
+            return value
+        # 形如 sqlite+aiosqlite:///./data/x.db 或 sqlite:///C:/... 或 :memory:
+        marker = ":///"
+        if marker not in value:
+            return value  # sqlite:// 或 sqlite:///:memory: 之类，不碰
+        scheme, path = value.split(marker, 1)
+        if path in (":memory:", "") or Path(path).is_absolute():
+            return value
+        resolved = (PROJECT_ROOT / path.lstrip("./")).resolve()
+        return f"{scheme}{marker}{resolved.as_posix()}"
+
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_fake: bool = True
 

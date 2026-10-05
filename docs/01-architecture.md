@@ -959,15 +959,10 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 
 | # | 技术债 | 影响 | 现状 / 绕过方式 | 要做的话 |
 |---|---|---|---|---|
-| T02 | **没有持久化** | 进程重启后**向量索引**全丢（会话其实已经在 SessionStore 里，Redis 后端是持久的）；另外 `DATABASE_URL` 声明了却**没有任何代码使用** | 会话走 `SessionStore`（memory / fake / redis）；索引在内存 | SQLite 起步（SQLAlchemy 已在依赖里）；同时决定 `DATABASE_URL` 是落地还是删掉 —— 一个"写在模板里但没人读"的配置项本身就是误导 |
-| T09 | **上下文没有 token 计数** | `MAX_OBSERVATION_CHARS = 8000` 是**字符**数：中文场景约 5k–8k token，偏大；也因此做不了真正的 token 预算与超窗保护 | 靠保守的字符上限兜底 | `tiktoken` 估算 + 动态预算（注意它只对 OpenAI 系编码准确，别的模型族要另配） |
-| T07 | **tool 消息不入历史**（ADR-006 的代价） | 多轮对话里模型"记不住上一轮查过什么"，会重复调用工具，既慢又费 token | 类型上就禁止（`Literal`），只写 user/assistant | 改为保留**结构化摘要**：原始 tool 消息会持续吃 token，全留是另一种浪费 |
-| T21 | **依赖没有锁定** | 别人 clone 后装出来的版本可能与本机不同。对这个项目尤其要紧：`scikit-learn` / `numpy` 的小版本差异足以让**检索指标漂移**，而指标是这份项目的主要证据 | 只声明了下限（`>=`），仓库里没有 lock 文件 | `uv lock` / `pip-compile` 产出 lock，并在 CI 里按 lock 安装 |
-
+| T09 | **上下文没有 token 计数** | `MAX_OBSERVATION_CHARS = 8000` 是**字符**数：中文场景约 5k–8k token，偏大；也因此做不了真正的 token 预算与超窗保护 | 靠保守的字符上限兜底 | `tiktoken` 估算 + 动态预算（注意它只对 OpenAI 系编码准确，别的模型族要另配） || T07 | **tool 消息不入历史**（ADR-006 的代价） | 多轮对话里模型"记不住上一轮查过什么"，会重复调用工具，既慢又费 token | 类型上就禁止（`Literal`），只写 user/assistant | 改为保留**结构化摘要**：原始 tool 消息会持续吃 token，全留是另一种浪费 |
 > **T04（限流与配额）不在这张表里**，它属于"已实现、按设计保持关闭"：`TokenBucket` 与全部配置项都在，默认 `RESILIENCE_RATE_LIMIT_ENABLED=false`。理由是**没有标定过的阈值比没有阈值更危险** —— 它只会拒掉正常用户，而不会挡住真正的滥用。谁部署谁标定。
 
 ### 8.2 已修复（含怎么修的）
-
 保留这张表不是为了列成绩，而是因为**其中大多数不是"写错了"，而是"没想到"** —— 面试里这类例子比"我用过什么技术"有说服力得多。
 
 | # | 原问题 | 修法 |
@@ -975,6 +970,7 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 | T01 | 一个回合里的多个工具调用**串行** `await`，延迟线性叠加（3×T） | `asyncio.gather` + `Semaphore`（新增 `AGENT_TOOL_CONCURRENCY`，默认 4）。并发必须同时守住三件事：**结果仍按模型给出的顺序回灌**（不是完成顺序）、**失败隔离**（`_execute_one` 把异常就地收敛成"这一条失败" —— 并发后 gather 的异常会取消同批，失败范围会被放大）、**有上限**。另加 `Tool.serial`：有副作用的工具会让整个回合退回串行，因为混合策略需要调度保证，而这个循环给不出。测试用**时序**断言（3×0.25s：串行 vs 并发），并配一条 `tool_concurrency=1` 的对照 —— 两条合起来才证明机制在起作用 |
 | T03 + T14 | **没有鉴权** + **CORS 放行任意 localhost 端口**。在这之前"安全边界"只有一句"只监听 127.0.0.1" —— 那是**部署约束**，改一个环境变量就能绕过去，而界面上不会有任何提示 | 两件事一起做，因为它们本质是一体的（"谁能调用"与"谁能在浏览器里调用"）：<br>· `SECURITY_API_KEY`（空 = 不启用，本地零配置）→ 中间件校验 `/api/*`、`/metrics`、`/docs`，两种头都收（`X-API-Key` / `Authorization: Bearer`），用 `hmac.compare_digest` 常数时间比较；`/healthz` 与静态资源**故意**不保护（探针拿不到密钥，硬要就会逼人把密钥写进探活配置）<br>· **非回环地址 + 无密钥 → 拒绝启动**，异常信息里写清三条出路（这正是"让危险组合起不来"而不是"打条 WARNING"）<br>· CORS 按配置决定：显式白名单 > 回环开发正则 > 非回环时**不放行任何来源**<br>· 前端：密钥存 localStorage（不进 URL/Cookie，只走请求头），设置面板可填，`/healthz` 新增 `auth_required` 让界面在 401 之前就能提示"去填密钥"<br>· 两个"只有跑起来才会发现"的点：**中间件顺序**（Starlette 的 `add_middleware` 是 insert(0)，后添加的在外层 —— 所以要先加鉴权再加 CORS，否则 401 上没有 CORS 头，浏览器读不到那句提示）；**回环 + 有密钥时启动日志说反了**（"未启用鉴权"） |
 | T15 | **没有请求级整体超时预算**：最坏单请求 ≈ `12 × (120s + 30s) ≈ 30 分钟` | 加了 `AGENT_RUN_TIMEOUT`（单轮总时长预算）。**每一跳都被"剩余预算"包住**（`asyncio.timeout(remaining)` 套住模型流式调用与工具批次），所以预算是**整轮累计**的而不是每步各给一份；用单调时钟 `loop.time()` 算 deadline（挂钟会被 NTP 校时影响，那类 bug 几乎无法复现）。到预算时以 `stopped_reason="timeout"` 收尾 —— **`asyncio.TimeoutError` 是 `Exception` 的子类，捕获顺序写反就会变成 `error`**，而"时间到了"是可预期的运行结果，混进错误率会让监控失真。默认 `0`（不限制）：合理的预算取决于部署形态，猜一个值会把"本来就慢但正常"的请求掐断 |
+| T21 | **依赖没有锁定** | 别人 clone 后装出来的版本可能与本机不同，而对这个项目尤其要紧：`scikit-learn` / `numpy` 的小版本差异足以让**检索指标漂移**，指标却是这份项目的主要证据 | `scripts/lock_deps.py`（纯标准库，**不引入 pip-tools/uv**）+ `services/api/requirements.lock`（34 个包 = 直接 14 + 传递 20）。几个刻意的决定：<br>· lock 的定位写进头部 —— "在某个具体环境上求得的**已知可用解**"，不是"最新版本清单"；<br>· marker 用 **`ast` 白名单求值**而不是 `eval`（依赖清单里的表达式来自第三方元数据，不该有执行能力），遇到不支持的写法**报错退出而不是猜**；<br>· `--check` 模式供 CI 用：不一致时打印逐包差异并退 1；<br>· **对拍**：另写一份基于 `packaging`（另一套 marker 实现）的解析器重算闭包，34/34 包与版本完全一致；<br>· `docker/Dockerfile` 改为 `pip install -r requirements.lock`，并保留一步构建期覆盖度校验 —— 把"加了依赖忘了重新生成 lock、镜像照样构建成功、直到运行期 `ModuleNotFoundError`"变成**构建期失败**；<br>· 实测挖出一个真坑：pip 读 requirements 文件在找不到 BOM/coding 声明时会退回**系统 locale**（本机 cp936），于是"头部写了中文注释"会让 `pip install -r` 直接 `UnicodeDecodeError` 失败。所以 lock 第一行是 `# -*- coding: utf-8 -*-`，并有测试钉住它。<br>**已知边界**：lock 是在 Windows / CPython 3.12.3 上求出的（`uvloop` 这类平台 marker 为假的包不在其中），换平台 `--check` 会报差异并打印说明；脚本也不校验"已装版本是否满足 pyproject 的 `>=` 下界" |
 | T22 | **部署是纸面上的**：`docker compose up` 从未跑通 | 真跑了一次，**一次就暴露四个只有"真跑"才会出现的问题**，全都是静默或致命的：<br>① `depends_on` 里写成 `redis: *depends-on-redis`，别名展开后多套了一层 → compose 直接拒绝解析（`additional properties 'redis' not allowed`）；<br>② `RUN pip install $(python - <<'PY' … PY\n)` 这种 heredoc 嵌在命令替换里的写法，Dockerfile 解析器不接受（`unknown instruction: )`）；<br>③ **`PROJECT_ROOT = parents[4]` 把仓库的目录深度写进了代码** → 镜像里代码只有三层，导入期直接 `IndexError`，rag / worker 无限重启。改成按标记推断，并且**规则要分两遍走**（`services/api` 自己就长得像镜像的 `/app`，同一层里依次判断会让源码树命中错的那层 → `.env` 找错地方 → 只有一句"未配置 LLM_API_KEY"）；<br>④ 前端产物没进镜像，而 `mount_frontend` 允许它缺失 → 容器 healthy、接口 200、**界面 404**。改成加 node 构建阶段 + `WEB_DIST` 显式指定；<br>顺带把 `APP_HOST` 与启动命令的 `--host` 钉成一对（不一致时访问控制检查会说反话），并让 CORS 来源与"是否要求密钥"在编排层也表达出来。证据：`scripts/verify_compose.py` 四个容器全 healthy、三个 backend 分别是 redis/redis/remote、界面可访问、无密钥 401 / 带密钥 200、**任务由独立 worker 容器消费**（api 里 `task_workers_in_api=false`，且 worker 日志里能查到该 task_id） |
 | T19 | `error` 与 `done` 的配对靠约定，四个分支各写一遍，漏发 `done` 时前端会一直等 | 收敛到 `_finish()`：可选 error + 必定 done。`done` 的存在从"纪律"变成"结构性事实"，并配一组"每个出口恰好一个 done"的不变量测试 |
 | T05 | trace id 早就有了，但注释里承诺的 JSON 日志**并不存在** | `JsonFormatter`（JSON Lines）+ `LOG_FORMAT=text｜json`（默认 text）。异常单独放 `exc`（堆栈混进 message 会让它无法聚合）、`extra=` 字段进 JSON、`default=str` 兜底不丢日志。顺带发现拆出去的 **RAG 服务根本读不到日志配置**（裸 `setup_logging()`），以及 worker / CLI 两个入口点没传形态 |
@@ -999,6 +995,28 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 **已经解决、但更值得展开讲的是这几条**（都是"静默失真"类，不是写错）：
 
 - **部署（T22）**：编排文件是**代码**，不跑就等于没写。真跑一次立刻抓到四个问题，其中两个是致命的（compose 解析失败、镜像里导入期 IndexError），另外两个是静默的（界面 404、访问控制说反话）。最值得讲的是第 ③ 条：**`parents[4]` 把仓库的目录深度写进了代码**，而修法本身也有个陷阱 —— 规则顺序错了不会报错，只会让 `.env` 找错地方。
+- **持久化（T02）**：`DATABASE_URL` 从"写在模板里没人读"变成真的有一个后端在用它
+  （`SESSION_BACKEND=sql`）。四件事值得讲：
+  ① **它补的是本地开发那一格** —— 内存不持久、Redis 要额外服务，而"跑一会儿重启
+  历史就没了"是最容易被忍下来的缺陷；
+  ② **一次被我自己猜错的性能诊断**：HTTP 压测显示会话写入 P95 600–800ms，
+  我先猜"SQLite 提交要 fsync"并加了 WAL —— **没有改善**。于是剥掉 HTTP 层
+  直接量存储层，才看清：SQLite 单次写只要 **0.9ms**，慢的是用法 ——
+  每次操作自己开一个事务、16 个连接去抢同一个文件锁，抢不到就等 `busy_timeout`。
+  加一把进程内 `asyncio.Lock`（把"抢文件锁"换成"在事件循环里公平排队"）之后，
+  并发 create 的 P95 **282ms → 14.7ms**，并发 append 的 P95 **1051ms → 133ms**，
+  而且分布变紧（append 的 P50 94ms / P95 133ms，长尾消失）。
+  复现：`python scripts/bench_session_store.py`（`--memory` 是对照组）。
+  ③ 顺带修掉一个债：Redis 实现的 `append_turn` 是"读整个会话 → 改 → 整体写回"，
+  并发追加会丢轮次；改成 `INSERT` + `UPDATE` 之后没有可丢的中间状态，
+  并有"并排 120 轮一轮不少"的断言钉住。
+  （**内存实现侥幸不丢** —— 它 `get()` 返回同一个对象引用。所以别把它当对照组，
+  这个差别是实测才发现的。）
+  ④ **`auto` 刻意不自动选它** —— `auto` 的语义是"探测环境"而不是"挑一个我喜欢的"，
+  悄悄开始写 `data/legacy.db` 会让"我只是启动一下"变成"多了个数据库文件"。
+  另外修掉一个 CWD 依赖：默认 URL 里的 `./` 让同一份配置落到两个不同文件
+  （`services/api/data/` 与 `<root>/data/`），两个都会写成功而用户以为历史丢了 ——
+  现在配置层会把它解析成项目根下的绝对路径。
 - **访问控制（T03 + T14）**：重点不在"加了一个中间件"，而在三个**组合问题**上 ——
   预检（OPTIONS）不带自定义头所以不能被拦、健康检查必须免密钥否则密钥会扩散、
   中间件顺序决定 401 能不能被浏览器读到。另外"非回环 + 无密钥直接拒绝启动"

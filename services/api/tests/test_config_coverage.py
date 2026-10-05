@@ -28,8 +28,9 @@ import importlib.util
 import re
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from app.core.config import PROJECT_ROOT, Settings, get_settings
@@ -86,6 +87,28 @@ def _readable_keys() -> dict[str, tuple[str, str, str]]:
 
 
 class TestEnvExampleCoverage:
+    """`.env.example` 必须与配置层一致。
+
+    【`_NORMALIZED` 这张小表是什么】
+    绝大多数键的规则是"文档写什么，字段就是什么"。但有极少数键的值会被
+    **有意规范化**，其中最典型的是 `DATABASE_URL`：
+
+        文档写  sqlite+aiosqlite:///./data/legacy.db（相对路径）
+        字段是  sqlite+aiosqlite:///D:/WXP/简历/MyAgent/data/legacy.db
+
+    因为那个 `./` 是相对**当前工作目录**的 —— 从 `services/api` 启动与从仓库根
+    启动会落到两个不同文件，而两个都写成功，用户以为历史丢了。
+    规范化的目的就是消除这个 CWD 依赖。
+
+    所以这里对这类键比对"规范化后的结果"。**这不是放松检查**：
+    键名映射写错时它照样会红（映射错就会落到另一个字段上）。
+    """
+
+    _NORMALIZED: ClassVar[dict[str, Callable[[str], object]]] = {
+        # 相对路径 → 项目根下的绝对路径（见 Settings._resolve_sqlite_path）
+        "DATABASE_URL": staticmethod(lambda raw: Settings._resolve_sqlite_path(raw)),
+    }
+
     def test_every_documented_key_is_readable(self) -> None:
         """文档里写了的键，代码必须真的读它（否则它是骗人的）。"""
         readable = _readable_keys()
@@ -143,6 +166,9 @@ class TestEnvExampleCoverage:
                 if raw == "":
                     continue  # 空值没有指纹，键存在性已由上一条测试覆盖
                 if _matches(actual, raw, field):
+                    continue
+                if self._NORMALIZED.get(key, lambda _raw: None)(raw) == actual:
+                    # 值被有意规范化（见类文档里的 _NORMALIZED 说明）
                     continue
                 mismatched.append(f"{key}={raw!r} → {outer or '(顶层)'}.{sub} 实际是 {actual!r}")
             assert not mismatched, "文档里的示例值与实际读到的值不一致：\n  " + "\n  ".join(
