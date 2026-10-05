@@ -1,0 +1,71 @@
+# -*- coding: utf-8 -*-
+# ============================================================
+# services/api 的运行时依赖锁（技术债 T21）
+# ============================================================
+#
+# 【这是什么】在**某一个具体环境**上求出的一个已知可用解
+# （known-good solution），不是"最新版本"清单。它记录的是
+# "装出来并且测试全绿的那一套"，所以它的价值在**可复现**，不在新。
+#
+# 【为什么要锁】本项目的证据是检索指标（Recall@k / MRR）。
+# scikit-learn / numpy / scipy 的小版本差异会改变 TF-IDF 与稀疏矩阵的
+# 行为，指标跟着漂移 —— 于是"指标变好了"就无法归因：可能是检索策略
+# 真的改好了，也可能只是依赖换了个版本。pyproject.toml 只写了下限，
+# 不锁的话，clone 之后装出来的版本取决于装的那一天。
+#
+# 【怎么重新生成】python scripts/lock_deps.py
+# 【怎么校验】    python scripts/lock_deps.py --check
+#                 （CI 用：有不一致就退出码非 0，并且不写文件）
+#
+# 求解环境：CPython 3.12.3 / Windows-11-10.0.26100-SP0
+#           上面这一行是**求解的地方**。带 marker 的依赖按那个平台算：
+#           在 Windows 上求出的 lock 不含 uvloop（它要 `sys_platform != "win32"`），
+#           所以 Linux 镜像里 uvicorn 走的是 asyncio 而不是 uvloop —— 能跑，
+#           但性能特性不同。换平台请**重新生成**，不要手工往这里加行。
+# 来源清单：services/api/pyproject.toml 的 [project].dependencies
+#           只含**运行时**传递闭包：dev / formats / fake-redis 这些 extras
+#           不在其中（它们只在开发机上需要，装进运行镜像纯属浪费）。
+#           要跑测试请另外装：pip install -e ".[dev]"
+#
+# 【为什么没有哈希】锁的是**版本**，不是字节。加 --hash 需要把每个包
+# （含 sdist）下载一遍，而本机网速 60–90 kB/s；本项目要防的是
+# "指标因为依赖版本漂移"，不是供应链投毒 —— 后者是另一个问题，
+# 该由别的机制解决，不该顺手塞进这份文件里。
+#
+# 包数：34（直接依赖 14 + 传递依赖 20）
+# ============================================================
+
+aiosqlite==0.22.1
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+click==8.5.0
+cloudpickle==3.1.2
+fastapi==0.141.1
+greenlet==3.5.5
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.19
+joblib==1.6.0
+narwhals==2.26.0
+numpy==2.5.3
+pydantic==2.13.5
+pydantic-core==2.46.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
+pyyaml==6.0.3
+redis==6.4.0
+scikit-learn==1.9.1
+scipy==1.18.1
+sqlalchemy==2.0.52
+sse-starlette==2.4.1
+starlette==1.6.0
+threadpoolctl==3.6.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+uvicorn==0.52.4
+watchfiles==1.2.0
+websockets==17.1

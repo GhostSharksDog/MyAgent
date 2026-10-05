@@ -52,24 +52,45 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /build
 
-# 先只复制依赖清单再装依赖，让这一层能被 Docker 缓存。
+# 先只复制**依赖清单**再装依赖，让这一层能被 Docker 缓存。
 # 如果和源码一起复制，那么改一行代码就会让"重装全部依赖"重新执行 ——
 # 这是 Docker 构建里最常见的、代价最大的缓存失效。
+#
+# requirements.lock 与 pyproject.toml 一起复制：它们都是"依赖清单"，
+# 任何一个变了都必须重装这一层（后者的作用见下面那段校验）。
 COPY services/api/pyproject.toml ./pyproject.toml
+COPY services/api/requirements.lock ./requirements.lock
 COPY services/api/README.md* ./
 
-# 只装第三方依赖，不装本项目（源码还没复制进来）。
+# 【T21：按 lock 装，而不是让 pip 在构建时去 PyPI 现场解析】
 #
-# 【这里踩过两个坑，都是"没构建过"才会留下的】
+# 原来这里是从 pyproject 读出依赖再 `pip install`，也就是**构建那一刻**
+# 才决定装哪些版本。后果是同一份代码、同一份 Dockerfile，今天构建和
+# 下周构建可能装到两个 scikit-learn —— 而本项目的证据是检索指标：
+# 指标跟着依赖版本漂移，"指标变好了"这件事就无法归因。
+# 现在装的是仓库里的那份**已知可用解**（在某台机器上装出来、测试全绿的组合），
+# 构建结果因此只由仓库内容决定。
+#
+# 【为什么装之前还要拿 pyproject 对一遍】
+# `pip install -r` 只发现得了"版本取不到"，发现不了"加了依赖却忘了
+# 重新生成 lock"：那种情况下镜像**照样构建成功**，一直到某个请求走进
+# 新依赖才 ModuleNotFoundError —— 在容器里、在运行期、离原因很远。
+# 所以这里先把 pyproject 声明的运行时依赖与 lock 对一遍，缺一个就让构建失败，
+# 让问题停在它的来源（清单）上。顺带说明为什么过滤掉项目自己的名字：
+# pyproject 里万一出现自引用，lock 里不会有它，而 pip 会跑去 PyPI
+# 找一个不存在的包（旧写法写死 `jobpilot` 时踩过这个坑）。
+#
+# 【为什么还是 `python -c` 一行，而不是 heredoc】
+# 这里踩过两个坑，都是"没构建过"才会留下的：
 #  1. 过滤自身依赖时写死了旧项目名 `jobpilot`，改名后那句话永远为真；
-#     现在从 pyproject 读项目名，改名不会再让它失效。
-#  2. 原来是 `RUN pip install ... $(python - <<'PY' … PY\n)` ——
+#     所以项目名必须从 pyproject 里读，不能写死。
+#  2. 原来试过 `RUN pip install ... $(python - <<'PY' … PY\n)` ——
 #     **Dockerfile 解析器直接报错**：`unknown instruction: )`。
 #     heredoc 只能作为 RUN 的整段内容，不能这样嵌在 `$( )` 命令替换里。
-#     改成"先生成 requirements.txt 再装"，两步都是最普通的 shell 写法；
-#     依赖层的缓存效果不变（这两步只依赖 pyproject.toml）。
-RUN python -c 'import pathlib,tomllib; p=tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]; n=p.get("name",""); pathlib.Path("/tmp/reqs.txt").write_text("\n".join(d for d in p.get("dependencies",[]) if not d.startswith(n)), encoding="utf-8")' \
- && pip install --prefix=/install -r /tmp/reqs.txt
+# 所以这里保持最普通的写法：一条 `python -c` + 一条 pip，中间用 `&&` 连起来，
+# 仍然是同一层、同一份缓存键。
+RUN python -c 'import pathlib,re,sys,tomllib; n=lambda s:re.sub("[-_.]+","-",s).lower(); k=lambda d:n(re.split(r"[<>=!~@;\[( ]",d)[0]); p=tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]; want={k(d) for d in p.get("dependencies",[]) if k(d)!=n(p.get("name",""))}; have={n(l.split("==")[0]) for l in pathlib.Path("requirements.lock").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}; lost=sorted(want-have); sys.exit("requirements.lock 没有覆盖这些运行时依赖（改了 pyproject 却忘了重新生成 lock？）："+", ".join(lost)) if lost else print("lock 覆盖了全部 %d 个运行时依赖"%len(want))' \
+ && pip install --prefix=/install -r requirements.lock
 
 # ------------------------------------------------------------
 FROM python:3.12-slim AS runtime
