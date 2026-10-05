@@ -1,39 +1,45 @@
 /**
- * 目录选择器：浏览服务端文件系统、挑一个目录作为工作区。
+ * 目录选择器：把"打开文件夹作为工作区"这件事做对。
  *
  * ============================================================
- * 为什么这个东西必须存在，而且必须能走出工作区
+ * 这里有两套交互，按**服务端声明的能力**二选一
  * ============================================================
- * 浏览器**没有服务端的文件夹对话框**。`<input type="file" webkitdirectory>`
- * 只能拿到文件、拿不到路径 —— 那是浏览器的安全设计，改不了。
  *
- * 所以"打开文件夹作为工作区"这件事只能由服务端列目录来支持。
- * 而这里有个绕不开的循环依赖：要选工作区，就必须能浏览工作区**之外**的目录，
- * 否则用户永远只能选当前工作区里面的文件夹。
+ *   native —— 宿主进程能弹出**系统**对话框。界面就是一个按钮，
+ *             点完直接拿回绝对路径，一步到位。
+ *   browse —— 宿主弹不出（远程浏览器访问、没有图形会话……）。
+ *             界面变成应用内的目录浏览面板。
  *
- * 于是这一条成了**刻意放宽、又刻意收窄**的权限：
- *     放宽：可以列出任意绝对路径下的目录结构
- *     收窄：**只列目录，不列文件、不读内容**
+ * 为什么不统一成一种？因为它们的适用条件不同，而**代价也是不对等的**：
  *
- * 界就是"选择工作区需要看到目录名，但不需要看到文件内容"。
- * 一句话能说清的权限，才不会在后续改动里被悄悄放宽。
+ *   浏览器自己弹不出返回绝对路径的对话框 —— `<input type="file" webkitdirectory>`
+ *   弹的确实是系统选择器，但拿到的每个文件只有 `webkitRelativePath`
+ *   （形如 `MyAgent/src/App.tsx`），**绝对路径被浏览器剥掉了**。
+ *   （File System Access API 也一样：它只给目录 handle，`handle.name` 是名字。）
+ *
+ * 所以"用浏览器对话框"这条路只能靠猜：拿名字去磁盘上反查。
+ * 有系统对话框时，那条路完全没必要 —— 它是兜底，不是主路。
  *
  * ============================================================
  * 为什么不用"输入路径"就够了
  * ============================================================
- * 设置面板里确实有一个路径输入框。但让人**凭记忆手打一个绝对路径**
- * 是很容易出错的：`D:/WXP/简历/MyAgent` 少一层、斜杠方向写反、
- * 中文字符 …… 而错了之后的表现是"文件功能没反应"，
- * 用户要对着错误提示猜自己哪里打错了。
- *
- * **能点就不要让人打。** 手输作为兜底保留（粘贴路径更快），
- * 但主路径应该是点选。
+ * 让人**凭记忆手打一个绝对路径**很容易出错：`D:/WXP/简历/MyAgent` 少一层、
+ * 斜杠写反、中文字符……而错了之后的表现是"文件功能没反应"，
+ * 用户只能对着错误提示猜自己哪里打错了。**能点就不要让人打。**
+ * 手输作为兜底保留（粘贴路径更快），但主路径是点选。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { browseDirectories, locateFolder } from '../lib/settings-api'
-import type { BrowseEntry, BrowseListing, LocateCandidate } from '../lib/types'
+import { resolvePickerView } from '../lib/picker'
+import type { PickerView } from '../lib/picker'
+import {
+  browseDirectories,
+  fetchPickerCapability,
+  locateFolder,
+  pickDirectory,
+} from '../lib/settings-api'
+import type { BrowseEntry, BrowseListing, LocateCandidate, PickerInfo } from '../lib/types'
 import { IconChevronRight, IconFolder, IconX } from './Icons'
 
 export interface FolderPickerProps {
@@ -48,10 +54,18 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
   const [listing, setListing] = useState<BrowseListing | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // 系统对话框选完之后，服务端可能找到多个同名目录，需要用户确认
+  // 系统对话框选完之后，服务端可能找到多个同名目录，需要用户确认（仅 browse 路径）
   const [candidates, setCandidates] = useState<LocateCandidate[] | null>(null)
   const [locating, setLocating] = useState(false)
+
+  // 能力：服务端说它能弹系统对话框，还是只能用应用内浏览
+  const [capability, setCapability] = useState<PickerInfo | null>(null)
+  const [capabilityError, setCapabilityError] = useState<string | null>(null)
+  // 系统对话框正开着（等用户操作）—— 这个状态可能持续几分钟
+  const [waitingDialog, setWaitingDialog] = useState(false)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const view = resolvePickerView(capability, capabilityError)
 
   const go = useCallback(async (path: string) => {
     setLoading(true)
@@ -73,22 +87,62 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
     setListing(null)
     setCandidates(null)
     setError(null)
+    setCapability(null)
+    setCapabilityError(null)
     void go('')
+
+    // 能力也重新问一次：服务可能在这期间换了绑定地址或重启过
+    let alive = true
+    fetchPickerCapability()
+      .then((info) => {
+        if (alive) setCapability(info)
+      })
+      .catch((err: unknown) => {
+        if (alive) setCapabilityError(err instanceof Error ? err.message : '无法确认目录选择能力')
+      })
+    return () => {
+      alive = false
+    }
   }, [open, go])
 
   /**
-   * 处理"用系统对话框选"的结果。
+   * 主路径：请宿主进程弹出**系统**对话框。
+   *
+   * 【为什么这里要一直等到用户点完】
+   * 这个请求是"用户节奏"的，可能要挂几分钟。等待期间按钮要禁用、
+   * 并且明确告诉用户"对话框已经弹出来了" —— 否则用户会以为卡住了
+   * 而反复点击（第二次点击会被服务端拒绝：同一个时刻只允许一个对话框）。
+   */
+  const handleServerDialog = useCallback(async () => {
+    setWaitingDialog(true)
+    setError(null)
+    setCandidates(null)
+    try {
+      const result = await pickDirectory()
+      if (result.path) {
+        onPick(result.path)
+      } else {
+        setError(result.hint || '已取消选择。')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '打开系统对话框失败')
+    } finally {
+      setWaitingDialog(false)
+    }
+  }, [onPick])
+
+  /**
+   * 兜底路径：用浏览器自己的文件夹选择器。
    *
    * 【为什么只能拿到文件夹名】
    * `<input type="file" webkitdirectory>` 弹的**就是系统文件夹选择器**，
    * 但浏览器出于隐私**剥掉了绝对路径**：每个文件只有 `webkitRelativePath`
-   * （形如 `MyAgent/src/App.tsx`）。任何网页都拿不到完整路径 ——
-   * 这是浏览器的设计，不是能绕过去的实现细节。
+   * （形如 `MyAgent/src/App.tsx`），而且只有 Chromium 系支持。
    *
    * 所以这里把名字和几条相对路径交给服务端反查：
    * **名字用来筛选，结构用来确认。**
    */
-  const handleNativePick = useCallback(
+  const handleBrowserPick = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return
       const first = files[0] as File & { webkitRelativePath?: string }
@@ -140,11 +194,12 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      // 系统对话框开着的时候，Esc 应该关的是那个对话框，而不是这个面板
+      if (event.key === 'Escape' && !waitingDialog) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, waitingDialog])
 
   if (!open) return null
 
@@ -169,22 +224,17 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
           </button>
         </header>
 
-        {/* ---------- 主路径：系统文件夹对话框 ---------- */}
-        <div className="picker__native">
-          <button
-            type="button"
-            className="btn btn--primary btn--block"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={locating}
-          >
-            {locating ? '正在定位…' : '用系统对话框选文件夹'}
-          </button>
-          {/*
-            这里放的是一个**真实存在但隐藏**的 input。
-            它弹出来的就是系统文件夹选择器 —— 但浏览器会剥掉绝对路径，
-            所以选中之后要拿"文件夹名 + 几条相对路径"回来请服务端反查。
-            这条限制写在下面的说明里，免得用户以为我们偷懒。
-          */}
+        {/* ---------- 主路径：由宿主进程弹出系统对话框 ---------- */}
+        <PickerPrimary
+          view={view}
+          waiting={waitingDialog}
+          locating={locating}
+          onServerDialog={() => void handleServerDialog()}
+          onBrowserDialog={() => fileInputRef.current?.click()}
+        />
+
+        {/* 浏览器选择器只在 browse 模式下才存在（native 模式下它是多余的） */}
+        {view.interaction === 'browse' && (
           <input
             ref={fileInputRef}
             type="file"
@@ -193,17 +243,11 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
             directory=""
             multiple
             style={{ display: 'none' }}
-            onChange={(e) => void handleNativePick(e.target.files)}
+            onChange={(e) => void handleBrowserPick(e.target.files)}
           />
-          <p className="picker__note picker__note--tight">
-            系统对话框只肯给出文件夹**名字**（浏览器隐私限制，任何网页都一样）。
-            我们会据名字和目录结构在你的磁盘上找回完整路径。
-            <br />
-            要是定位不到（或结果不对），用下面手动浏览 —— 那条路是**确定**的。
-          </p>
-        </div>
+        )}
 
-        {/* ---------- 多个同名目录时让用户确认 ---------- */}
+        {/* ---------- 多个同名目录时让用户确认（仅 browse 路径） ---------- */}
         {candidates && candidates.length > 0 && (
           <div className="picker__candidates">
             <p className="picker__candidates-title">
@@ -312,6 +356,94 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
           </div>
         </footer>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 主路径区块：按 `view.interaction` 渲染三种形态之一。
+ *
+ * 【为什么不"能弹就弹、不能弹再降级"】
+ * 降级（先渲染按钮，失败后换成面板）听起来更"自适应"，实际是把一个
+ * **启动时就确定的静态事实**变成了一次失败的用户操作。先问能力、
+ * 再渲染正确的形态，用户永远不会看到"点了一个没反应的按钮"。
+ */
+function PickerPrimary({
+  view,
+  waiting,
+  locating,
+  onServerDialog,
+  onBrowserDialog,
+}: {
+  view: PickerView
+  waiting: boolean
+  locating: boolean
+  onServerDialog: () => void
+  onBrowserDialog: () => void
+}) {
+  if (view.status === 'unavailable') {
+    return (
+      <div className="picker__native">
+        <p className="settings__alert settings__alert--bad">{view.reason}</p>
+        <p className="picker__note picker__note--tight">
+          下面的手动浏览目录仍然可用 —— 它不依赖系统对话框。
+        </p>
+      </div>
+    )
+  }
+
+  if (view.status === 'loading') {
+    return (
+      <div className="picker__native">
+        <p className="drawer__note">{view.reason}</p>
+      </div>
+    )
+  }
+
+  if (view.interaction === 'native') {
+    return (
+      <div className="picker__native">
+        <button
+          type="button"
+          className="btn btn--primary btn--block"
+          onClick={onServerDialog}
+          disabled={waiting}
+        >
+          {waiting ? '等待你在系统对话框中选择…' : '用系统对话框选文件夹'}
+        </button>
+        <p className="picker__note picker__note--tight">
+          {waiting ? (
+            <>
+              系统对话框已经弹出 —— 它在你的**桌面**上（可能被浏览器挡在后面）。
+              选好文件夹后这里会自动填上完整路径。
+            </>
+          ) : (
+            <>
+              对话框由**本机的 Legacy 服务**弹出，因此能拿到**完整路径** ——
+              浏览器自己做不到这一点（它只会给你文件夹的名字）。
+            </>
+          )}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="picker__native">
+      <button
+        type="button"
+        className="btn btn--primary btn--block"
+        onClick={onBrowserDialog}
+        disabled={locating}
+      >
+        {locating ? '正在定位…' : '用浏览器选择文件夹'}
+      </button>
+      <p className="picker__note picker__note--tight">
+        {view.reason}
+        <br />
+        浏览器只肯给出文件夹**名字**（这是它的隐私设计），所以我们会据名字和目录结构
+        在你的磁盘上找回完整路径。定位不到时，用下面手动浏览 —— 那条路是**确定**的。
+      </p>
     </div>
   )
 }

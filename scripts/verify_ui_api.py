@@ -98,7 +98,23 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
         r2 = c.get("/api/files/content", params={"path": ".env"})
         check(r2.status_code == 403, "即便在列表里可见，读取内容仍被拒绝")
 
-    print("\n=== 6. 恢复原状（不留副作用）===")
+    print("\n=== 6. 目录选择能力（这一条是新加的）===")
+    r = c.get("/api/files/picker")
+    check(r.status_code == 200, f"GET /api/files/picker → {r.status_code}")
+    if r.status_code == 200:
+        cap = r.json()
+        print(f"        能力 = {cap['kind']}")
+        print(f"        理由 = {cap['detail']}")
+        check(cap["kind"] in ("native", "browse"), "能力值是前端认识的那两种之一")
+        check(bool(cap["detail"]), "给出了人话理由（用户看不到对话框时最需要的就是它）")
+
+    # ⚠ 这里**刻意不调用** POST /api/files/pick：它会在你的屏幕上弹出真实对话框
+    # 并一直挂着等人操作。验证脚本可以自动做很多事，但"替用户点一个模态窗口"不行。
+    # 那个功能由 scripts/verify_picker_dialog.py 验证（从进程外枚举窗口 + 发 WM_CLOSE）。
+    r = c.post("/api/files/pick")
+    check(r.status_code == 422, f"不带 JSON 体调用 /pick 被拒绝 → {r.status_code}（CSRF 护栏）")
+
+    print("\n=== 7. 恢复原状（不留副作用）===")
     r = c.put("/api/settings", json={"workspace_root": ""})
     check(r.status_code == 200 and r.json()["agent"]["workspace_root"] == "", "已清空工作区配置")
 

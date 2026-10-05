@@ -19,17 +19,36 @@ Agent 读文件是把内容塞进**提示词**，用户只能从句子里推断�
 两者是不同用途：一个是给模型的上下文，一个是给人的界面。
 但**权限边界必须是同一条**，否则界面就成了绕过模型侧限制的后门
 （用户完全可以让 Agent 别读 .env，却自己在预览面板里点开它）。
+
+【这个文件里同时存在两套"选目录"的机制，不是历史包袱】
+
+    GET  /picker   问宿主：你能弹出系统对话框吗？（启动时采样一次的能力声明）
+    POST /pick     能弹 —— 宿主进程弹系统对话框，一次点击直接拿到绝对路径
+    GET  /browse   不能弹 —— 应用内浏览目录名（远程部署时的唯一选择）
+    POST /locate   browse 的兜底：用浏览器给的文件夹名反查磁盘路径
+
+它们的分工由 `capability().kind` 决定，前端只会渲染其中一种。
+"两套机制"听起来像冗余，但它们是**两种适用条件不同的交互**：
+宿主有屏幕时用第一种（准确、一步到位），没有屏幕时用第二种（到处能用）。
+判断只在启动时做一次，见 app/core/directory_picker.py。
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import get_settings
+from app.core.directory_picker import (
+    DirectoryPickerBusy,
+    DirectoryPickerUnavailable,
+    get_directory_picker,
+)
+from app.core.telemetry import METRICS
 from app.tools.files import (
     FileAccessError,
     _check_secret,
@@ -78,6 +97,115 @@ class WorkspaceInfo(BaseModel):
 # ============================================================
 # 目录选择器 —— 一条**与文件读取不同**的权限
 # ============================================================
+class PickerCapabilityView(BaseModel):
+    """宿主能提供哪种"选目录"的交互。
+
+    `kind=native` 时前端只渲染一个按钮（宿主进程弹**系统**对话框）；
+    `kind=browse` 时前端渲染应用内浏览面板。两种交互长得完全不一样，
+    所以前端必须先问、再决定渲染什么。
+    """
+
+    kind: str
+    # 人话解释"为什么是这一种"（绑定地址 / SSH / 显示会话……）
+    detail: str = ""
+
+
+@router.get("/picker", response_model=PickerCapabilityView, summary="目录选择能力")
+async def picker_capability() -> PickerCapabilityView:
+    """告诉前端"打开文件夹"该渲染成哪种交互。
+
+    【为什么让前端先问，而不是"点了再说"】
+    让前端去试（先按有对话框渲染，失败再换）会把一个**启动时就确定的静态事实**
+    变成一次失败的用户操作：用户点了一个按钮，什么也没发生。
+    能力先声明出来，界面就能一开始就长对的样子，并且能顺手说明原因。
+    """
+    cap = get_directory_picker().capability()
+    return PickerCapabilityView(kind=cap.kind, detail=cap.detail)
+
+
+class PickRequest(BaseModel):
+    """请求体刻意是空的。
+
+    【为什么要一个 JSON 请求体，而不是一个无参 POST】
+    `Content-Type: application/json` 会触发浏览器的 CORS 预检。第三方网页
+    因此**无法**让用户的浏览器悄悄发出这次调用（预检会被 allow_origin_regex
+    拒掉），而"无参 POST"属于简单请求、根本不预检。
+    这个接口的副作用是在用户屏幕上弹出窗口 —— 该挡的正是"谁能让它弹"。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PickResponse(BaseModel):
+    # 用户取消时为 None。前端据此区分"取消"（静默）与"出错"（要提示）
+    path: str | None = None
+    cancelled: bool = False
+    hint: str = ""
+
+
+@router.post("/pick", response_model=PickResponse, summary="弹出系统文件夹对话框")
+async def pick_directory(payload: PickRequest) -> PickResponse:
+    """让**宿主进程**弹出系统文件夹对话框，并把绝对路径带回来。
+
+    ============================================================
+    这是"打开文件夹"的唯一正解
+    ============================================================
+    网页永远拿不到绝对路径（`webkitdirectory` 只给文件夹名、
+    File System Access API 只给 handle 的 name），所以能拿到路径的只有
+    跑在用户这台机器上的进程。这条路一次点击就结束，不需要任何猜测。
+
+    （同目录的 `/locate` 是**旧方案**：从浏览器对话框拿到文件夹名，
+    再反查磁盘。它只在宿主弹不出对话框（browse 后端）时才作为兜底出现。）
+
+    ============================================================
+    这个请求是"用户节奏"的，不要给它加超时
+    ============================================================
+    同一份服务里其他接口都在几十毫秒内返回，而这个接口会一直挂着，
+    直到用户点完对话框 —— 可能是几秒，也可能是几分钟（他去接了个电话）。
+    **不能套用"超时就失败"的直觉**：误杀一个正开着的对话框，
+    用户看到的是"我明明选好了，它却说失败了"。
+
+    反过来，这里也**不需要**超时来防"卡死"：对话框是操作系统在管，
+    用户随时可以点取消；真的卡住了，用户关掉它就行。
+    """
+    picker = get_directory_picker()
+    cap = picker.capability()
+    if cap.kind != "native":
+        # 409 而不是 404：接口存在，只是这个部署没有这个能力。
+        # 带上 reason，前端就能直接把原因显示给用户，而不是"未知错误"。
+        raise HTTPException(
+            status_code=409,
+            detail=f"{DirectoryPickerUnavailable.code}：当前部署没有系统文件夹对话框。{cap.detail}",
+        )
+
+    logger.info("等待用户在宿主屏幕上选择目录……")
+    started = time.perf_counter()
+    try:
+        outcome = await picker.pick()
+    except (DirectoryPickerUnavailable, DirectoryPickerBusy) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    elapsed = time.perf_counter() - started
+    result = "error" if outcome.error else ("cancelled" if outcome.cancelled else "selected")
+    METRICS.inc("legacy_directory_pick_total", result=result)
+    # 这个直方图量的是**用户思考时间**，不是服务耗时 ——
+    # 它存在的意义是把"用户节奏"和"服务延迟"分开，免得有人看到
+    # 这条曲线的 P99 是几十秒就以为服务出了问题。
+    METRICS.observe("legacy_directory_pick_seconds", elapsed, result=result)
+
+    if outcome.error:
+        logger.warning("目录选择失败（%.1fs）：%s", elapsed, outcome.error)
+        raise HTTPException(status_code=500, detail=f"系统对话框出错：{outcome.error}")
+    if outcome.cancelled or not outcome.path:
+        logger.info("用户取消了目录选择（%.1fs）", elapsed)
+        return PickResponse(cancelled=True, hint="已取消选择，工作区未改变。")
+
+    # 路径只记 debug：它往往含有用户名等个人信息，INFO 日志会被长期留存
+    logger.info("用户选定了目录（%.1fs）", elapsed)
+    logger.debug("选中的目录：%s", outcome.path)
+    return PickResponse(path=outcome.path)
+
+
 class BrowseEntry(BaseModel):
     name: str
     path: str

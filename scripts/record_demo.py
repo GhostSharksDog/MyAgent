@@ -296,7 +296,10 @@ def main() -> int:
         r = subprocess.run(
             ["git", "check-ignore", str(out)],
             capture_output=True,
-            text=True,
+            # 显式 UTF-8，理由同 scan_history_pii.py：git 输出 UTF-8，
+            # 而 text=True 按本机区域编码解码会杀掉后台读取线程
+            encoding="utf-8",
+            errors="replace",
             cwd=ROOT,
         )
         ignored = "（已被 .gitignore 排除）" if r.returncode == 0 else "⚠ **未被 gitignore 排除**"

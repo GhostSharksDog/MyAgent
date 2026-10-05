@@ -137,6 +137,13 @@ class TestSandboxEscape:
                     ["cmd", "/c", "mklink", "/J", str(link), str(tmp_path / "outside")],
                     capture_output=True,
                     text=True,
+                    # 【为什么必须给 errors】
+                    # `text=True` 用的是**本机区域编码**，而 cmd 的输出编码跟着
+                    # 控制台代码页走。两者在 UTF-8 控制台（chcp 65001）下不一致 ——
+                    # 于是 pytest 会在一个**后台读取线程**里抛 UnicodeDecodeError，
+                    # 报成一个和测试毫无关系的 warning，而用例本身还是绿的。
+                    # 这里只关心退出码，所以有解码不掉的字节就替换掉。
+                    errors="replace",
                 )
                 created = r.returncode == 0
         if not created:
@@ -160,6 +167,7 @@ class TestSandboxEscape:
                     ["cmd", "/c", "mklink", "/J", str(link), str(sandbox.parent / "outside")],
                     capture_output=True,
                     text=True,
+                    errors="replace",  # 见上面那条注释（控制台代码页与区域编码可能不一致）
                 )
                 created = r.returncode == 0
         if not created:

@@ -34,6 +34,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import PROJECT_ROOT, get_settings
+from app.core.directory_picker import reset_directory_picker
 from app.rag.factory import reset_shared_retriever
 
 logger = logging.getLogger(__name__)
@@ -151,9 +152,14 @@ def _apply() -> None:
        表现是"改了没反应"，而这是最让人怀疑自己没保存的一类问题。
     2. 检索器是进程内共享的 —— 语料/工作区变了必须重建索引，
        否则新加的文档搜不到、去掉的文档还在被召回。
+
+    目录选择器也要跟着重建：它的能力是**启动时按宿主事实采样**的
+    （绑定地址、显示会话……），而那正是 pull 单例缓存的理由 ——
+    缓存了就必须在事实可能变化的地方清掉它。
     """
     get_settings.cache_clear()
     reset_shared_retriever()
+    reset_directory_picker()
 
 
 # ============================================================

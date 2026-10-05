@@ -18,6 +18,8 @@ import type {
   DirListing,
   LocateResponse,
   FileContent,
+  PickResult,
+  PickerInfo,
   SettingsUpdatePayload,
   SettingsView,
   TestConnectionResult,
@@ -110,6 +112,9 @@ export function browseDirectories(path = ''): Promise<BrowseListing> {
 /**
  * 用「文件夹名 + 若干相对路径」反查绝对路径。
  *
+ * ⚠ 这是**旧方案**，只在宿主弹不出系统对话框（browse 后端）时作为兜底出现。
+ * 有系统对话框时请用 `pickDirectory()` —— 那条路一步到位、不需要猜。
+ *
  * 【为什么需要绕这一圈】
  * `<input type="file" webkitdirectory>` 弹的是**系统**文件夹选择器，
  * 但浏览器出于隐私**剥掉了绝对路径** —— 网页只能拿到 `webkitRelativePath`
@@ -122,5 +127,40 @@ export function locateFolder(name: string, samples: string[]): Promise<LocateRes
   return request<LocateResponse>('/api/files/locate', {
     method: 'POST',
     body: JSON.stringify({ name, samples }),
+  })
+}
+
+// ============================================================
+// 系统文件夹对话框（宿主进程弹窗）
+// ============================================================
+/**
+ * 问服务端：你现在能弹出系统文件夹对话框吗？
+ *
+ * 【为什么先问再渲染，而不是"点了再说"】
+ * 这是一个**启动时就确定的静态事实**（服务绑定在哪张网卡、有没有图形会话）。
+ * 让前端去试会把一个可以直接说明的事实变成一次失败的用户操作 ——
+ * 用户点了一个按钮，然后什么也没发生。
+ */
+export function fetchPickerCapability(): Promise<PickerInfo> {
+  return request<PickerInfo>('/api/files/picker')
+}
+
+/**
+ * 让宿主进程弹出系统文件夹对话框，拿回**绝对路径**。
+ *
+ * 【为什么这里不能设超时】
+ * 这个请求会一直挂着，直到用户在系统对话框里点完 —— 可能是几秒，
+ * 也可能是几分钟（他去接了个电话）。给它套一个"XX 秒超时"的直觉是错的：
+ * 用户明明选好了，界面却报超时失败。`fetch` 默认没有超时，正合适。
+ *
+ * 【为什么要发一个空 JSON 体】
+ * 空 body 的 POST 属于 CORS 简单请求，任何第三方网页都能让浏览器发出它；
+ * 而带上 `Content-Type: application/json` 会触发预检，非本机的来源会被拒。
+ * 这个接口的副作用是**在用户屏幕上弹窗**，所以这一点是刻意的。
+ */
+export function pickDirectory(): Promise<PickResult> {
+  return request<PickResult>('/api/files/pick', {
+    method: 'POST',
+    body: JSON.stringify({}),
   })
 }

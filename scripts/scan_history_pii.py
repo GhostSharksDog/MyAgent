@@ -42,6 +42,33 @@ GENERIC_PATTERNS: dict[str, str] = {
 # 写在这里等于把要保护的东西和工具一起送出去
 TERMS_FILE = ROOT / "data" / "pii-terms.txt"
 
+# 【为什么必须跳过生成文件 —— 这是为了让报告还能被人看】
+#
+# `pnpm-lock.yaml` 里有 264 处邮箱命中，全部来自**第三方包的作者信息**
+# （npm 注册表元数据里就带着），一条都不是本项目作者的。
+#
+# 危险的不是这 264 条本身，而是它们的后果：一份几百行的报告会让人
+# 直接滚到底看结论，于是**真正的命中被淹没在噪音里**。
+# 一个"反正总是红的"的检查，等于没有检查 —— 这和 PII 扫描工具本身
+# 因编码问题静默崩溃是同一个结局，只是路径不同。
+#
+# 这些文件由工具生成、不由人编写，所以按文件名整体跳过（而不是按规则跳过：
+# 规则跳过会让同一个文件里的别的内容也失去保护）。
+_GENERATED_NAMES = {
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Cargo.lock",
+}
+
+
+def is_generated(path: str) -> bool:
+    """是否是"由工具生成、不由人编写"的文件（见 `_GENERATED_NAMES` 的说明）。"""
+    name = path.rsplit("/", 1)[-1]
+    return name in _GENERATED_NAMES or name.endswith(".min.js") or name.endswith(".min.css")
+
 
 def load_terms(path: Path) -> list[str]:
     if not path.exists():
@@ -54,14 +81,41 @@ def load_terms(path: Path) -> list[str]:
 
 
 def all_blobs() -> list[tuple[str, str]]:
-    """返回 [(object_id, path)]，覆盖所有提交里出现过的文件。"""
-    out = subprocess.run(
+    """返回 [(object_id, path)]，覆盖所有提交里出现过的文件。
+
+    【踩坑记录：`text=True` 会在这里把工具整个搞崩，而且报错指向别处】
+
+    `text=True` 用**本机区域编码**解码（这台机器是 GBK），而 git 输出的是
+    UTF-8（仓库里有中文路径，且 `core.quotePath=false` 时路径不会被转义）。
+    解码失败发生在 subprocess 的**后台读取线程**里，那个线程直接死掉，
+    于是 `proc.stdout` 变成 `None` —— 上面那句 `.stdout` 在下一行
+    `out.splitlines()` 处炸成一个 AttributeError：
+
+        AttributeError: 'NoneType' object has no attribute 'splitlines'
+
+    这个报错**完全没提编码**，指向的还是一个语法上没问题的表达式。
+    我是靠"扫一次历史看看"才发现自己的 PII 扫描工具本身早就跑不动了 ——
+    而跑不动的工具会让整条纪律（提交前必须扫）静默失效。
+
+    所以这里显式指定 UTF-8，并额外把"读取线程死掉"这种情况报成一句人话。
+    """
+    proc = subprocess.run(
         ["git", "rev-list", "--objects", "--all"],
         capture_output=True,
-        text=True,
+        encoding="utf-8",  # git 的输出是 UTF-8，与区域编码无关
+        errors="replace",  # 万一有转义/二进制字节，也不要让读取线程炸掉
         cwd=ROOT,
-        check=True,
-    ).stdout
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"git rev-list 失败（退出码 {proc.returncode}）：{(proc.stderr or '')[:300]}")
+    out = proc.stdout
+    if out is None:
+        # 只有"读取线程死了"会走到这里（见上面那段注释），报成明确的原因
+        raise SystemExit("无法读取 git 输出（子进程输出读取线程异常退出，通常是编码问题）")
+    if not out.strip():
+        raise SystemExit("git rev-list 没有输出 —— 这个仓库还没有任何提交？")
+
     pairs: list[tuple[str, str]] = []
     for line in out.splitlines():
         parts = line.split(" ", 1)
@@ -129,8 +183,13 @@ def main() -> int:
 
     findings: list[dict[str, str]] = []
     binary_skipped = 0
+    generated_skipped: set[str] = set()
 
     for oid, blob in contents.items():
+        path = path_of.get(oid, "?")
+        if is_generated(path):
+            generated_skipped.add(path)
+            continue
         try:
             text = blob.decode("utf-8")
         except UnicodeDecodeError:
@@ -140,7 +199,7 @@ def main() -> int:
             for m in re.finditer(pat, text):
                 findings.append(
                     {
-                        "path": path_of.get(oid, "?"),
+                        "path": path,
                         "oid": oid[:10],
                         "label": label,
                         # 【只报告位置，不报告命中内容】——
@@ -151,6 +210,8 @@ def main() -> int:
 
     if binary_skipped:
         print(f"（跳过 {binary_skipped} 个二进制 blob）\n")
+    if generated_skipped:
+        print(f"（跳过 {len(generated_skipped)} 个生成文件，如 lock 文件 —— 见 is_generated 的说明）\n")
 
     if not findings:
         print("[OK] 全历史未发现 PII")

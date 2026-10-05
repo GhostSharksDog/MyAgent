@@ -37,12 +37,16 @@ def git_hooks_dir() -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--git-path", "hooks"],
         capture_output=True,
-        text=True,
+        # 显式 UTF-8：`text=True` 默认按本机区域编码解码（中文 Windows 是 GBK），
+        # 而 git 输出 UTF-8。解码失败会**在后台读取线程里**抛异常并把 stdout
+        # 变成 None —— 报错指向"NoneType 没有 strip"，跟编码毫无关系。
+        encoding="utf-8",
+        errors="replace",
         cwd=ROOT,
         check=False,
     )
     if out.returncode != 0:
-        raise RuntimeError(f"不是 git 仓库或 git 不可用：{out.stderr.strip()}")
+        raise RuntimeError(f"不是 git 仓库或 git 不可用：{(out.stderr or '').strip()}")
     p = Path(out.stdout.strip())
     return p if p.is_absolute() else (ROOT / p)
 
@@ -76,7 +80,8 @@ def smoke_test(hook: Path) -> tuple[bool, str]:
         proc = subprocess.run(
             [str(hook)],
             capture_output=True,
-            text=True,
+            encoding="utf-8",  # 见 git_hooks_dir 的注释（区域编码 ≠ git 的 UTF-8）
+            errors="replace",
             cwd=ROOT,
             timeout=30,
             # 用 shell=False 直接执行，好让 Windows 按 shebang / PATHEXT 解析 ——

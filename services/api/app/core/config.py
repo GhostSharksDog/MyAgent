@@ -121,6 +121,21 @@ class AgentSettings(BaseSettings):
     # 单次目录列举上限，防止在一个几十万文件的目录上卡死
     file_max_entries: int = Field(default=500, gt=0)
 
+    # ---------- 目录选择器 ----------
+    # 界面上"打开文件夹"用哪种交互：
+    #   auto   —— 启动时按宿主事实自动判定（默认）
+    #   native —— 强制用系统对话框
+    #   browse —— 强制用应用内浏览
+    #
+    # 【为什么默认是 auto，而不是直接把 native 打开】
+    # native 只在"操作者就坐在这台机器的屏幕前"时才成立。服务一旦绑到
+    # 0.0.0.0、或跑在 SSH/容器里，系统对话框就会开在一台没人看的屏幕上 ——
+    # 用户点了按钮什么都不会发生，而且完全没有线索。
+    # auto 正是为了不让用户在这种情形下踩坑：判定含糊时一律退回 browse，
+    # 因为它到处都能用。两个值只用于"你确定自己在宿主屏幕前"的显式覆盖。
+    # 判定规则见 app/core/directory_picker.py（与 DSH 的 directory-picker-auto 一致）。
+    directory_picker: Literal["auto", "native", "browse"] = "auto"
+
     # ---------- 知识库数据源 ----------
     # 逗号分隔的额外文档路径（文件或目录）。**相对仓库根或绝对路径**。
     #
