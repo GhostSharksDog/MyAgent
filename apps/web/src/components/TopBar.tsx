@@ -174,7 +174,7 @@ export function TopBar({
           type="button"
           className="btn"
           onClick={onOpenSettings}
-          title="模型接入、知识库数据源、文件工作区"
+          title="外观与交互、模型供应商、Agent 身份、知识库、文件工作区"
         >
           <IconGear size={13} />
           设置

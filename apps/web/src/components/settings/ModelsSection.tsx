@@ -20,7 +20,7 @@
  *   让用户知道"这里已经有一把了"。
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useModels } from '../../hooks/useModels'
 import {
@@ -45,10 +45,21 @@ export function ModelsSection() {
   const [importName, setImportName] = useState('')
   const [showImport, setShowImport] = useState(false)
 
-  // 首次展开这一页时拉一次清单（不放在对话框打开时拉：用户可能只想改主题）
-  if (models.data === null && !models.loading && models.error === null) {
+  // 挂载时拉一次清单。
+  //
+  // 【为什么用 ref 而不是 `if (data === null) load()` 直接写在渲染体里】
+  // 那样写看着更短，但它是**在渲染期间发副作用**：`load()` 会同步 setLoading，
+  // 于是 React 在渲染一个组件的过程中更新另一个组件的状态，
+  // 轻则警告、重则"渲染 → 状态变化 → 再渲染"地打转。
+  // 一次性的副作用就该放在 effect 里，并用 ref 保证只跑一次。
+  //
+  // 只在**这一页**挂载时拉，而不是对话框一打开就拉：用户可能只想改主题。
+  const loaded = useRef(false)
+  useEffect(() => {
+    if (loaded.current) return
+    loaded.current = true
     void models.load()
-  }
+  }, [models.load])
 
   const errors = draft ? validateModelDraft(draft) : {}
   const ready = draft ? canSubmitDraft(draft) : false
