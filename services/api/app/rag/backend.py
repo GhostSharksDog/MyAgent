@@ -235,7 +235,7 @@ class RemoteKnowledgeBackend:
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=self._timeout,
-                headers={"User-Agent": "jobpilot-agent/0.1"},
+                headers={"User-Agent": "legacy-agent/0.1"},
             )
         return self._client
 

@@ -1,6 +1,6 @@
 # 01 · 大模型基本原理与推理部署
 
-> **这一篇写给谁**：写 JobPilot 的我自己，以及会翻这份文档的面试官。
+> **这一篇写给谁**：写 Legacy 的我自己，以及会翻这份文档的面试官。
 > **目标**：不是背概念，而是能在白板上把 attention 写出来、能手算 KV Cache 显存、能在「本机跑 7B」这种具体问题上给出可执行方案，并且在被追问「为什么」的时候答得下去。
 > **前置知识**：会写 Python，知道 softmax 和矩阵乘法，了解 HTTP API 基本形态。
 > **建议阅读时间**：90 分钟；面试前一天只看第 3、5、6、9 节。
@@ -707,13 +707,13 @@ PARAMETER num_ctx 16384
 PARAMETER temperature 0.3
 PARAMETER top_p 0.9
 EOF
-ollama create jobpilot-qwen -f Modelfile
+ollama create legacy-qwen -f Modelfile
 
 # 5. 起一个常驻服务（Ollama 自带 OpenAI 兼容 API）
 #    http://localhost:11434/v1/chat/completions
 curl http://localhost:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"jobpilot-qwen","messages":[{"role":"user","content":"你好"}]}'
+  -d '{"model":"legacy-qwen","messages":[{"role":"user","content":"你好"}]}'
 ```
 
 **注意 Ollama 的静默截断坑**：`num_ctx` 默认 2048，超长 prompt 会被**从中间截掉**而不报错，表现为「检索到了但模型答非所问」。RAG 项目里必须显式把它调到 8K-32K，并接受随之而来的显存/内存上涨。
@@ -756,7 +756,7 @@ vllm bench serve --model Qwen/Qwen2.5-7B-Instruct-AWQ \
 | `--gpu-memory-utilization` | 0.9 | 0.85-0.92 | 太高会和其它进程抢显存导致 OOM；太低浪费 |
 | `--max-num-seqs` | 256 | 8-32（消费级卡） | 消费级卡上 256 会让 KV 显存瞬间爆掉 |
 
-**前缀缓存对 RAG/Agent 的收益极大**：同一个长 system prompt + few-shot 示例，只要开了 `--enable-prefix-caching`，第二个请求起就免掉这段的 prefill。实测 TTFT 能从 800ms 降到 150ms 级别。**这是 JobPilot 这类 Agent 项目最值钱的一个优化。**
+**前缀缓存对 RAG/Agent 的收益极大**：同一个长 system prompt + few-shot 示例，只要开了 `--enable-prefix-caching`，第二个请求起就免掉这段的 prefill。实测 TTFT 能从 800ms 降到 150ms 级别。**这是 Legacy 这类 Agent 项目最值钱的一个优化。**
 
 **路线 C（无 NVIDIA 卡）：llama.cpp**
 
@@ -777,7 +777,7 @@ vllm bench serve --model Qwen/Qwen2.5-7B-Instruct-AWQ \
 因为 vLLM、Ollama、llama.cpp 都提供 **OpenAI 兼容接口**，后端代码可以完全不感知后端差异：
 
 ```python
-# app/llm/client.py —— JobPilot 的统一模型入口
+# app/llm/client.py —— Legacy 的统一模型入口
 from openai import AsyncOpenAI
 from app.core.config import settings
 
@@ -807,7 +807,7 @@ async def chat(messages, temperature=0.3, tools=None, stream=False):
 
 ## 7. Function Calling 在模型侧是怎么实现的
 
-Agent 项目（JobPilot 的核心）离不开工具调用，这块面试一定会问。
+Agent 项目（Legacy 的核心）离不开工具调用，这块面试一定会问。
 
 ### 7.1 整体链路
 
@@ -895,7 +895,7 @@ sequenceDiagram
 | 输出混入解释文字 | `好的，我来调用：{...}` | 用模型自带的 tool parser；或强约束 system prompt |
 | 循环调用同一个工具 | Agent 陷入死循环 | 应用侧硬性限制 `max_iterations`（建议 5-10）并注入「已调用 N 次，请给出结论」 |
 
-**必须写的三件事（JobPilot 的 tool 执行层）：**
+**必须写的三件事（Legacy 的 tool 执行层）：**
 
 ```python
 import json, re
@@ -1074,11 +1074,11 @@ RoPE 的频率是分层的：低维频率高（负责局部位置），在训练
 
 ---
 
-## 10. 落到 JobPilot 上的清单
+## 10. 落到 Legacy 上的清单
 
 把上面这些结论映射成项目里的具体动作：
 
-| 结论 | JobPilot 里的落地动作 | 状态 |
+| 结论 | Legacy 里的落地动作 | 状态 |
 | --- | --- | --- |
 | OpenAI 兼容协议解耦推理层 | `app/llm/client.py` 统一 client，`LLM_BASE_URL` 走环境变量 | 待做 |
 | Ollama 默认 `num_ctx=2048` 会静默截断 | Modelfile 显式设 `num_ctx 16384`，并在启动日志里打印实际 ctx | 待做 |
@@ -1091,7 +1091,7 @@ RoPE 的频率是分层的：低维频率高（负责局部位置），在训练
 
 **面试时的叙述模板（背下来）：**
 
-> 「JobPilot 的推理层我做了后端无关的抽象：本地用 Ollama 跑 Qwen2.5-7B 的 Q4_K_M 做开发，需要并发压测时切到 WSL2 里的 vLLM + AWQ INT4，线上可以换成任意 OpenAI 兼容 API，只改一个环境变量。因为我提前算了 KV Cache——7B GQA 模型单 token 全层 56KB，32K 上下文单条要 1.8GB——所以我知道消费级显卡上并发数是被 KV 显存而不是算力卡死的，据此设了 `max_num_seqs`。另外 Agent 场景前缀复用收益很大，我开了 prefix caching，TTFT 从 800ms 降到了 150ms 左右。」
+> 「Legacy 的推理层我做了后端无关的抽象：本地用 Ollama 跑 Qwen2.5-7B 的 Q4_K_M 做开发，需要并发压测时切到 WSL2 里的 vLLM + AWQ INT4，线上可以换成任意 OpenAI 兼容 API，只改一个环境变量。因为我提前算了 KV Cache——7B GQA 模型单 token 全层 56KB，32K 上下文单条要 1.8GB——所以我知道消费级显卡上并发数是被 KV 显存而不是算力卡死的，据此设了 `max_num_seqs`。另外 Agent 场景前缀复用收益很大，我开了 prefix caching，TTFT 从 800ms 降到了 150ms 左右。」
 
 这段话里有具体数字、有 tradeoff、有工程判断，比罗列名词有效得多。
 

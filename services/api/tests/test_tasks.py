@@ -431,8 +431,8 @@ class TestRedisQueue:
         queue = RedisTaskQueue(_fake_redis())
         record = await queue.submit("x")
         keys = await queue._redis.keys("*")  # type: ignore[attr-defined]
-        assert all(k.startswith("jobpilot:") for k in keys)
-        assert f"jobpilot:task:{record.id}" in keys
+        assert all(k.startswith("legacy:") for k in keys)
+        assert f"legacy:task:{record.id}" in keys
 
     async def test_pending_list_holds_task_id(self) -> None:
         queue = RedisTaskQueue(_fake_redis())

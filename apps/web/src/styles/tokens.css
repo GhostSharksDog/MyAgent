@@ -144,6 +144,8 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   --sidebar-width: 264px;
+  /* 右侧文件栏宽度。比会话栏宽一点：要显示文件名 + 大小 */
+  --files-width: 320px;
   --topbar-height: 52px;
   --content-max: 820px;
 }

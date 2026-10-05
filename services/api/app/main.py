@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(settings.log_level)
 
-    logger.info("启动 JobPilot API v%s（env=%s）", __version__, settings.app_env)
+    logger.info("启动 Legacy API v%s（env=%s）", __version__, settings.app_env)
 
     if not settings.llm.is_configured:
         logger.warning(
@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="JobPilot API",
+    title="Legacy API",
     description="求职/招聘 AI Agent —— 手写内核的 ReAct Agent 服务",
     version=__version__,
     lifespan=lifespan,
@@ -166,7 +166,7 @@ async def trace_middleware(request: Request, call_next: Callable[[Request], Any]
     except Exception:
         # 异常也要计入指标，否则"错误率"这条曲线永远是平的 ——
         # 而那恰恰是最需要被看到的曲线
-        METRICS.inc("jobpilot_http_requests_total", method=request.method, status="5xx")
+        METRICS.inc("legacy_http_requests_total", method=request.method, status="5xx")
         logger.exception("请求处理异常 %s %s", request.method, request.url.path)
         raise
     finally:
@@ -175,10 +175,10 @@ async def trace_middleware(request: Request, call_next: Callable[[Request], Any]
         # 带 id 的路径（/api/sessions/{id}）会让指标条数随会话数无限增长。
         # 这是 Prometheus 使用中最经典的事故。
         METRICS.inc(
-            "jobpilot_http_requests_total", method=request.method, status=f"{status // 100}xx"
+            "legacy_http_requests_total", method=request.method, status=f"{status // 100}xx"
         )
         METRICS.observe(
-            "jobpilot_http_duration_ms",
+            "legacy_http_duration_ms",
             duration_ms,
             method=request.method,
             status=f"{status // 100}xx",

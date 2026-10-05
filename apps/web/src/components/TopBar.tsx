@@ -40,6 +40,8 @@ export interface TopBarProps {
   onOpenFiles: () => void
   /** 文件功能是否可用（未配置工作区时按钮置灰并说明差什么） */
   filesAvailable: boolean
+  /** 右侧文件栏是否展开 —— 按钮要能显示激活态，否则用户不知道点了有没有生效 */
+  filesOpen: boolean
   onRefresh: () => void
   onCycleTheme: () => void
 }
@@ -69,6 +71,7 @@ export function TopBar({
   onOpenSettings,
   onOpenFiles,
   filesAvailable,
+  filesOpen,
   onRefresh,
   onCycleTheme,
 }: TopBarProps) {
@@ -90,7 +93,7 @@ export function TopBar({
           <IconPanelLeft size={15} />
         </button>
         <span className="topbar__mark">JP</span>
-        <span className="topbar__title">JobPilot</span>
+        <span className="topbar__title">Legacy</span>
         <span className="topbar__subtitle">手写 ReAct 内核 · Agent 控制台</span>
       </div>
 
@@ -153,8 +156,9 @@ export function TopBar({
             而置灰 + title 说明了"差什么才能用"，那是可操作的。 */}
         <button
           type="button"
-          className="btn"
+          className={filesOpen ? 'btn btn--primary' : 'btn'}
           onClick={onOpenFiles}
+          aria-pressed={filesOpen}
           title={
             filesAvailable
               ? '浏览工作区文件并预览'

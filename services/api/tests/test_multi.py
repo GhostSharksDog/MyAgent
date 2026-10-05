@@ -74,7 +74,7 @@ class SupervisorLLM:
             )
             return _resp(raw)
 
-        if "你是 JobPilot 的协调者" in prompt:
+        if "你是 Legacy 的协调者" in prompt:
             self.synthesis_calls += 1
             if self._synthesis_raises:
                 raise RuntimeError("汇总服务不可用")

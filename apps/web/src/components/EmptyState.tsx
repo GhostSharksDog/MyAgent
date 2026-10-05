@@ -39,7 +39,7 @@ export function EmptyState({ meta, health, onPick }: EmptyStateProps) {
         <div className="empty__brand">
           <span className="empty__mark">JP</span>
           <div>
-            <div className="empty__title">JobPilot · Agent 控制台</div>
+            <div className="empty__title">Legacy · Agent 控制台</div>
             <div className="empty__subtitle">
               手写 ReAct 内核的求职 Agent。每一次回答背后的推理步骤与工具调用都会实时展开在这里。
             </div>

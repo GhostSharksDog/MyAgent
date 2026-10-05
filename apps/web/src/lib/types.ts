@@ -392,3 +392,32 @@ export interface WorkspaceInfo {
   root: string
   reason: string
 }
+
+// ============================================================
+// 目录选择器（P6 布局改造）
+// ============================================================
+/**
+ * 目录选择器的返回。
+ *
+ * ⚠ 这个接口**可以走出工作区** —— 因为要选工作区，就必须先能看到它，
+ * 否则用户永远只能选当前工作区里面的文件夹（循环依赖）。
+ *
+ * 但它刻意**只返回目录**：没有文件名、没有内容。
+ * 界是"选择工作区需要看到目录名，但不需要看到文件内容"——
+ * 一句话能说清的权限，才不会在后续改动里被悄悄放宽。
+ */
+export interface BrowseEntry {
+  name: string
+  path: string
+  /** 子项数量，帮用户确认"就是这一层"，但不暴露文件名 */
+  child_count: number
+}
+
+export interface BrowseListing {
+  path: string
+  /** 上一级目录；到顶时为 null */
+  parent: string | null
+  entries: BrowseEntry[]
+  /** 未指定路径时返回的起点（Windows 是盘符，其它平台是主目录） */
+  roots: BrowseEntry[]
+}

@@ -162,7 +162,7 @@ async def _reindex_spammer(base_url: str, deadline: float, done: list[int]) -> N
 
 
 async def main() -> int:
-    ap = argparse.ArgumentParser(description="JobPilot 并发压测")
+    ap = argparse.ArgumentParser(description="Legacy 并发压测")
     ap.add_argument("--api-url", default="http://127.0.0.1:8000")
     ap.add_argument("--rag-url", default="http://127.0.0.1:8001")
     ap.add_argument("--concurrency", type=int, default=8)
@@ -176,7 +176,7 @@ async def main() -> int:
     args = ap.parse_args()
 
     print("=" * 68)
-    print("JobPilot 压测（单机本地，非生产能力数据）")
+    print("Legacy 压测（单机本地，非生产能力数据）")
     print("=" * 68)
     print(
         "\n⚠ 压测进程与被测服务在同一台机器上，并发越高、测出来的延迟越偏悲观。\n"

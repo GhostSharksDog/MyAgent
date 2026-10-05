@@ -37,7 +37,8 @@ import { EmptyState } from './components/EmptyState'
 import { MessageList } from './components/MessageList'
 import { Notice } from './components/Notice'
 import { SessionSidebar } from './components/SessionSidebar'
-import { FileBrowser } from './components/FileBrowser'
+import { FileSidebar } from './components/FileSidebar'
+import { FolderPicker } from './components/FolderPicker'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ToolsDrawer } from './components/ToolsDrawer'
 import { TopBar } from './components/TopBar'
@@ -69,18 +70,21 @@ export default function App() {
   const [draft, setDraft] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [filesOpen, setFilesOpen] = useState(false)
+  // 右侧文件栏是否展开。默认收起：不是每次对话都需要看文件，
+  // 但它是一条**常驻的一等区域**，展开后与对话并排，不遮挡。
+  const [fileSidebarOpen, setFileSidebarOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // 首次打开任一面板时拉一次设置 ——
   // 文件浏览需要知道"工作区配了没有"，设置面板需要当前值。
   // 放在 App 而不是各自组件里，是为了两个面板共享同一份数据：
   // 用户在设置里改完工作区，文件浏览器立刻能用，不用重开。
   useEffect(() => {
-    if (settingsOpen || filesOpen) void settings.load()
+    if (settingsOpen) void settings.load()
     // settings.load 是 useCallback 稳定的；不把 settings 整个放进来，
     // 否则每次渲染都会因为它返回新对象而重新触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsOpen, filesOpen, settings.load])
+  }, [settingsOpen, settings.load])
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow())
 
   /**
@@ -157,6 +161,28 @@ export default function App() {
   const workspaceConfigured =
     settings.saved != null && settings.saved.agent.workspace_root.trim() !== ''
 
+  /**
+   * 选中一个文件夹作为工作区。
+   *
+   * 【为什么选完自动展开文件栏】
+   * 用户选文件夹的目的就是"要看它"。选完还停在收起状态，等于要他再点一次 ——
+   * 而那个多余的动作会让人怀疑"我选上了吗"。
+   * **动作的结果应当立刻可见。**
+   */
+  const handlePickFolder = useCallback(
+    async (absolutePath: string) => {
+      setPickerOpen(false)
+      const ok = await settings.save({ workspace_root: absolutePath })
+      if (ok) setFileSidebarOpen(true)
+    },
+    [settings],
+  )
+
+  const handleCloseFolder = useCallback(async () => {
+    await settings.save({ workspace_root: '' })
+    setFileSidebarOpen(false)
+  }, [settings])
+
   const offline = server.offline
   const hasMessages = chat.items.length > 0
 
@@ -173,13 +199,18 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         onOpenTools={() => setToolsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenFiles={() => setFilesOpen(true)}
+        onOpenFiles={() => setFileSidebarOpen((v) => !v)}
+        filesOpen={fileSidebarOpen}
         filesAvailable={workspaceConfigured}
         onRefresh={handleRefresh}
         onCycleTheme={cycle}
       />
 
-      <div className="workspace" data-sidebar={sidebarOpen ? 'open' : 'collapsed'}>
+      <div
+        className="workspace"
+        data-sidebar={sidebarOpen ? 'open' : 'collapsed'}
+        data-files={fileSidebarOpen ? 'open' : 'collapsed'}
+      >
         <SessionSidebar
           sessions={sessions.sessions}
           backend={sessions.backend}
@@ -193,6 +224,11 @@ export default function App() {
           onRefresh={() => {
             void sessions.refresh()
           }}
+          workspaceRoot={settings.saved?.agent.workspace_root ?? ''}
+          fileSidebarOpen={fileSidebarOpen}
+          onOpenFolder={() => setPickerOpen(true)}
+          onCloseFolder={() => void handleCloseFolder()}
+          onToggleFileSidebar={() => setFileSidebarOpen((v) => !v)}
         />
 
         {sidebarOpen ? (
@@ -226,7 +262,7 @@ export default function App() {
                     <code className="mono">/healthz</code> 都会被转发到{' '}
                     <code className="mono">http://127.0.0.1:8000</code>。
                     若后端已在运行，请检查 <code className="mono">vite.config.ts</code> 里的代理目标
-                    （可用环境变量 <code className="mono">JOBPILOT_BACKEND</code> 覆盖）。
+                    （可用环境变量 <code className="mono">LEGACY_BACKEND</code> 覆盖）。
                   </div>
                 </div>
               </div>
@@ -318,13 +354,21 @@ export default function App() {
         settings={settings}
       />
 
-      <FileBrowser
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        configured={workspaceConfigured}
-        root={settings.saved?.agent.workspace_root ?? ''}
-        /* 未配置时引导到设置面板 */
-        onOpenSettings={() => setSettingsOpen(true)}
+      {/* 右侧常驻文件栏：与对话并排，不遮挡。见 FileSidebar 的说明 */}
+      {fileSidebarOpen && (
+        <FileSidebar
+          root={settings.saved?.agent.workspace_root ?? ''}
+          onClose={() => setFileSidebarOpen(false)}
+          onOpenFolder={() => setPickerOpen(true)}
+          onSwitchFolder={() => setPickerOpen(true)}
+        />
+      )}
+
+      <FolderPicker
+        open={pickerOpen}
+        current={settings.saved?.agent.workspace_root}
+        onClose={() => setPickerOpen(false)}
+        onPick={(p) => void handlePickFolder(p)}
       />
     </div>
   )

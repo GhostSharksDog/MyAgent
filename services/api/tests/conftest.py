@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 import pytest
@@ -57,6 +58,87 @@ def _set_corpus_paths(monkeypatch: pytest.MonkeyPatch, paths: str) -> None:
         settings.agent.model_copy(update={"corpus_paths": paths}),
         raising=False,
     )
+    reset_shared_retriever()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _hermetic_baseline() -> Iterator[None]:
+    """把 Agent 配置钉在一个确定的基线上，**不受开发者 `.env` 影响**。
+
+    ============================================================
+    这个夹具是为一次真实的、莫名其妙的失败加的
+    ============================================================
+    我把设置界面接好之后，"打开文件夹"的验证脚本往 `.env` 里写了一次工作区路径。
+    之后跑测试时：
+
+        FAILED test_tools.py::TestRegistry::test_general_profile_registers_only_core_tools
+
+    它断言通用形态只有 3 个核心工具 —— 而文件工具也被注册了，
+    因为 `.env` 里配了工作区，文件工具就会被加载。
+
+    **被测代码没有错，测试的口径也没错，错的是"测试读了开发者的机器配置"。**
+    这类失败最消耗人的地方在于：它看起来像功能坏了，而实际上"换台机器跑就绿了"——
+    于是你会去改本来没问题的代码。
+
+    ============================================================
+    为什么必须是**会话级**，而不是每个用例一个
+    ============================================================
+    我第一版写成了 function 级，结果 `test_tools` 绿了、三个 API 测试还是红的：
+
+        test_api.py:155: assert 7 == 3
+
+    因为那几个用例走的是**会话级**的 `client` 夹具 —— 它在任何 per-test 夹具
+    之前就把 app 建好了（lifespan 里读配置、注册工具），钉晚了就没用。
+
+    **钉基线的夹具必须比它要影响的对象的生命周期更长。** 这是个很容易踩的坑：
+    function 级夹具看起来"更规范"，但在这里根本来不及。
+
+    【为什么用 autouse】
+    需要这一层的用例是"绝大多数"，而漏加一个的代价是偶发的、依赖机器状态的失败。
+    默认生效、需要时显式覆盖（seeded_corpus / empty_corpus / test_file_tools 的
+    工作区夹具），比反过来安全。
+
+    ============================================================
+    为什么最后改成了**设环境变量**，而不是改 `settings` 实例
+    ============================================================
+    我前两版都在改 `get_settings()` 返回的那个对象（function 级 → session 级），
+    每一版都能让一部分用例变绿，但总有新的漏出来：
+
+        function 级 → test_tools 绿了，三个 API 用例还是红的（app 早建好了）
+        session 级  → API 用例绿了，test_tools / test_tasks 又红了
+
+    根因是 **`get_settings` 是 `lru_cache` 的，而 `test_settings_api.py` 的夹具
+    会调 `cache_clear()`** —— 那个调用把缓存连同我打在旧实例上的补丁一起丢掉，
+    下一次 `get_settings()` 会重新从 `.env` 读出一个**没被钉住的**实例。
+
+    所以补丁的位置错了：**改一个会被替换掉的对象，等于没改。**
+    改成设 `os.environ` 之后，无论实例被重建多少次、从哪读，
+    环境变量的优先级都高于 `.env`，基线始终成立。
+
+    这条经验值得记：**要钉住一个可重建的缓存对象，就去钉它的数据来源，
+    而不是钉它的某个副本。**
+    """
+    from app.core.config import get_settings
+    from app.rag.factory import reset_shared_retriever
+
+    baseline = {
+        "AGENT_PROFILE": "general",
+        "AGENT_WORKSPACE_ROOT": "",
+        "AGENT_CORPUS_PATHS": "",
+        "AGENT_CORPUS_INCLUDE_SEED": "false",
+    }
+    # 手动存取而不是 monkeypatch —— 后者是 function 级的，在 session 夹具里用不了
+    saved = {k: os.environ.get(k) for k in baseline}
+    os.environ.update(baseline)
+    get_settings.cache_clear()
+    reset_shared_retriever()
+    yield
+    for key, value in saved.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    get_settings.cache_clear()
     reset_shared_retriever()
 
 

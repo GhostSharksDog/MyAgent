@@ -211,7 +211,7 @@ async def healthz(request: Request) -> dict[str, object]:
 async def meta(request: Request) -> MetaResponse:
     settings = get_settings()
     return MetaResponse(
-        service="jobpilot-api",
+        service="legacy-api",
         version=__version__,
         env=str(settings.app_env),
         model=settings.llm.model,
@@ -319,7 +319,7 @@ def _client_key(request: Request) -> str:
 
 def _raise_429(bucket: TokenBucket, reason: str) -> None:
     wait = bucket.retry_after()
-    METRICS.inc("jobpilot_rate_limited_total", scope="chat")
+    METRICS.inc("legacy_rate_limited_total", scope="chat")
     raise HTTPException(
         status_code=429,
         detail=f"{reason}，请 {wait:.1f} 秒后重试。",

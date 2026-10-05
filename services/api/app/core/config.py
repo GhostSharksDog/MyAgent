@@ -382,7 +382,7 @@ class Settings(BaseSettings):
     tasks: TaskSettings = Field(default_factory=TaskSettings)
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
 
-    database_url: str = "sqlite+aiosqlite:///./data/jobpilot.db"
+    database_url: str = "sqlite+aiosqlite:///./data/legacy.db"
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_fake: bool = True
 

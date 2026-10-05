@@ -149,7 +149,7 @@ class SupervisorAgent:
 {menu}"""
 
     SYNTHESIS_PROMPT = """\
-你是 JobPilot 的协调者。下面几位专家分别给出了各自的分析。
+你是 Legacy 的协调者。下面几位专家分别给出了各自的分析。
 请把它们综合成一个**统一、连贯**的回答给用户。
 
 关键要求：

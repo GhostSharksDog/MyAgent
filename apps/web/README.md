@@ -1,11 +1,11 @@
-# JobPilot · Web 前端
+# Legacy · Web 前端
 
 Agent 控制台：流式对话 + **工具调用过程可视化的**界面。
 不是把回答渲染成气泡那么简单 —— 它要把 ReAct 循环的每一步摊开给人看。
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ JP JobPilot   deepseek-chat ● session a1b2c3d4 ▸ memory 存储 │
+│ JP Legacy   deepseek-chat ● session a1b2c3d4 ▸ memory 存储 │
 ├───────────────┬──────────────────────────────────────────────┤
 │ 会话          │  用户：帮我看看简历和这个 JD 匹配度            │
 │ ▸ 简历匹配 3轮 │  ┌ 思考过程 · 3 步 · 3 次工具调用 ──────────┐  │
@@ -35,7 +35,7 @@ pnpm dev            # http://localhost:5173
 开发期通过 vite 代理访问后端：`/api` 与 `/healthz` 都被转发到
 `http://127.0.0.1:8000`（见 `vite.config.ts`），所以没有跨域问题，前端代码里
 也**不出现任何绝对地址**。要指向别的后端时用 `VITE_API_BASE`（例如部署到
-独立域名），或设 `JOBPILOT_BACKEND` 改代理目标。
+独立域名），或设 `LEGACY_BACKEND` 改代理目标。
 
 ## 构建与测试
 

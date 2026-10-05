@@ -21,7 +21,7 @@ import { useCallback, useEffect, useState } from 'react'
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
 
-const STORAGE_KEY = 'jobpilot.theme'
+const STORAGE_KEY = 'legacy.theme'
 
 function readPreference(): ThemePreference {
   try {

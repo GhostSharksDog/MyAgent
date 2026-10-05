@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="JobPilot RAG Service",
+    title="Legacy RAG Service",
     description="独立的检索服务：向量 + BM25 混合召回、重排、索引重建",
     version="0.1.0",
     lifespan=lifespan,
@@ -130,7 +130,7 @@ async def trace_middleware(request: Request, call_next):  # type: ignore[no-unty
     started = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Trace-Id"] = get_trace_id()
-    METRICS.observe("jobpilot_rag_request_ms", (time.perf_counter() - started) * 1000)
+    METRICS.observe("legacy_rag_request_ms", (time.perf_counter() - started) * 1000)
     return response
 
 
@@ -140,7 +140,7 @@ async def healthz() -> dict[str, object]:
     stats = retriever.stats()
     return {
         "status": "ok",
-        "service": "jobpilot-rag",
+        "service": "legacy-rag",
         "chunks": stats.get("chunk_count", 0),
         "mode": stats.get("mode"),
         "reranker": stats.get("reranker"),

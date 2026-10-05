@@ -191,14 +191,14 @@ class RedisSessionStore(SessionStore):
     """Redis 会话存储。
 
     key 设计：
-        jobpilot:session:{id}      会话 JSON 字符串（带 TTL）
-        jobpilot:sessions:index    有序集合，score = updated_at
+        legacy:session:{id}      会话 JSON 字符串（带 TTL）
+        legacy:sessions:index    有序集合，score = updated_at
 
     加统一前缀是为了多环境共用同一个 Redis 时不互相踩。
     """
 
-    PREFIX = "jobpilot:session:"
-    INDEX_KEY = "jobpilot:sessions:index"
+    PREFIX = "legacy:session:"
+    INDEX_KEY = "legacy:sessions:index"
 
     def __init__(self, client: object, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> None:
         self._redis = client

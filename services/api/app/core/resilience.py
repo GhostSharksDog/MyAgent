@@ -194,7 +194,7 @@ class CircuitBreaker:
                     self._failure_threshold,
                     self._recovery_timeout,
                 )
-                METRICS.inc("jobpilot_circuit_open_total", circuit=self.name)
+                METRICS.inc("legacy_circuit_open_total", circuit=self.name)
 
     # ---------- 调用 ----------
 

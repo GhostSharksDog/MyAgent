@@ -25,7 +25,7 @@
 import { applyEvent, computeTurnView, emptyTurn } from '../src/lib/stream.ts'
 import { streamAgentEvents } from '../src/lib/sse.ts'
 
-const BASE = process.env.JOBPILOT_BACKEND ?? 'http://127.0.0.1:8000'
+const BASE = process.env.LEGACY_BACKEND ?? 'http://127.0.0.1:8000'
 const QUESTION = process.argv[2] ?? '我的简历里有没有消息队列相关的经验？请引用出处。'
 
 let failures = 0

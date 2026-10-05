@@ -93,8 +93,23 @@
 /* ---------- 主体 ---------- */
 .workspace {
   display: grid;
+  /* 三列：会话 | 对话 | 文件。
+     【为什么文件栏是独立一列，而不是对话区里的一块】
+     文件浏览不是"偶尔打开的功能"，而是与对话**并列的一等区域** ——
+     问 Agent"这个函数在哪定义的"时，你要一边看文件树一边看回答。
+     做成抽屉会把对话盖住，做成对话区内的一块又会被消息挤扁。
+     三列各占各的，是唯一能让两边同时可读的结构。 */
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 0;
+}
+
+.workspace[data-files='open'] {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--files-width);
+}
+
+/* 会话栏收起时，文件栏仍然要能开 */
+.workspace[data-sidebar='collapsed'][data-files='open'] {
+  grid-template-columns: 0 minmax(0, 1fr) var(--files-width);
 }
 
 .workspace[data-sidebar='collapsed'] {

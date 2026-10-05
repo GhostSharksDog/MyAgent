@@ -169,16 +169,16 @@ class TestMetricsRegistry:
 
     def test_prometheus_format(self) -> None:
         registry = MetricsRegistry()
-        registry.inc("jobpilot_http_requests_total", method="GET", status="2xx")
+        registry.inc("legacy_http_requests_total", method="GET", status="2xx")
         text = registry.render_prometheus()
-        assert 'jobpilot_http_requests_total{method="GET",status="2xx"} 1' in text
+        assert 'legacy_http_requests_total{method="GET",status="2xx"} 1' in text
         # 直方图必须输出 _bucket / _sum / _count 三件套，
         # 少任何一个 Prometheus 都算不出分位数
-        registry.observe("jobpilot_http_duration_ms", 42, method="GET")
+        registry.observe("legacy_http_duration_ms", 42, method="GET")
         text = registry.render_prometheus()
-        assert "jobpilot_http_duration_ms_bucket{" in text
-        assert "jobpilot_http_duration_ms_sum{" in text
-        assert "jobpilot_http_duration_ms_count{" in text
+        assert "legacy_http_duration_ms_bucket{" in text
+        assert "legacy_http_duration_ms_sum{" in text
+        assert "legacy_http_duration_ms_count{" in text
         assert 'le="+Inf"' in text
 
 
@@ -289,7 +289,7 @@ class TestAgentEventMetrics:
             ),
             mode="react",
         )
-        assert METRICS.counter("jobpilot_tool_calls_total", tool="search_knowledge", ok="true") == 1
+        assert METRICS.counter("legacy_tool_calls_total", tool="search_knowledge", ok="true") == 1
 
     def test_tool_failure_separate_label(self) -> None:
         """成功与失败必须是不同标签值 —— 混在一起就没法算成功率。"""
@@ -297,8 +297,8 @@ class TestAgentEventMetrics:
             _FakeEvent(type="tool_result", tool_name="t", tool_ok=False, duration_ms=5),
             mode="react",
         )
-        assert METRICS.counter("jobpilot_tool_calls_total", tool="t", ok="false") == 1
-        assert METRICS.counter("jobpilot_tool_calls_total", tool="t", ok="true") == 0
+        assert METRICS.counter("legacy_tool_calls_total", tool="t", ok="false") == 1
+        assert METRICS.counter("legacy_tool_calls_total", tool="t", ok="true") == 0
 
     def test_done_records_tokens(self) -> None:
         record_agent_event(
@@ -310,9 +310,9 @@ class TestAgentEventMetrics:
             ),
             mode="plan",
         )
-        assert METRICS.counter("jobpilot_llm_tokens_total", kind="prompt") == 100
-        assert METRICS.counter("jobpilot_llm_tokens_total", kind="completion") == 50
-        assert METRICS.counter("jobpilot_chat_requests_total", mode="plan", reason="finished") == 1
+        assert METRICS.counter("legacy_llm_tokens_total", kind="prompt") == 100
+        assert METRICS.counter("legacy_llm_tokens_total", kind="completion") == 50
+        assert METRICS.counter("legacy_chat_requests_total", mode="plan", reason="finished") == 1
 
     def test_budget_stop_recorded_as_distinct_reason(self) -> None:
         """max_steps 与 error 必须是不同的 reason 标签值。
@@ -324,10 +324,8 @@ class TestAgentEventMetrics:
             _FakeEvent(type="done", usage=None, steps_used=12, stopped_reason="max_steps"),
             mode="react",
         )
-        assert (
-            METRICS.counter("jobpilot_chat_requests_total", mode="react", reason="max_steps") == 1
-        )
-        assert METRICS.counter("jobpilot_chat_requests_total", mode="react", reason="error") == 0
+        assert METRICS.counter("legacy_chat_requests_total", mode="react", reason="max_steps") == 1
+        assert METRICS.counter("legacy_chat_requests_total", mode="react", reason="error") == 0
 
     def test_unknown_event_ignored(self) -> None:
         record_agent_event(_FakeEvent(type="some_future_event"), mode="react")
@@ -337,7 +335,7 @@ class TestAgentEventMetrics:
         record_agent_event(
             _FakeEvent(type="tool_result", tool_ok=True, duration_ms=1), mode="react"
         )
-        assert METRICS.counter("jobpilot_tool_calls_total", tool="unknown", ok="true") == 1
+        assert METRICS.counter("legacy_tool_calls_total", tool="unknown", ok="true") == 1
 
 
 # ============================================================
@@ -368,14 +366,14 @@ class TestTelemetryEndpoints:
         assert "task_backend" in body["components"]
         assert "tools" in body["components"]
         names = {c["name"] for c in body["counters"]}
-        assert "jobpilot_http_requests_total" in names
+        assert "legacy_http_requests_total" in names
 
     def test_prometheus_endpoint(self, client: TestClient) -> None:
         client.get("/healthz")
         response = client.get("/metrics")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/plain")
-        assert "jobpilot_http_requests_total" in response.text
+        assert "legacy_http_requests_total" in response.text
 
     def test_metrics_endpoint_has_no_cardinality_explosion(self, client: TestClient) -> None:
         """标签里不能出现具体路径或 id。

@@ -40,7 +40,7 @@ MAGENTA = "\033[35m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-BANNER = f"""{BOLD}{MAGENTA}JobPilot{RESET} {DIM}— 求职/招聘 AI Agent（手写 ReAct 内核）{RESET}
+BANNER = f"""{BOLD}{MAGENTA}Legacy{RESET} {DIM}— 求职/招聘 AI Agent（手写 ReAct 内核）{RESET}
 {DIM}输入问题开始对话；命令：/tools 查看工具，/clear 清空上下文，/exit 退出{RESET}
 """
 
@@ -74,7 +74,7 @@ class CLI:
 
     async def ask(self, question: str) -> None:
         print(f"\n{BOLD}{CYAN}你 ›{RESET} {question}")
-        print(f"{BOLD}{MAGENTA}JobPilot ›{RESET} ", end="", flush=True)
+        print(f"{BOLD}{MAGENTA}Legacy ›{RESET} ", end="", flush=True)
 
         final_text = ""
         error_text: str | None = None
@@ -99,7 +99,7 @@ class CLI:
                         print()
                         printed_tokens = False
                     self._render_tool_call(event.tool_name or "?", event.tool_args)
-                    print(f"{BOLD}{MAGENTA}JobPilot ›{RESET} ", end="", flush=True)
+                    print(f"{BOLD}{MAGENTA}Legacy ›{RESET} ", end="", flush=True)
 
                 case EventType.TOOL_RESULT:
                     self._render_tool_result(event.tool_ok, event.content, event.duration_ms)
@@ -181,7 +181,7 @@ def agent_tools_schemas(agent: Agent) -> list[dict[str, str]]:
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="JobPilot 命令行客户端")
+    parser = argparse.ArgumentParser(description="Legacy 命令行客户端")
     parser.add_argument("-q", "--question", help="单次提问后退出（非交互模式）")
     parser.add_argument("--show-raw", action="store_true", help="打印原始事件，便于排查")
     parser.add_argument(

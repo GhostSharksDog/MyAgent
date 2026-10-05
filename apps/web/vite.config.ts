@@ -23,7 +23,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 /** 后端地址：开发时用 `.\scripts\dev.ps1 serve` 起在 8000。 */
-const BACKEND = process.env.JOBPILOT_BACKEND ?? 'http://127.0.0.1:8000'
+const BACKEND = process.env.LEGACY_BACKEND ?? 'http://127.0.0.1:8000'
 
 /** 共享的代理选项。
  *

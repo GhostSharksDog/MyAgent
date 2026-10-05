@@ -1,5 +1,5 @@
 {
-  "name": "jobpilot-retrieval-public",
+  "name": "legacy-retrieval-public",
   "description": "可提交的公开评测集：锚点全部取自同样可提交的 seed/resume.sample.md 与 seed/jobs.json，不含任何个人隐私信息，且保证任何人都能 clone 后直接跑通。用户自己的评测集应放在 data/eval_set.local.json（已被 .gitignore 排除），脚本会优先使用它。",
   "queries": [
     {

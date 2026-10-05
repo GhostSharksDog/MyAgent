@@ -1,4 +1,4 @@
-# JobPilot · 求职/招聘 AI Agent
+# Legacy · 求职/招聘 AI Agent
 
 > 一个从零手写内核的全栈 Agent 项目：不依赖 LangChain 等框架的"黑盒"，
 > 把 **ReAct 循环、Tool Use、Planning、Memory、RAG** 逐层拆开实现，
@@ -8,7 +8,7 @@
 
 求职者面对的核心痛点是**信息不对称与重复劳动**：
 
-| 痛点 | JobPilot 的解法 | 依赖的技术 |
+| 痛点 | Legacy 的解法 | 依赖的技术 |
 |---|---|---|
 | 不知道自己简历和 JD 差在哪 | 简历 × JD 结构化匹配打分，给出差距清单 | LLM 结构化输出 + RAG |
 | 投递靠海投，无针对性 | 按 JD 自动改写简历要点、生成求职信 | Agent Tool Use + Planning |

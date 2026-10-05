@@ -48,7 +48,7 @@ def main() -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
-    parser = argparse.ArgumentParser(description="生成 JobPilot 的 .env 配置")
+    parser = argparse.ArgumentParser(description="生成 Legacy 的 .env 配置")
     parser.add_argument("--force", action="store_true", help="覆盖已存在的 .env")
     parser.add_argument("--base-url", default=None, help="覆盖 LLM_BASE_URL")
     parser.add_argument("--model", default=None, help="覆盖 LLM_MODEL")

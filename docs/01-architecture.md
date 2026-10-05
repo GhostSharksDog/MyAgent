@@ -1,4 +1,4 @@
-# JobPilot 架构设计
+# Legacy 架构设计
 
 > 本文档描述 **P1 阶段已经落地的真实架构**（不是设想），并给出到 P4 的演进依据。
 > 所有引用的文件与行号都可在仓库中直接打开核对。
@@ -580,7 +580,7 @@ graph LR
 
 > 有结果 ≠ 请求真的到达了那个进程
 
-实测：一次真实 `/api/chat` 让 RAG 服务的 `jobpilot_rag_request_ms_count` 从 13 涨到 16，返回的答案带 `[1]` 引用。这同时证明了四件事：HTTP 调用真实发生、语料在服务端被检索、引用标注跨进程回传、agent 进程没有偷偷走本地路径。
+实测：一次真实 `/api/chat` 让 RAG 服务的 `legacy_rag_request_ms_count` 从 13 涨到 16，返回的答案带 `[1]` 引用。这同时证明了四件事：HTTP 调用真实发生、语料在服务端被检索、引用标注跨进程回传、agent 进程没有偷偷走本地路径。
 
 `tests/test_service_split.py` 里的 `TestContractAgainstRealServer` 则用 `ASGITransport` 让**真实客户端**调用**真实服务端 app**：不起进程、不占端口，但完整走一遍 HTTP 序列化与状态码。这填上了"单体单元测试"与"线上联调"之间的那个缺口——只在两端各自 mock 的测试里，字段名不一致（客户端发 `top_k`、服务端读 `k`）会同时"全绿"。
 

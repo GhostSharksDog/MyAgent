@@ -6,16 +6,16 @@
     <meta name="color-scheme" content="dark light" />
     <meta
       name="description"
-      content="JobPilot —— 求职/招聘 AI Agent 控制台：流式对话 + 工具调用过程可见"
+      content="Legacy —— 求职/招聘 AI Agent 控制台：流式对话 + 工具调用过程可见"
     />
-    <title>JobPilot · Agent 控制台</title>
+    <title>Legacy · Agent 控制台</title>
     <script>
       /* 主题必须在**首次绘制之前**定下来，否则暗色页面会先闪一下白底。
          这就是所谓 FOUC。放在 <head> 里的同步脚本是唯一可靠的做法 ——
          React 挂载后再切主题永远晚了一帧。 */
       ;(function () {
         try {
-          var pref = localStorage.getItem('jobpilot.theme') || 'system'
+          var pref = localStorage.getItem('legacy.theme') || 'system'
           var light =
             pref === 'light' ||
             (pref === 'system' &&

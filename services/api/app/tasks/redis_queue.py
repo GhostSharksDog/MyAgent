@@ -4,8 +4,8 @@
 
 一个朴素的消息队列用 `LPUSH` + `BRPOP` 就够了：
 
-    生产：LPUSH jobpilot:tasks:pending <task_id>
-    消费：BRPOP jobpilot:tasks:pending 1
+    生产：LPUSH legacy:tasks:pending <task_id>
+    消费：BRPOP legacy:tasks:pending 1
 
 但 **BRPOP 在取走消息的瞬间就从 Redis 删除了它**。如果 worker 在
 "已取走、还没执行完"之间崩溃（进程被杀、机器断电），这条任务就**永久丢失**了，
@@ -48,14 +48,14 @@ class RedisTaskQueue(TaskQueue):
     """基于 Redis 的任务队列。
 
     key 设计：
-        jobpilot:task:{id}        任务记录（JSON 字符串，带 TTL）
-        jobpilot:tasks:pending    待处理队列（LIST）
-        jobpilot:tasks:index      任务索引（ZSET，score = created_at）
+        legacy:task:{id}        任务记录（JSON 字符串，带 TTL）
+        legacy:tasks:pending    待处理队列（LIST）
+        legacy:tasks:index      任务索引（ZSET，score = created_at）
     """
 
-    PREFIX = "jobpilot:task:"
-    PENDING_KEY = "jobpilot:tasks:pending"
-    INDEX_KEY = "jobpilot:tasks:index"
+    PREFIX = "legacy:task:"
+    PENDING_KEY = "legacy:tasks:pending"
+    INDEX_KEY = "legacy:tasks:index"
 
     def __init__(
         self,

@@ -14,6 +14,7 @@
 
 import { ApiError, apiUrl } from './api'
 import type {
+  BrowseListing,
   DirListing,
   FileContent,
   SettingsUpdatePayload,
@@ -89,4 +90,18 @@ export function listDirectory(path: string, includeHidden = false): Promise<DirL
 export function readFileContent(path: string): Promise<FileContent> {
   const q = new URLSearchParams({ path })
   return request<FileContent>(`/api/files/content?${q.toString()}`)
+}
+
+/**
+ * 浏览目录（选工作区用）。
+ *
+ * ⚠ 这个接口**可以走出工作区**，返回的是**目录名**。
+ *
+ * 理由：浏览器里没有服务端的文件夹对话框，要选工作区就必须能先看到它 ——
+ * 否则用户永远只能选当前工作区里面的文件夹。而它刻意只返回目录、
+ * 不返回文件名、不返回内容：**选择工作区需要看到目录名，但不需要看到文件内容。**
+ */
+export function browseDirectories(path = ''): Promise<BrowseListing> {
+  const q = new URLSearchParams({ path })
+  return request<BrowseListing>(`/api/files/browse?${q.toString()}`)
 }

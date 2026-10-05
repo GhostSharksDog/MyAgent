@@ -137,7 +137,7 @@ export function AssistantTurn({ item }: AssistantTurnProps) {
     <article className="turn">
       <header className="turn__head">
         <span className="turn__avatar">JP</span>
-        <span>JobPilot Agent</span>
+        <span>Legacy Agent</span>
         {streaming ? <span className="dot dot--live" /> : null}
         {item.restored ? (
           <span title="会话历史里只保存了问答文本，工具调用过程不会被持久化">

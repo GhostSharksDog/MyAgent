@@ -20,7 +20,7 @@ import { useState } from 'react'
 
 import { formatCompact, formatRelativeTime } from '../lib/format'
 import type { SessionSummary } from '../lib/types'
-import { IconPlus, IconRefresh, IconTrash } from './Icons'
+import { IconFolder, IconPlus, IconRefresh, IconTrash } from './Icons'
 
 export interface SessionSidebarProps {
   sessions: SessionSummary[]
@@ -31,6 +31,20 @@ export interface SessionSidebarProps {
   onCreate: () => void
   onDelete: (id: string) => void
   onRefresh: () => void
+
+  // ---------- 工作区（P6 布局改造） ----------
+  // 【为什么工作区入口放在会话栏，而不是顶栏或设置里】
+  // "打开文件夹"是一个**建立上下文**的动作，和"新建会话"是同一类事情：
+  // 它们都决定了接下来这场对话在什么范围内发生。
+  // 放在一起，用户一眼就能看懂"左边这块是管上下文的"。
+  //
+  // 而文件浏览是**使用**这个上下文的地方，所以它在右侧边栏常驻 ——
+  // 一处建立、一处使用，各归其位。
+  workspaceRoot: string
+  fileSidebarOpen: boolean
+  onOpenFolder: () => void
+  onCloseFolder: () => void
+  onToggleFileSidebar: () => void
 }
 
 export function SessionSidebar({
@@ -42,7 +56,13 @@ export function SessionSidebar({
   onCreate,
   onDelete,
   onRefresh,
+  workspaceRoot,
+  fileSidebarOpen,
+  onOpenFolder,
+  onCloseFolder,
+  onToggleFileSidebar,
 }: SessionSidebarProps) {
+  const hasWorkspace = workspaceRoot.trim() !== ''
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   return (
@@ -61,6 +81,56 @@ export function SessionSidebar({
           <IconRefresh size={13} className={loading ? 'spin' : undefined} />
         </button>
       </div>
+
+      {/* ---------- 工作区 ---------- */}
+      <div className="sidebar__section">
+        <div className="sidebar__section-head">
+          <span className="sidebar__heading">工作区</span>
+          {hasWorkspace && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--icon"
+              onClick={onToggleFileSidebar}
+              title={fileSidebarOpen ? '收起文件栏' : '展开文件栏'}
+              aria-pressed={fileSidebarOpen}
+            >
+              <IconFolder size={13} />
+            </button>
+          )}
+        </div>
+
+        {hasWorkspace ? (
+          <div className="ws">
+            <div className="ws__path" title={workspaceRoot}>
+              <IconFolder size={12} />
+              <span className="ws__name">{workspaceRoot.split(/[\\/]/).filter(Boolean).pop()}</span>
+            </div>
+            <div className="ws__full" title={workspaceRoot}>
+              {workspaceRoot}
+            </div>
+            <div className="ws__actions">
+              <button type="button" className="btn btn--ghost ws__btn" onClick={onOpenFolder}>
+                换一个
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost ws__btn ws__btn--danger"
+                onClick={onCloseFolder}
+                title="关闭工作区（Agent 将不能再读写文件）"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="ws__open" onClick={onOpenFolder}>
+            <IconFolder size={13} />
+            打开文件夹
+          </button>
+        )}
+      </div>
+
+      <div className="sidebar__divider" />
 
       <div className="sidebar__list">
         {sessions.length === 0 ? (

@@ -128,7 +128,7 @@ async def collect(
 # ============================================================
 class TestDirectAnswer:
     async def test_single_step_finishes(self) -> None:
-        agent, _ = make_agent([text_turn("你好，我是 JobPilot。")])
+        agent, _ = make_agent([text_turn("你好，我是 Legacy。")])
         events = await collect(agent, "你好")
 
         types = [e.type for e in events]
@@ -138,7 +138,7 @@ class TestDirectAnswer:
         assert EventType.TOOL_CALL not in types
 
         final = next(e for e in events if e.type == EventType.FINAL)
-        assert final.content == "你好，我是 JobPilot。"
+        assert final.content == "你好，我是 Legacy。"
 
     async def test_usage_aggregated(self) -> None:
         agent, _ = make_agent([text_turn("答案", tokens=30)])

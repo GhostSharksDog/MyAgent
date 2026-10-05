@@ -1,9 +1,9 @@
 {
-  "name": "@jobpilot/web",
+  "name": "@legacy/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "JobPilot 前端：流式对话 + 工具调用可视化的 Agent 控制台",
+  "description": "Legacy 前端：流式对话 + 工具调用可视化的 Agent 控制台",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

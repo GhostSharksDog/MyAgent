@@ -1,4 +1,4 @@
-﻿# JobPilot 开发任务脚本（Windows / PowerShell）
+﻿# Legacy 开发任务脚本（Windows / PowerShell）
 #
 # 【为什么需要它】
 # 本机有一组会互相干扰的环境设置，手工敲命令很容易踩坑：

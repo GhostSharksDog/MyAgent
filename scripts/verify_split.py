@@ -112,7 +112,7 @@ async def main() -> int:
         # ---------- 3. 走真实工具路径 ----------
         print("\n[3] Agent 工具路径（不注入后端 → 走工厂 → 走 HTTP）")
         before = _metric_count((await probe.get(f"{RAG_URL}/metrics")).text,
-                               "jobpilot_rag_request_ms")
+                               "legacy_rag_request_ms")
 
         tool = KnowledgeSearchTool(settings=settings)
         queries = [
@@ -135,7 +135,7 @@ async def main() -> int:
         # ---------- 4. 关键证据：请求真的到达了另一个进程 ----------
         print("\n[4] 关键证据：RAG 服务自己的指标")
         after = _metric_count((await probe.get(f"{RAG_URL}/metrics")).text,
-                              "jobpilot_rag_request_ms")
+                              "legacy_rag_request_ms")
         delta = after - before
         check(
             delta > 0,

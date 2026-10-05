@@ -1,7 +1,7 @@
 [project]
-name = "jobpilot-api"
+name = "legacy-api"
 version = "0.1.0"
-description = "JobPilot 求职/招聘 AI Agent —— 手写内核的 Agent 服务"
+description = "Legacy 求职/招聘 AI Agent —— 手写内核的 Agent 服务"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

@@ -374,3 +374,466 @@
   line-height: 1.8;
   color: var(--text);
 }
+
+
+/* ============================================================
+   工作区块（会话栏里）
+   ============================================================
+   【为什么放在会话栏而不是顶栏或设置里】
+   "打开文件夹"和"新建会话"是同一类动作：都是**建立上下文** ——
+   决定接下来这场对话在什么范围内发生。放在一起，用户一眼看懂
+   "左边这块管的是上下文"。
+   而文件浏览是**使用**这个上下文，所以在右侧边栏，一处建立一处使用。
+   ============================================================ */
+.sidebar__section {
+  padding: 10px 10px 8px;
+  flex: none;
+}
+
+.sidebar__section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sidebar__divider {
+  height: 1px;
+  margin: 0 10px 6px;
+  background: var(--border);
+  flex: none;
+}
+
+.ws__open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-2);
+  background: none;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.ws__open:hover {
+  color: var(--accent-text);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.ws {
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ws__path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ws__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws__full {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;      /* 从右往左截断：路径的关键部分在尾部 */
+  text-align: left;
+}
+
+.ws__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ws__btn {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+
+.ws__btn--danger:hover {
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+/* ============================================================
+   右侧文件边栏（常驻，不是抽屉）
+   ============================================================ */
+.fileside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.fileside__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.fileside__heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.fileside__root {
+  padding: 5px 10px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  flex: none;
+}
+
+.fileside__crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  flex: none;
+}
+
+.fileside__crumb-group {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3);
+}
+
+.fileside__crumb {
+  font-size: 11.5px;
+  padding: 1px 5px;
+}
+
+.fileside__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  flex: none;
+}
+
+.fileside__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.fileside__entries {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+
+.fileside__entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 7px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-2);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.fileside__entry:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.fileside__entry--active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.fileside__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileside__size {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 预览跟在列表下面而不是并排 —— 边栏本来就窄，再分两栏两边都读不了 */
+.fileside__preview {
+  margin: 8px 8px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.fileside__preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.fileside__code {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.65;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fileside__markdown {
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.fileside__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 14px;
+}
+
+.fileside__empty p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+/* ============================================================
+   目录选择器
+   ============================================================ */
+.picker {
+  width: min(620px, 92vw);
+  max-height: min(640px, 86vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+}
+
+.picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.picker__note {
+  margin: 0;
+  padding: 9px 16px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.picker__path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.picker__crumb {
+  font-size: 11.5px;
+  padding: 1px 6px;
+}
+
+.picker__crumb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.picker__crumb-text {
+  color: var(--text-2);
+}
+
+.picker__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.picker__entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.picker__entry:hover {
+  background: var(--surface-hover);
+}
+
+.picker__entry--current {
+  background: var(--accent-soft);
+}
+
+/* 点名字 = 进去看；点右侧按钮 = 就选它。
+   合成一个动作的话，用户想"进去确认一下"会变成"直接选中"。 */
+.picker__open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-2);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.picker__open:hover {
+  color: var(--text);
+}
+
+.picker__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__count {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.picker__pick {
+  flex: none;
+  font-size: 11.5px;
+  padding: 3px 10px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+/* "选它"平时隐藏、悬停才出现 ——
+   常驻会让列表变成两列按钮，反而看不清目录名 */
+.picker__entry:hover .picker__pick,
+.picker__entry:focus-within .picker__pick {
+  opacity: 1;
+}
+
+.picker__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  flex: none;
+}
+
+.picker__current {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* 窄屏下三列塞不下：文件栏浮在对话之上，用绝对定位而不是挤掉对话 */
+@media (max-width: 1180px) {
+  .workspace[data-files='open'] {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0;
+  }
+}

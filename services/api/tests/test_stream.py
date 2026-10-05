@@ -25,9 +25,9 @@ def _tc_delta(index: int, **fn: object) -> StreamDelta:
 class TestStreamAccumulator:
     def test_plain_text_concatenation(self) -> None:
         acc = StreamAccumulator()
-        for piece in ["你好", "，我是", " JobPilot"]:
+        for piece in ["你好", "，我是", " Legacy"]:
             acc.feed(StreamDelta(content=piece))
-        assert acc.content == "你好，我是 JobPilot"
+        assert acc.content == "你好，我是 Legacy"
         assert acc.tool_calls() is None
         assert acc.build_message().role == "assistant"
         assert acc.finish_reason == "stop"

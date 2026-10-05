@@ -151,7 +151,7 @@ class TestMetaEndpoints:
         r = client.get("/api/meta")
         assert r.status_code == 200
         body = r.json()
-        assert body["service"] == "jobpilot-api"
+        assert body["service"] == "legacy-api"
         assert body["tool_count"] == 3
         assert body["max_steps"] >= 1
 

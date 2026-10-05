@@ -203,8 +203,8 @@ class TestRedisStore:
         """加统一前缀：多环境共用同一个 Redis 时不会互相踩。"""
         session = await store.create()
         keys = await store._redis.keys("*")  # type: ignore[attr-defined]
-        assert all(k.startswith("jobpilot:") for k in keys)
-        assert f"jobpilot:session:{session.id}" in keys
+        assert all(k.startswith("legacy:") for k in keys)
+        assert f"legacy:session:{session.id}" in keys
 
     async def test_index_used_for_listing(self, store: RedisSessionStore) -> None:
         """列表按 ZSET 索引的分数（updated_at）倒序。

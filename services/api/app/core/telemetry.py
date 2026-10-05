@@ -327,12 +327,12 @@ METRICS = MetricsRegistry()
 # 指标命名遵循 Prometheus 约定：`<namespace>_<name>_<unit>`，
 # 计数器以 _total 结尾。统一命名不是洁癖 —— 它是让 Grafana 面板
 # 与告警规则可以按前缀批量匹配的前提。
-_M_TOKENS = "jobpilot_llm_tokens_total"
-_M_TOOLS = "jobpilot_tool_calls_total"
-_M_TOOL_LATENCY = "jobpilot_tool_duration_ms"
-_M_STEPS = "jobpilot_agent_steps"
-_M_REQUESTS = "jobpilot_chat_requests_total"
-_M_RUN_LATENCY = "jobpilot_chat_duration_ms"
+_M_TOKENS = "legacy_llm_tokens_total"
+_M_TOOLS = "legacy_tool_calls_total"
+_M_TOOL_LATENCY = "legacy_tool_duration_ms"
+_M_STEPS = "legacy_agent_steps"
+_M_REQUESTS = "legacy_chat_requests_total"
+_M_RUN_LATENCY = "legacy_chat_duration_ms"
 
 
 def record_agent_event(event: object, *, mode: str) -> None:
