@@ -86,6 +86,17 @@ class Tool(ABC):
     params_model: type[BaseModel]
     # 单次执行超时（秒）。防止某个工具卡住导致整个 Agent 永久挂起。
     timeout: float = 30.0
+    # 是否**不可并发**执行。默认 False = 可以和其他工具同时跑。
+    #
+    # 【为什么这个标志必须由工具自己声明，而不是由循环去猜】
+    # 同一个模型回合里的多个工具调用会被并发执行（延迟从 3T 降到 1T）。
+    # 这对**只读**工具是纯收益：读 A 和读 B 之间没有任何关系。
+    # 但对**有副作用**的工具不成立 —— 两个协程交错地写同一个文件、
+    # 或两次"发消息"，结果是不可复现的，而且只在"模型一次吐出多个调用"时出现。
+    #
+    # 判断"这个工具能不能并发"需要知道它内部在做什么，那是工具作者的知识，
+    # 不是循环能推断出来的。所以由工具声明，循环据此决定策略。
+    serial: bool = False
 
     @abstractmethod
     async def run(self, params: BaseModel) -> ToolResult:
@@ -267,6 +278,15 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return sorted(self._tools)
+
+    def is_serial(self, name: str) -> bool:
+        """这个工具是否声明了"不可并发"。
+
+        未知工具名返回 False（按可并发处理）：它马上会被当成"不存在的工具"
+        失败掉，既没有副作用，也没有必要为它把整段执行退回串行。
+        """
+        tool = self._tools.get(name)
+        return bool(tool is not None and tool.serial)
 
     def schemas(self) -> list[dict[str, Any]]:
         """给模型看的工具清单。为空时返回空列表（请求体里就不带 tools 字段）。"""

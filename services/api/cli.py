@@ -161,23 +161,20 @@ class CLI:
                     print(f"{DIM}[{tag}] {str(m.content)[:120]}{RESET}")
                 continue
             if line == "/tools":
-                for schema in agent_tools_schemas(self.agent):
-                    print(
-                        f"  {BOLD}{schema['name']}{RESET}\n    {DIM}{schema['description']}{RESET}"
-                    )
+                for brief in self.agent.tool_briefs:
+                    print(f"  {BOLD}{brief['name']}{RESET}\n    {DIM}{brief['description']}{RESET}")
                 continue
 
             await self.ask(line)
 
 
 def agent_tools_schemas(agent: Agent) -> list[dict[str, str]]:
-    """从 Agent 取出工具描述（用于 /tools 命令）。"""
-    tools = agent._tools
-    out: list[dict[str, str]] = []
-    for schema in tools.schemas():
-        fn = schema["function"]
-        out.append({"name": fn["name"], "description": fn["description"]})
-    return out
+    """从 Agent 取出工具描述（用于 /tools 命令）。
+
+    保留这个函数是为了不破坏既有调用点；它现在只是转发到 Agent 的只读属性。
+    原来它直接读 `agent._tools`（受保护成员），见 `Agent.tool_briefs` 的说明。
+    """
+    return agent.tool_briefs
 
 
 async def main() -> int:

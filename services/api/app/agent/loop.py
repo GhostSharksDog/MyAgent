@@ -21,13 +21,15 @@ ReAct = Reasoning + Acting。核心思想是让模型交替进行「推理」和
 调用工具几十次，单次请求成本从 0.01 元变成 3 元。max_steps 就是保险丝。
 
 【并发说明】
-本版本工具**串行**执行。模型一次返回多个 tool_calls 时，串行最简单也最好懂。
-但如果多个工具互不依赖（如同时查三个城市的岗位），并发执行能把延迟
-从 3×T 降到 1×T —— 这是 P3 的优化项，届时会用 asyncio.gather 改造。
+同一个模型回合里的多个工具调用**并发**执行（延迟从 3×T 降到 1×T），
+上限见 `AgentSettings.tool_concurrency`。三条边界保证它不会改变行为语义：
+结果仍按模型给出的顺序回灌、单个工具失败只影响自己、
+声明了 `Tool.serial` 的工具会让整个回合退回串行。
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -39,7 +41,7 @@ from app.agent.prompts import build_system_prompt
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
 from app.llm.types import ChatMessage, ToolCall, Usage
-from app.tools.base import ToolRegistry
+from app.tools.base import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -171,14 +173,14 @@ class Agent:
                         yield AgentEvent(type=EventType.TOKEN, step=step, content=delta.content)
             except Exception as exc:
                 logger.exception("第 %d 步模型调用失败", step)
-                yield AgentEvent(type=EventType.ERROR, step=step, content=str(exc))
-                yield AgentEvent(
-                    type=EventType.DONE,
-                    step=step,
+                for event in self._finish(
+                    stopped_reason="error",
                     steps_used=step,
                     usage=total_usage,
-                    stopped_reason="error",
-                )
+                    step=step,
+                    error=str(exc),
+                ):
+                    yield event
                 return
 
             total_usage = total_usage + accumulator.usage
@@ -203,13 +205,13 @@ class Agent:
                     self._memory.add_turn(user_input, answer)
 
                 yield AgentEvent(type=EventType.FINAL, step=step, content=answer)
-                yield AgentEvent(
-                    type=EventType.DONE,
-                    step=step,
+                for event in self._finish(
+                    stopped_reason="finished",
                     steps_used=step,
                     usage=total_usage,
-                    stopped_reason="finished",
-                )
+                    step=step,
+                ):
+                    yield event
                 return
 
             # ---------- 3. 死循环检测 ----------
@@ -224,14 +226,14 @@ class Agent:
                         f"建议换一种问法，或补充更多信息。"
                     )
                     logger.warning(msg)
-                    yield AgentEvent(type=EventType.ERROR, step=step, content=msg)
-                    yield AgentEvent(
-                        type=EventType.DONE,
-                        step=step,
+                    for event in self._finish(
+                        stopped_reason="loop_detected",
                         steps_used=step,
                         usage=total_usage,
-                        stopped_reason="loop_detected",
-                    )
+                        step=step,
+                        error=msg,
+                    ):
+                        yield event
                     return
 
             # ---------- 4. 预算检查：最后一步的工具调用没有意义 ----------
@@ -242,6 +244,28 @@ class Agent:
                 break
 
             # ---------- 5. 执行工具 ----------
+            #
+            # 【为什么并发，以及并发的三条边界】
+            # 一个模型回合里可能有多个互不依赖的调用（"看看 A，再看看 B"）。
+            # 串行执行让延迟线性叠加：3 个各 1 秒的工具就是 3 秒，而它们之间
+            # 没有任何数据依赖 —— 这是本项目最容易拿到的性能收益。
+            #
+            # 并发要成立，必须同时守住三件事：
+            #   1. **结果顺序不变**：回灌给模型的 tool 消息仍按 tool_calls 的
+            #      原始顺序排列。协议只要求 tool_call_id 能对上，但顺序决定了
+            #      上下文里"先做了什么"的叙事，也让同样的输入产生同样的上下文 ——
+            #      并发不该让行为变得不可复现。
+            #   2. **失败隔离**：一个工具出问题只影响它自己。`gather` 在这里用
+            #      真值而不是 return_exceptions=True，因为每条调用都已经被
+            #      `_execute_one` 包住并转成了 ToolResult —— 隔离发生在那里，
+            #      而 CancelledError 是 BaseException，不会被吞掉，
+            #      所以"用户断开连接"仍然能立刻取消整批工具。
+            #   3. **有上限**：见 config.py 的 tool_concurrency。
+            #
+            # 【有副作用的工具会让整个回合退回串行】
+            # 只要本回合里有任何一个调用命中声明了 `serial` 的工具，就不并发。
+            # 混合策略（只读并发、写入串行）需要调度保证，而这个循环给不出 ——
+            # 与其写一个"大部分情况下正确"的聪明策略，不如写一个显然正确的笨策略。
             for call in tool_calls:
                 yield AgentEvent(
                     type=EventType.TOOL_CALL,
@@ -250,8 +274,14 @@ class Agent:
                     tool_args=call.arguments,
                 )
 
-                result = await self._tools.execute(call)
+            if any(self._tools.is_serial(call.name) for call in tool_calls):
+                logger.debug("第 %d 步含不可并发的工具，整段串行执行", step)
+                results = [await self._execute_one(call) for call in tool_calls]
+            else:
+                results = await self._execute_batch(tool_calls)
 
+            # 按**原始顺序**回灌（不是完成顺序）—— 见上面第 1 条
+            for call, result in zip(tool_calls, results, strict=True):
                 tool_trace.append(
                     {
                         "step": step,
@@ -288,13 +318,108 @@ class Agent:
             f"已调用工具：{'、'.join(str(t['name']) for t in tool_trace) or '无'}。"
         )
         logger.warning(msg)
-        yield AgentEvent(type=EventType.ERROR, content=msg, steps_used=self._s.max_steps)
-        yield AgentEvent(
-            type=EventType.DONE,
+        for event in self._finish(
+            stopped_reason="max_steps",
             steps_used=self._s.max_steps,
             usage=total_usage,
-            stopped_reason="max_steps",
+            error=msg,
+        ):
+            yield event
+        return
+
+    # ============================================================
+    # 只读视图
+    # ============================================================
+    @property
+    def tool_briefs(self) -> list[dict[str, str]]:
+        """已注册工具的简表（名字 + 描述），给 CLI 的 `/tools` 用。
+
+        【为什么要专门开一个只读入口，而不是让调用方读 `agent._tools`】
+        原来的 CLI 直接读 `agent._tools`（技术债 T12）。代价不是"不优雅"，
+        而是**Agent 一旦调整内部结构就会连带改坏 CLI，而这种破坏不会出现在
+        Agent 自己的测试里** —— 它会在别人运行 CLI 时以 AttributeError 的形式出现。
+
+        暴露一个只读入口之后，内部怎么存（注册表？字典？懒加载？）
+        就成了 Agent 自己的事。这也是"接口比实现小"的一个具体例子。
+        """
+        out: list[dict[str, str]] = []
+        for schema in self._tools.schemas():
+            fn = schema["function"]
+            out.append({"name": str(fn["name"]), "description": str(fn["description"])})
+        return out
+
+    # ============================================================
+    # 工具执行
+    # ============================================================
+    async def _execute_one(self, call: ToolCall) -> ToolResult:
+        """执行一次工具调用，并把**任何**异常都转成失败的观察结果。
+
+        【为什么这里还要兜一层】
+        `ToolRegistry.execute` → `Tool.execute` 已经把参数校验失败、超时、
+        工具内部异常都转成了 ToolResult。但"工具层之上"仍然可能出错
+        （注册表被替换、工具对象本身有 bug）。串行时这种异常会直接抛出，
+        与"工具失败"的区分还算清楚；**并发之后不一样了**：
+        gather 遇到异常会取消同批的其他调用，于是一个工具的小毛病
+        会让同一批里本来能成功的调用一起失败 —— 失败的传播范围被放大了。
+
+        所以并发路径上必须有这一层，把异常就地收敛成"这一条失败了"。
+        `CancelledError` 不在捕获范围内（它继承 BaseException）：用户断开
+        连接时必须能立刻取消整批工具，而不是把它们一个个跑完。
+        """
+        try:
+            return await self._tools.execute(call)
+        except Exception as exc:
+            logger.exception("工具 %s 执行时抛出未处理异常", call.name)
+            return ToolResult.failure(f"工具 {call.name} 执行时发生未预期错误：{exc}")
+
+    async def _execute_batch(self, calls: Sequence[ToolCall]) -> list[ToolResult]:
+        """并发执行一批工具调用，返回**与入参同序**的结果。"""
+        limit = max(1, min(self._s.tool_concurrency, len(calls)))
+        gate = asyncio.Semaphore(limit)
+
+        async def guarded(call: ToolCall) -> ToolResult:
+            async with gate:
+                return await self._execute_one(call)
+
+        return list(await asyncio.gather(*(guarded(call) for call in calls)))
+
+    # ============================================================
+    # 终结事件
+    # ============================================================
+    def _finish(
+        self,
+        *,
+        stopped_reason: str,
+        steps_used: int,
+        usage: Usage,
+        step: int = 0,
+        error: str | None = None,
+    ) -> list[AgentEvent]:
+        """一个轮次的**终结事件序列**：可选的 error + 必定有的 done。
+
+        【为什么必须收敛到一处】
+        原来是四个 return 分支各自手写"先 error 再 done"。这个约定只存在于
+        写代码的人的脑子里，而它有两个后果：
+          · 新增一个终止分支时漏发 done → 前端一直转圈等一个永远不来的终态，
+            而且**不会有任何报错**（它只是在等）；
+          · 反过来多发一个 done → 调用方可能把中间状态当成结束。
+
+        现在所有出口都必须经过这里，`done` 的存在成了结构性事实而不是纪律。
+        对应的回归测试见 test_agent_loop.py 的"终态不变量"。
+        """
+        events: list[AgentEvent] = []
+        if error:
+            events.append(AgentEvent(type=EventType.ERROR, step=step, content=error))
+        events.append(
+            AgentEvent(
+                type=EventType.DONE,
+                step=step,
+                steps_used=steps_used,
+                usage=usage,
+                stopped_reason=stopped_reason,
+            )
         )
+        return events
 
     # ============================================================
     # 主入口 B：非流式（给程序调用 / 测试用）

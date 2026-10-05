@@ -15,6 +15,7 @@ Agent 的行为由"模型在每一步返回什么"决定。把模型换成脚本
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -649,6 +650,277 @@ class TestLastStepEconomy:
         result = await agent.run("x")
         assert result.stopped_reason == "finished"
         assert len(fake.received) == 2
+
+
+# ============================================================
+# 场景 11：同一回合里的多个工具调用（并发执行）
+# ============================================================
+class _NoParams(BaseModel):
+    """空参数模型 —— 这几个工具只关心"什么时候开始、睡多久"。"""
+
+
+def multi_tool_turn(calls: list[tuple[str, dict[str, Any]]]) -> list[StreamDelta]:
+    """一次请求**多个**工具调用的响应（一个 delta 里带多个 index）。
+
+    这也顺带覆盖了 T13 修过的那条路径：一个 chunk 携带多个分片时不能只取 [0]。
+    """
+    import json
+
+    deltas = [
+        {
+            "index": i,
+            "id": f"call_{i}",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        }
+        for i, (name, args) in enumerate(calls)
+    ]
+    return [
+        StreamDelta(tool_call_deltas=deltas),
+        StreamDelta(
+            finish_reason="tool_calls",
+            usage=Usage(prompt_tokens=40, completion_tokens=10, total_tokens=50),
+        ),
+    ]
+
+
+class _SleepTool(Tool):
+    """睡一会儿的工具：用来把"并发/串行"从时序上量出来。
+
+    它是这个测试文件里唯一带真实等待的工具 —— 因为并发与否**只能从耗时观测**，
+    断言"结果对"是查不出串行的（串行也会得到正确结果，只是慢）。
+    """
+
+    params_model = _NoParams
+
+    def __init__(self, name: str, delay: float, *, serial: bool = False, boom: bool = False) -> None:
+        self.name = name
+        self.description = f"sleep {delay}s"
+        self.timeout = 5.0
+        self.serial = serial
+        self.delay = delay
+        self.boom = boom
+        self.started: list[float] = []
+
+    async def run(self, params: BaseModel) -> ToolResult:
+        self.started.append(asyncio.get_running_loop().time())
+        await asyncio.sleep(self.delay)
+        if self.boom:
+            raise ToolError("这个工具故意炸了")
+        return ToolResult.success(f"{self.name} 完成")
+
+
+def _sleep_registry(
+    delay: float = 0.25, *, serial: bool = False, boom: str | None = None
+) -> tuple[ToolRegistry, dict[str, _SleepTool]]:
+    registry = ToolRegistry()
+    made: dict[str, _SleepTool] = {}
+    for name in ("alpha", "beta", "gamma"):
+        tool = _SleepTool(name, delay, serial=serial, boom=(name == boom))
+        made[name] = tool
+        registry.register(tool)
+    return registry, made
+
+
+async def _timed_run(agent: Agent, question: str) -> tuple[list[Any], float]:
+    started = asyncio.get_running_loop().time()
+    events = await collect(agent, question)
+    return events, asyncio.get_running_loop().time() - started
+
+
+class TestConcurrentTools:
+    async def test_independent_tools_overlap(self) -> None:
+        """三个互不依赖的工具应当**重叠**执行，而不是排队。
+
+        串行是 3×0.25s；并发是 ~0.25s。阈值取中间的 0.6s：
+        既不会因为机器慢而误报，也不会把"真的没并发"放过去。
+        """
+        registry, _ = _sleep_registry(delay=0.25)
+        agent, _ = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("都好了"),
+            ],
+            tools=registry,
+        )
+        events, elapsed = await _timed_run(agent, "一起做三件事")
+
+        assert elapsed < 0.6, f"三个 0.25s 的工具花了 {elapsed:.2f}s —— 看起来还是串行"
+        results = [e for e in events if e.type == EventType.TOOL_RESULT]
+        assert len(results) == 3
+
+    async def test_results_keep_the_model_order(self) -> None:
+        """结果必须按**模型给出的顺序**回灌，而不是完成顺序。
+
+        让第一个工具最慢：如果实现按完成顺序返回，alpha 就会跑到最后。
+        顺序不是装饰 —— 它决定回灌给模型的上下文长什么样，
+        而并发不该让"同样的输入产生不同的上下文"。
+        """
+        registry = ToolRegistry()
+        registry.register(_SleepTool("alpha", 0.30))
+        registry.register(_SleepTool("beta", 0.05))
+        registry.register(_SleepTool("gamma", 0.05))
+        agent, fake = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("好了"),
+            ],
+            tools=registry,
+        )
+        events = await collect(agent, "x")
+        names = [e.tool_name for e in events if e.type == EventType.TOOL_RESULT]
+        assert names == ["alpha", "beta", "gamma"]
+
+        # 回灌给模型的 tool 消息同样按这个顺序（每一次工具结果都是一条 role=tool）
+        tool_messages = [m for m in fake.received[1] if m.role == "tool"]
+        assert [m.name for m in tool_messages] == ["alpha", "beta", "gamma"]
+
+    async def test_serial_tool_makes_the_whole_turn_serial(self) -> None:
+        """只要有一个调用命中 `serial` 工具，整批就退回串行。
+
+        混合策略（只读并发、写入串行）需要调度保证，这个循环给不出；
+        与其写一个"大部分情况下正确"的聪明策略，不如写一个显然正确的笨策略。
+        这里三个都是 serial，所以应当量到 3×0.25s。
+        """
+        registry, _ = _sleep_registry(delay=0.2, serial=True)
+        agent, _ = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("好了"),
+            ],
+            tools=registry,
+        )
+        _, elapsed = await _timed_run(agent, "x")
+        assert elapsed >= 0.55, f"声明了 serial 却只有 {elapsed:.2f}s —— 没有被串行化"
+
+    async def test_concurrency_limit_is_respected(self) -> None:
+        """`tool_concurrency=1` 应当把并发完全关掉（这是那个配置项的意义）。"""
+        registry, _ = _sleep_registry(delay=0.2)
+        agent, _ = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("好了"),
+            ],
+            tools=registry,
+            agent_settings=AgentSettings(max_steps=4, tool_concurrency=1),
+        )
+        _, elapsed = await _timed_run(agent, "x")
+        assert elapsed >= 0.55, f"上限设为 1 却只花了 {elapsed:.2f}s"
+
+    async def test_one_failing_tool_does_not_cancel_the_others(self) -> None:
+        """一个工具炸了，同批的其他工具必须照常完成。
+
+        【为什么这条在并发下才真的需要】
+        串行时异常是顺序传播的；并发之后 gather 遇到异常会**取消同批的其他调用**，
+        于是一个工具的小毛病会让本来能成功的调用一起失败 —— 失败的传播范围被放大了。
+        """
+        registry, _ = _sleep_registry(delay=0.05, boom="beta")
+        agent, _ = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("好了"),
+            ],
+            tools=registry,
+        )
+        events = await collect(agent, "x")
+        by_name = {e.tool_name: e for e in events if e.type == EventType.TOOL_RESULT}
+
+        assert by_name["beta"].tool_ok is False
+        assert "故意炸了" in by_name["beta"].content
+        assert by_name["alpha"].tool_ok is True
+        assert by_name["gamma"].tool_ok is True
+        # 失败被如实回灌给模型之后，本轮照常走到最终答案
+        assert events[-1].type == EventType.DONE
+        assert events[-1].stopped_reason == "finished"
+
+    async def test_unexpected_exception_in_execute_is_contained(self) -> None:
+        """连"工具层之上"的异常（注册表/工具对象本身的 bug）也只能影响自己。
+
+        `Tool.execute` 已经处理了校验失败、超时、工具内部异常；
+        这一条测的是它之外的那一层 —— 并发路径上必须有这层兜底，
+        否则一个 bug 会连带取消整批调用。
+        """
+        registry, _ = _sleep_registry(delay=0.05)
+        original = registry.execute
+
+        async def flaky(call: ToolCall) -> ToolResult:
+            if call.name == "beta":
+                raise RuntimeError("注册表层面的意外错误")
+            return await original(call)
+
+        registry.execute = flaky  # type: ignore[method-assign]
+        agent, _ = make_agent(
+            [
+                multi_tool_turn([("alpha", {}), ("beta", {}), ("gamma", {})]),
+                text_turn("好了"),
+            ],
+            tools=registry,
+        )
+        events = await collect(agent, "x")
+        by_name = {e.tool_name: e for e in events if e.type == EventType.TOOL_RESULT}
+
+        assert by_name["beta"].tool_ok is False
+        assert "未预期错误" in by_name["beta"].content
+        assert by_name["alpha"].tool_ok is True and by_name["gamma"].tool_ok is True
+
+
+# ============================================================
+# 场景 12：终态不变量（每个出口都必须发且只发一个 done）
+# ============================================================
+class TestTerminalInvariant:
+    """不管从哪条路结束，事件流都要以**恰好一个** `done` 收尾。
+
+    【为什么它值得单独立一组测试】
+    原来四个终止分支各自手写"先 error 再 done"，这个约定只存在于写代码的人
+    的脑子里。漏发 done 的后果是前端**一直转圈等一个永远不会来的终态**，
+    而且不会有任何报错 —— 它只是在等。这类"没有错误信息的错误"最难发现，
+    所以要用不变量把它钉住，而不是靠每个分支各写一遍。
+    """
+
+    async def test_direct_answer(self) -> None:
+        agent, _ = make_agent([text_turn("直接回答")])
+        events = await collect(agent, "你好")
+        self._assert_single_terminal(events, "finished")
+
+    async def test_max_steps(self) -> None:
+        agent, _ = make_agent(
+            [tool_turn("calculator", {"expression": "1+1"}, call_id=f"c{i}") for i in range(6)],
+            max_steps=2,
+        )
+        events = await collect(agent, "算")
+        self._assert_single_terminal(events, "max_steps", expect_error=True)
+
+    async def test_loop_detected(self) -> None:
+        turns = [tool_turn("calculator", {"expression": "1+1"}, call_id=f"c{i}") for i in range(5)]
+        agent, _ = make_agent(turns, max_steps=6, loop_guard=3)
+        events = await collect(agent, "算")
+        self._assert_single_terminal(events, "loop_detected", expect_error=True)
+
+    async def test_model_failure(self) -> None:
+        class ExplodingLLM(FakeLLM):
+            async def stream_chat(self, *a: Any, **kw: Any) -> AsyncIterator[StreamDelta]:
+                raise RuntimeError("模型炸了")
+                yield StreamDelta()  # pragma: no cover - 让它是异步生成器
+
+        agent = Agent(ExplodingLLM([]), build_default_registry(), AgentSettings())  # type: ignore[arg-type]
+        events = await collect(agent, "你好")
+        self._assert_single_terminal(events, "error", expect_error=True)
+
+    @staticmethod
+    def _assert_single_terminal(
+        events: list[Any], reason: str, *, expect_error: bool = False
+    ) -> None:
+        types = [e.type for e in events]
+        dones = [e for e in events if e.type == EventType.DONE]
+        assert len(dones) == 1, f"done 事件应当恰好一个，实际 {len(dones)} 个"
+        assert types[-1] == EventType.DONE, "事件流必须以 done 收尾"
+        assert dones[0].stopped_reason == reason
+
+        errors = [e for e in events if e.type == EventType.ERROR]
+        if expect_error:
+            assert errors, f"终止原因 {reason} 必须附带一条 error 说明"
+            assert types.index(EventType.ERROR) < types.index(EventType.DONE), "error 要先于 done"
+        else:
+            assert not errors
 
 
 @pytest.mark.live
