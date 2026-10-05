@@ -235,6 +235,30 @@ class RagSettings(BaseSettings):
     # 要开启就必须先在本项目的评测集上标定。
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    # ---------- Query 改写（P5 补的最后一个 RAG 空白） ----------
+    # none | multi_query | hyde
+    #
+    # 【为什么需要它 —— 这是本项目评测里唯一一条始终失败的查询】
+    # 「我适合投递哪些岗位」期望覆盖简历的多个侧面，实际只召回了岗位块。
+    # 原因不是算法不够好，而是**一个查询只有一个向量**：
+    # 这句话与"Kafka 使用经验""ClickHouse 位图索引"之间既无词汇重叠、
+    # 也无足够的语义桥梁，它在向量空间里落在一个很泛的位置，谁也召不回来。
+    # 这是「单一查询」的固有局限，**加多少召回路数都救不了**，
+    # 必须从查询侧解决。
+    #
+    # 默认关闭：它与重排一样每次检索多一次 LLM 调用，
+    # 收益必须先在评测集上量化 —— 与 RAG_RERANKER 保持同一条纪律：
+    # **没有数字支持的默认值不开。**
+    query_rewrite: str = "none"
+    # multi_query 生成多少条改写（不含原查询）
+    rewrite_count: int = Field(default=3, ge=1, le=8)
+    # 改写真相对原查询的 RRF 权重。**必须 < 1**：
+    # 改写只是"我们猜你可能想问什么"，原查询才是用户真的问了什么。
+    rewrite_weight: float = Field(default=0.6, gt=0.0, le=1.0)
+    # 改写结果缓存条数。评测会用同一批查询反复跑，
+    # 不缓存的话消融阶梯会付出成倍的 LLM 调用。
+    rewrite_cache_size: int = Field(default=512, ge=1)
+
 
 class ResilienceSettings(BaseSettings):
     """韧性配置：熔断与限流。

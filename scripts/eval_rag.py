@@ -193,6 +193,7 @@ class LadderStep:
     label: str
     mode: RetrievalMode
     reranker: str
+    rewrite: str = "none"
 
 
 # 阶梯的顺序是刻意设计的：**先固定召回看重排的收益，再固定重排看召回的收益**。
@@ -209,6 +210,25 @@ _LADDER: list[LadderStep] = [
     LadderStep("③ 混合 RRF", RetrievalMode.HYBRID, "none"),
     LadderStep("④ 向量 + 特征重排", RetrievalMode.DENSE, "lexical"),
     LadderStep("⑤ 混合 + 特征重排", RetrievalMode.HYBRID, "lexical"),
+]
+
+# Query 改写的对照阶梯。**必须单独成组，不能混进上面的主阶梯**：
+# 上面每一步是"改召回/改重排"，这里是"改查询"，属于不同维度。
+# 混在一起的话，⑥ 相对 ⑤ 的 Δ 里会同时含有"加了改写"和"用了不同召回配置"
+# 两个变化 —— 那就又回到了"无法归因"的老问题。
+#
+# 所以设计上让"改写 vs 不改写"在**完全相同**的召回与重排配置下对比。
+#
+# R5/R6 是刻意加的：用来观察改写与重排的**交互**。
+# 重排是用**原查询**对候选重新打分的，所以它有可能吃掉改写带来的排序收益 ——
+# 这种事只有把两种组合都跑一遍才能发现，靠推理想不到。
+_REWRITE_LADDER: list[LadderStep] = [
+    LadderStep("R1 混合（= ③ 对照组）", RetrievalMode.HYBRID, "none", "none"),
+    LadderStep("R2 混合 + Multi-Query", RetrievalMode.HYBRID, "none", "multi_query"),
+    LadderStep("R3 混合 + HyDE", RetrievalMode.HYBRID, "none", "hyde"),
+    LadderStep("R4 混合+重排（= ⑤ 对照组）", RetrievalMode.HYBRID, "lexical", "none"),
+    LadderStep("R5 混合+重排 + Multi-Query", RetrievalMode.HYBRID, "lexical", "multi_query"),
+    LadderStep("R6 混合+重排 + HyDE", RetrievalMode.HYBRID, "lexical", "hyde"),
 ]
 
 
@@ -230,6 +250,13 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
         print("[!] 未配置 LLM_API_KEY，跳过 LLM 重排步骤。")
         steps = [s for s in steps if s.reranker != "llm"]
 
+    # 改写阶梯需要真实模型（改写本身要调 LLM），没配密钥就跳过
+    if getattr(args, "with_rewrite", False):
+        if not settings.llm.is_configured:
+            print("[!] 未配置 LLM_API_KEY，跳过 Query 改写阶梯。")
+        else:
+            steps.extend(_REWRITE_LADDER)
+
     print(f"评测集：{eval_set.name}（{len(eval_set.queries)} 条查询）")
     print(f"k = {args.k}，min_size = {args.min_size}，strategy = {args.strategy}")
     print()
@@ -239,6 +266,7 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
         step_args = argparse.Namespace(**vars(args))
         step_args.mode = step.mode.value
         step_args.rerank = step.reranker
+        step_args.rewrite = step.rewrite
         report = await cmd_run(eval_set, args=step_args, quiet=True)
         rows.append((step.label, report))
         print(f"  完成 {step.label}: {report.summary_line()}")
@@ -300,6 +328,25 @@ def build_reranker(kind: str) -> Reranker | None:
     raise ValueError(f"未知重排器：{kind}")
 
 
+def build_rewriter(kind: str):  # type: ignore[no-untyped-def]
+    """按 kind 构造改写器。none 返回 None（= 功能不启用）。"""
+    from app.rag.rewrite import NoOpRewriter, build_rewriter as _build
+
+    if (kind or "none").lower() in ("none", "", "off"):
+        return None
+    r = _build(kind, llm=_llm())
+    # NoOpRewriter 传给 Retriever 与传 None 在行为上等价，
+    # 但**语义不同**：None 表示"这个功能不存在"，NoOp 表示"启用了但没改动"。
+    # 评测里统一返回 None，让基线路径与引入改写前逐字节一致。
+    return None if isinstance(r, NoOpRewriter) else r
+
+
+def _llm():  # type: ignore[no-untyped-def]
+    from app.llm.client import LLMClient
+
+    return LLMClient(get_settings().llm)
+
+
 def build_retriever(args: argparse.Namespace) -> Retriever:
     weights = None
     if getattr(args, "rrf_weights", None):
@@ -318,6 +365,7 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
         reranker=build_reranker(args.rerank),
         rrf_k=args.rrf_k,
         rrf_weights=weights,
+        rewriter=build_rewriter(getattr(args, "rewrite", "none")),
         **({"fixed_recall_k": args.recall_k} if getattr(args, "recall_k", None) else {}),
     )
 
@@ -357,6 +405,15 @@ def main() -> int:
         default="lexical",
         help="重排器。默认 lexical —— 它是消融实验里唯一稳定带来收益且零成本的选项",
     )
+    parser.add_argument(
+        "--rewrite",
+        choices=["none", "multi_query", "hyde"],
+        default="none",
+        help=(
+            "Query 改写方式，默认 none。会调用真实模型（每次查询多一次 LLM 调用），"
+            "结果有缓存，所以消融阶梯里同一查询只付一次"
+        ),
+    )
     parser.add_argument("--rrf-k", type=int, default=60, help="RRF 平滑常数，默认 60")
     parser.add_argument(
         "--recall-k",
@@ -381,6 +438,14 @@ def main() -> int:
         "--with-llm",
         action="store_true",
         help="--compare 时额外包含 LLM 重排步骤（真实调用 API，会计费）",
+    )
+    parser.add_argument(
+        "--with-rewrite",
+        action="store_true",
+        help=(
+            "--compare 时额外包含 Query 改写阶梯（Multi-Query / HyDE）。"
+            "真实调用 API，会计费；改写结果有缓存，同一查询在整轮阶梯里只付一次"
+        ),
     )
     args = parser.parse_args()
 

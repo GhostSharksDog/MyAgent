@@ -35,6 +35,7 @@ from app.rag.embedder import Embedder, TfidfEmbedder
 from app.rag.fusion import reciprocal_rank_fusion
 from app.rag.loaders import DocType, LoadedDocument
 from app.rag.rerank import Reranker
+from app.rag.rewrite import QueryRewriter
 from app.rag.store import SearchHit, VectorStore
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,8 @@ class Retriever:
         fixed_recall_k: int | None = None,
         bm25_k1: float = 1.5,
         bm25_b: float = 0.75,
+        rewriter: QueryRewriter | None = None,
+        rewrite_weight: float = 0.6,
     ) -> None:
         self._chunks = chunks
         self._embedder = embedder
@@ -77,6 +80,15 @@ class Retriever:
         self._min_recall_k = min_recall_k
         # 固定召回宽度，供消融实验覆盖默认策略（默认策略是"k 的若干倍"）
         self._fixed_recall_k = fixed_recall_k
+
+        # Query 改写：为 None 时行为与改写功能引入前**完全一致** ——
+        # 新增能力不该改变未启用它时的既有行为，否则消融实验的
+        # 基线数字就不可比了（这是个很容易被忽视的实验纪律）。
+        self._rewriter = rewriter
+        # 改写真相对原查询的权重。**必须小于 1**：
+        # 改写只是我们的猜测，原查询才是用户真正想问的。
+        # 等权会让三个"可能跑偏的猜测"盖过一个确定的事实。
+        self._rewrite_weight = rewrite_weight
 
         self._store = VectorStore(embedder)
         self._store.rebuild(chunks)
@@ -184,32 +196,96 @@ class Retriever:
             recall_k or self._fixed_recall_k or max(k * self._recall_multiplier, self._min_recall_k)
         )
 
-        if self._mode is RetrievalMode.DENSE:
-            hits = self._dense_hits(query, rk, normalized)
-            if min_score > 0:
-                hits = [h for h in hits if h.score >= min_score]
-        elif self._mode is RetrievalMode.SPARSE:
-            hits = self._hits_from_ids(self._sparse_ids(query, rk, normalized))
+        # ---------- Query 改写 ----------
+        # 改写产出 [原查询, ...改写真]，原查询永远在第一位。
+        queries = await self._rewrite(query)
+
+        if len(queries) == 1:
+            # 无改写：走与引入本功能前**逐字节相同**的路径。
+            # 不把单查询也塞进融合逻辑，是为了让消融基线保持可比 ——
+            # 「行为没变」这件事本身需要被保证，而不是靠"看起来一样"。
+            hits = self._single_query_hits(query, rk, normalized)
         else:
-            hits = self._hybrid(query, rk, normalized)
+            hits = self._fuse_queries(queries, rk, normalized)
 
         # ---------- 相关性闸门 ----------
-        # 【为什么必须对全部模式生效】
-        # RRF 与 BM25 都是**基于排名**的：它们只会说"谁比谁更相关"，
-        # 从不说"都不相关"。所以混合检索永远会凑满 k 条，哪怕语料里
-        # 没有任何相关内容。把这些无关片段喂给模型，比明说"没找到"更危险 ——
-        # 模型会拿它们硬编出一个看起来合理的答案。
+        # 【为什么闸门永远只用原查询，而不用改写】
+        # 闸门问的是"**用户问的这件事**，语料里到底有没有相关内容"。
+        # 用改写真去算，会把"我猜你可能想问 X"的相关性
+        # 当成"你问的这件事"的相关性 —— 于是拒答失效，
+        # 用户拿到一堆他根本没问的内容。
         #
-        # 余弦相似度是**绝对量**（0~1，与语料规模无关），所以用它当闸门。
-        # 这一步刻意排在重排之前：先筛掉无关候选，就不必为它们付重排成本。
+        # 闸门与下面的重排都锚在原查询上，是这个功能里最关键的一致性约束。
         if min_score > 0 and hits:
             gate = self._dense_score_map(query, normalized)
             hits = [h for h in hits if gate.get(h.chunk.id, 0.0) >= min_score]
 
         if self._reranker is not None and hits:
+            # 同理：重排也是用原查询对候选打分
             return await self._reranker.rerank(query, hits, k)
 
         return _renumber(hits[:k])
+
+    async def _rewrite(self, query: str) -> list[str]:
+        """产出用于召回的查询列表（原查询恒在第一位）。"""
+        if self._rewriter is None:
+            return [query]
+        return await self._rewriter.rewrite(query)
+
+    def _single_query_hits(
+        self, query: str, recall_k: int, doc_types: list[str] | None
+    ) -> list[SearchHit]:
+        """单查询召回（引入改写功能之前的原路径）。"""
+        if self._mode is RetrievalMode.DENSE:
+            return self._dense_hits(query, recall_k, doc_types)
+        if self._mode is RetrievalMode.SPARSE:
+            return self._hits_from_ids(self._sparse_ids(query, recall_k, doc_types))
+        return self._hybrid(query, recall_k, doc_types)
+
+    def _fuse_queries(
+        self, queries: list[str], recall_k: int, doc_types: list[str] | None
+    ) -> list[SearchHit]:
+        """多查询召回：每个查询各走一遍召回路径，再把所有排名做 RRF 融合。
+
+        【为什么这一步不需要新算法】
+        混合检索是「1 个查询 → 2 路排名 → RRF」，
+        多查询是「N 个查询 → 2N 路排名 → RRF」。
+
+        **RRF 本来就只关心"有几路排名"，不关心路是怎么来的** ——
+        所以这里直接复用 `reciprocal_rank_fusion`，一行新算法都没写。
+
+        这不是巧合，而是说明当初把融合抽成"接收排名列表"这个接口
+        切在了正确的位置：**一个抽象切得对不对，看的就是新需求来时
+        能不能不改它。**
+        """
+        rankings: list[list[str]] = []
+        weights: list[float] = []
+
+        # 每一路的基础权重（[向量, BM25]，默认等权）。
+        # 用 `self._rrf_weights or [1,1]` 而不是把它和查询权重合并成一个新配置 ——
+        # 两个正交的维度分开表达，比揉成一个数好解释也好调。
+        path_weights = self._rrf_weights or [1.0, 1.0]
+
+        for i, q in enumerate(queries):
+            # 原查询（i=0）拿满权重，改写真按 rewrite_weight 打折
+            query_weight = 1.0 if i == 0 else self._rewrite_weight
+
+            dense = self._dense_hits(q, recall_k, doc_types)
+            rankings.append([h.chunk.id for h in dense])
+            weights.append(query_weight * path_weights[0])
+
+            if self._mode is not RetrievalMode.DENSE:
+                rankings.append(self._sparse_ids(q, recall_k, doc_types))
+                weights.append(query_weight * path_weights[1])
+
+        fused = reciprocal_rank_fusion(rankings, k=self._rrf_k, weights=weights)
+
+        hits: list[SearchHit] = []
+        for rank, (cid, score) in enumerate(fused):
+            chunk = self._index.get(cid)
+            if chunk is not None:
+                hits.append(SearchHit(chunk=chunk, score=score, rank=rank))
+        return hits
 
     def _dense_score_map(self, query: str, doc_types: list[str] | None) -> dict[str, float]:
         """全语料的稠密相似度，为排名式检索提供绝对相关性判据。"""
@@ -292,6 +368,20 @@ class Retriever:
         s["rrf_weights"] = self._rrf_weights
         s["recall_k_policy"] = f"max(k*{self._recall_multiplier}, {self._min_recall_k})"
         s["bm25"] = {"k1": self._bm25.k1, "b": self._bm25.b, "vocab": self._bm25.vocab_size}
+        s["rewriter"] = self._rewriter.name if self._rewriter else "none"
+        # Query 改写的运行统计必须暴露出来。
+        #
+        # 【为什么这不是"锦上添花的可观测"，而是必需的】
+        # 改写失败时会静默降级成"只用原查询"。如果没有这个计数，
+        # 一个**从未真正执行过**的改写器，在消融实验里的表现与
+        # "启用了但没效果"**完全一致** —— 于是你会得出
+        # "Query 改写对本项目没有收益"这个看起来权威、实则错误的结论。
+        #
+        # 这件事在本次开发中真实发生过：调用方法名写成了 `complete`，
+        # 而 LLMClient 的实际接口是 `chat`。每次调用都抛 AttributeError、
+        # 每次都被降级逻辑吞掉，指标一动不动。
+        if self._rewriter is not None:
+            s["rewriter_stats"] = self._rewriter.stats()
         # 重排成本必须可观测：LLM 重排的代价就是"每次查询多一次调用"，
         # 不把它量化出来，"值不值得"这个问题就没法回答。
         if self._reranker is not None and hasattr(self._reranker, "total_tokens"):

@@ -21,6 +21,8 @@ from app.core.config import RagSettings, Settings, get_settings
 from app.rag.chunker import ChunkStrategy
 from app.rag.rerank import LexicalReranker, LLMReranker, Reranker
 from app.rag.retriever import RetrievalMode, Retriever
+from app.rag.rewrite import NoOpRewriter, QueryRewriter
+from app.rag.rewrite import build_rewriter as build_rewriter_impl
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +51,30 @@ def build_reranker(settings: RagSettings) -> Reranker | None:
     raise ValueError(f"未知的 RAG_RERANKER：{settings.reranker!r}（可选 none / lexical / llm）")
 
 
+def build_rewriter(settings: RagSettings, *, llm: object | None = None) -> QueryRewriter:
+    """按配置构造 Query 改写器。
+
+    与 `build_reranker` 同样的策略：只在真正需要模型时才 import LLMClient，
+    避免 rag 层与 llm 层形成循环依赖，也让纯离线检索不必加载 httpx 客户端。
+    """
+    kind = (settings.query_rewrite or "none").lower()
+    if kind in ("none", "", "off"):
+        return NoOpRewriter()
+    if llm is None:
+        from app.core.config import get_settings as _get
+        from app.llm.client import LLMClient
+
+        llm = LLMClient(_get().llm)
+    return build_rewriter_impl(
+        kind, llm, count=settings.rewrite_count, cache_size=settings.rewrite_cache_size
+    )
+
+
 def build_configured_retriever(
     settings: Settings | None = None,
     *,
     use_sample_resume: bool = False,
+    rewriter: QueryRewriter | None = None,
 ) -> Retriever:
     """按当前配置构造一个全新的检索器（不写缓存）。
 
@@ -71,6 +93,10 @@ def build_configured_retriever(
         mode=RetrievalMode(rag.mode),
         reranker=build_reranker(rag),
         rrf_k=rag.rrf_k,
+        # 显式传入才启用改写。评测脚本会把不同的改写器传进来做对比，
+        # 而"不传"必须精确等于"功能不存在" —— 否则消融基线不可比。
+        rewriter=rewriter,
+        rewrite_weight=rag.rewrite_weight,
     )
 
 
@@ -92,18 +118,22 @@ def get_shared_retriever(settings: Settings | None = None) -> Retriever:
         rag.chunk_overlap,
         rag.min_chunk_size,
         rag.rrf_k,
+        rag.query_rewrite,
+        rag.rewrite_count,
+        rag.rewrite_weight,
     )
 
     if _cache is not None and _cache_key == key:
         return _cache
 
     logger.info(
-        "构建检索索引（mode=%s, reranker=%s, min_size=%d）",
+        "构建检索索引（mode=%s, reranker=%s, min_size=%d, 改写=%s）",
         rag.mode,
         rag.reranker,
         rag.min_chunk_size,
+        rag.query_rewrite,
     )
-    _cache = build_configured_retriever(s)
+    _cache = build_configured_retriever(s, rewriter=build_rewriter(rag))
     _cache_key = key
     logger.info("检索索引就绪：%s", _cache.stats())
     return _cache

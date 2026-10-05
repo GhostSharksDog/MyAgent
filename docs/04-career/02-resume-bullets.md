@@ -71,6 +71,10 @@ MQ / 缓存 / 限流在 JobPilot 里也存在，但**不要当作亮点写** —
 > - **RAG 检索链路 + 消融标定**：章节切分 + 稠密/BM25 混合召回 + RRF + 重排 + 相关性闸门，
 >   回答带出处标注、检索不到即拒答；公开评测集 **Recall@5 0.821 / MRR 0.685 / NDCG@5 0.717**，
 >   消融证明混合召回带来 **+0.048 Recall**、重排带来 **+0.084 MRR**；指标已做成 CI 回归门禁。
+> - **Query 改写与一个反直觉的交互**：HyDE 把 Recall@5 从 0.869 提到 **0.964**、命中率
+>   **92.9% → 100%**。但实测发现**改写与词法重排相互抵消**（加权重排后增益被完全吃掉，
+>   0.964 回落 0.821）—— 因为重排锚定原查询打分，而改写召回的恰是与其词汇重叠低的文档。
+>   面试可直接讲这个"两个正确决定互相打架"的取舍。
 > - **微服务拆分与可观测**：按"接口边界先于进程边界"拆出独立检索服务与 worker，
 >   实测检索与索引重建争抢 CPU 时 **P95 放大 1.5×**；实现 trace id 五跳贯穿、Prometheus 指标与熔断降级。
 
@@ -80,12 +84,14 @@ MQ / 缓存 / 限流在 JobPilot 里也存在，但**不要当作亮点写** —
 
 | 简历上的数字 | 来源文件 / 命令 | 备注 |
 |---|---|---|
-| 后端 590 测试通过 | `.\scripts\dev.ps1 test` | 18 个测试文件 |
+| 后端 590 测试通过 | `.\scripts\dev.ps1 test` | **现在实际是 636 个**，见下方"测试数会变"说明 |
 | 前端 58 测试通过 | `cd apps/web; pnpm test` | 纯 `react` + `react-dom`，无测试框架依赖第三方 |
 | 5 个工具 | `python scripts/list_tools.py` | calculator / get_current_time / read_resume / search_jobs / search_knowledge |
 | 19 个 HTTP 端点 | `http://127.0.0.1:8000/docs` | 含 RAG 服务 5 个 |
 | Recall@5 0.821 / MRR 0.685 / NDCG@5 0.717 | `python scripts/eval_rag.py --run --sample` | **公开无 PII 评测集，14 条查询** |
 | 混合 RRF +0.048 Recall、重排 +0.084 MRR | `python scripts/eval_rag.py --compare --sample` | 同一评测集/语料/k=5 |
+| HyDE 把 Recall@5 提到 0.964、命中率 100% | `python scripts/eval_rag.py --compare --sample --with-rewrite` | **会调真实模型**；Recall 稳定，MRR 有波动（0.70~0.80） |
+| 改写与词法重排相互抵消（0.964 → 0.821） | 同上，对比 R3 与 R6 两行 | 这是**负结果**，要主动说 |
 | 回归门禁 0.74 / 0.60 / 0.64 | `services/api/tests/test_rag_regression.py:47-49` | 低于则 CI 失败 |
 | P95 80.9ms → 124.3ms（1.5×） | `python scripts/loadtest.py --contention` | 8 并发 / 8 秒，**单机本地** |
 | P99 86.8ms → 169.0ms（1.95×） | 同上 | 同上 |
