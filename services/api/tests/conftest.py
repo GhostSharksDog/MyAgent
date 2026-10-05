@@ -35,3 +35,65 @@ def client() -> Iterator[TestClient]:
     """全测试会话共享的 HTTP 客户端（含 lifespan）。"""
     with TestClient(app) as c:
         yield c
+
+
+def _set_corpus_paths(monkeypatch: pytest.MonkeyPatch, paths: str) -> None:
+    """改写"知识库数据源"这一项配置，并清掉进程内共享的检索索引。
+
+    直接改 `get_settings()` 返回的那个实例上的 `agent`（与 test_file_tools.py
+    改 workspace_root 的做法一致）：配置是单例，改实例才能让懒加载工厂
+    真的读到新值；`monkeypatch` 会在用例结束时还原。
+
+    共享检索器是**进程级**的，必须一起清掉 —— 否则上一个用例建好的索引
+    会被下一个用例当成自己的，失败信息会指向完全无关的地方。
+    """
+    from app.core.config import get_settings
+    from app.rag.factory import reset_shared_retriever
+
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings,
+        "agent",
+        settings.agent.model_copy(update={"corpus_paths": paths}),
+        raising=False,
+    )
+    reset_shared_retriever()
+
+
+@pytest.fixture
+def seeded_corpus(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """把知识库语料显式指向可提交的**公开示例数据**（services/api/seed/）。
+
+    【为什么需要这个前提声明，而不是依赖默认配置】
+    通用（默认）形态下语料就是**空的** —— 这是有意的默认值：
+    数据源由用户声明，不是系统替用户猜（见 `build_corpus` 的说明）。
+    所以任何"需要非空语料"的用例都必须自己把来源说清楚，
+    否则它实际测到的是"空语料下的行为"，而失败信息完全不会提示这一点。
+
+    用 seed/ 而不是 data/：示例数据不含隐私、可提交，CI 与协作者都能跑。
+    """
+    from app.core.config import PROJECT_ROOT
+    from app.rag.factory import reset_shared_retriever
+
+    _set_corpus_paths(monkeypatch, str(PROJECT_ROOT / "services" / "api" / "seed"))
+    try:
+        yield
+    finally:
+        reset_shared_retriever()
+
+
+@pytest.fixture
+def empty_corpus(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """把知识库固定为**默认形态：空语料**（未声明任何数据源）。
+
+    默认值本来就是空的，但前提仍要写出来：本机 .env 里任何一个
+    AGENT_CORPUS_PATHS 都会让"空语料"用例悄悄变成"非空语料"用例 ——
+    而它测的恰恰是空语料下的行为。
+    """
+    from app.rag.factory import reset_shared_retriever
+
+    _set_corpus_paths(monkeypatch, "")
+    try:
+        yield
+    finally:
+        reset_shared_retriever()

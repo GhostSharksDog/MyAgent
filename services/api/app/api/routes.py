@@ -181,6 +181,9 @@ async def healthz(request: Request) -> dict[str, object]:
         "env": str(settings.app_env),
         "llm_configured": settings.llm.is_configured,
         "model": settings.llm.model,
+        # 形态（general / jobhunt）决定提示词、工具集与知识库默认数据源，
+        # 而它配错了不会报错 —— 与下面三个 backend 属于同一类"静默差异"。
+        "profile": settings.agent.profile,
         "tools": request.app.state.tools.names(),
         # 三个 backend 必须同时可见：它们的共同点是**配错了不报错**，
         # 只会默默以另一种拓扑运行。健康检查是唯一能一眼看出来的地方。
@@ -214,6 +217,7 @@ async def meta(request: Request) -> MetaResponse:
         model=settings.llm.model,
         max_steps=settings.agent.max_steps,
         tool_count=len(request.app.state.tools.names()),
+        profile=settings.agent.profile,
         session_backend=request.app.state.sessions.backend,
         rag_backend=describe_knowledge_backend(settings)["backend"],
         task_backend=request.app.state.tasks.backend,

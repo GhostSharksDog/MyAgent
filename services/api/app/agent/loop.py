@@ -35,8 +35,8 @@ from collections.abc import AsyncIterator, Sequence
 
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.memory import ConversationMemory, LongTermMemory
-from app.agent.prompts import SYSTEM_PROMPT
-from app.core.config import AgentSettings
+from app.agent.prompts import build_system_prompt
+from app.core.config import AgentSettings, get_settings
 from app.llm.client import LLMClient, StreamAccumulator
 from app.llm.types import ChatMessage, ToolCall, Usage
 from app.tools.base import ToolRegistry
@@ -75,14 +75,25 @@ class Agent:
         tools: ToolRegistry,
         settings: AgentSettings,
         *,
-        system_prompt: str = SYSTEM_PROMPT,
+        system_prompt: str | None = None,
         memory: ConversationMemory | None = None,
         long_term: LongTermMemory | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tools
         self._s = settings
-        self._system_prompt = system_prompt
+        # 【为什么默认值是 None 而不是 SYSTEM_PROMPT】
+        # 写 `system_prompt: str = SYSTEM_PROMPT` 会让默认值在**模块导入时**
+        # 就固定下来 —— 那时还没有配置、也不知道注册了哪些工具。
+        # 于是"按 profile 选提示词"和"按实际工具裁剪提示词"两件事都做不了。
+        #
+        # 改成 None 之后，解析发生在 `__init__`（运行时），
+        # 一个地方决定，所有调用点自动拿到正确的提示词 ——
+        # **不需要每个构造 Agent 的地方都记得传 profile**。
+        # 后者正是那种"加了新调用点就忘了传"的典型漏洞。
+        self._system_prompt = system_prompt or build_system_prompt(
+            get_settings().agent.profile, set(tools.names())
+        )
 
         # ---------- 记忆（可选） ----------
         # 不传就保持 P1 的无状态行为（历史由调用方传入）。

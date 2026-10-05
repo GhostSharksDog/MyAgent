@@ -30,6 +30,17 @@ def _call(name: str, **args: object) -> ToolCall:
     return ToolCall(id="call_test", name=name, arguments=args, raw_arguments=json.dumps(args))
 
 
+def _jobhunt_registry() -> ToolRegistry:
+    """求职技能包相关的用例必须**显式声明** profile="jobhunt"。
+
+    read_resume / search_jobs 只在 jobhunt 下注册（见 `build_default_registry` 的分层），
+    所以"注册表里没有这个工具"是默认形态下的**正常结果**，不是环境故障。
+    把前提写进用例，比让整个测试会话恰好跑在 jobhunt 配置上可靠得多 ——
+    后者一旦有人改了 .env，失败信息会指向"search_jobs 不存在"这个完全错误的方向。
+    """
+    return build_default_registry(profile="jobhunt")
+
+
 # ============================================================
 # 计算器
 # ============================================================
@@ -113,7 +124,9 @@ class TestValidation:
         assert "expression" in result.content
 
     async def test_out_of_range_value_rejected(self) -> None:
-        registry = build_default_registry()
+        # 越界校验属于 search_jobs 的参数模型（limit 上限 10），
+        # 所以要先把求职技能包装上，否则测到的是"工具不存在"而不是"参数被拒"。
+        registry = _jobhunt_registry()
         result = await registry.execute(_call("search_jobs", keyword="Python", limit=999))
         assert not result.ok
         assert "参数校验失败" in result.content
@@ -167,15 +180,36 @@ class TestSecurity:
 # 注册表
 # ============================================================
 class TestRegistry:
-    def test_default_registry_has_expected_tools(self) -> None:
+    def test_general_profile_registers_only_core_tools(self) -> None:
+        """默认（general）profile 只加载核心三件套。
+
+        【为什么这里要盯住"默认"这两个字】
+        默认值决定了"没读文档的人会得到什么"。一个会自动把用户私人简历读进来的
+        助手，不该是默认形态 —— 所以求职技能包（read_resume / search_jobs）
+        被拿掉了，见 `AgentSettings.profile` 与 `build_default_registry` 的分层说明。
+        这条用例就是那个约定的守卫：不是"文件被删了"，而是"默认不出现"。
+
+        文件层（list_dir / read_file / glob / grep）不在这里断言：它需要用户
+        先配置工作区根目录，属另一条独立的分层规则，由 test_file_tools.py 覆盖。
+        """
         registry = build_default_registry()
         assert registry.names() == [
             "calculator",
             "get_current_time",
-            "read_resume",
-            "search_jobs",
             "search_knowledge",
         ]
+
+    def test_jobhunt_profile_also_registers_job_tools(self) -> None:
+        """求职技能包仍然可用 —— 只是变成了"显式选择"而不是"默认加载"。
+
+        这条与上一条配对：一条守住默认不加载，一条守住"选了就真的能拿到"。
+        只有前者会退化成"功能被删了"，只有后者会退化成"默认又偷偷加回来了"。
+        """
+        registry = build_default_registry(profile="jobhunt")
+        names = set(registry.names())
+        assert {"read_resume", "search_jobs"} <= names
+        # 核心层不能被技能包顶掉 —— 两个 profile 的共同底座
+        assert {"calculator", "get_current_time", "search_knowledge"} <= names
 
     def test_schemas_are_openai_compatible(self) -> None:
         registry = build_default_registry()
@@ -240,24 +274,24 @@ class TestRegistry:
 
 
 # ============================================================
-# 岗位检索
+# 岗位检索（求职技能包）
 # ============================================================
 class TestSearchJobs:
     async def test_keyword_hit(self) -> None:
-        registry = build_default_registry()
+        registry = _jobhunt_registry()
         result = await registry.execute(_call("search_jobs", keyword="Agent", limit=5))
         assert result.ok
         assert "Agent" in result.content
 
     async def test_city_filter(self) -> None:
-        registry = build_default_registry()
+        registry = _jobhunt_registry()
         result = await registry.execute(_call("search_jobs", city="北京", limit=10))
         assert result.ok
         assert "北京" in result.content
 
     async def test_no_match_gives_actionable_error(self) -> None:
         """查不到时要告诉模型有哪些可用选项，而不是简单的"无结果"。"""
-        registry = build_default_registry()
+        registry = _jobhunt_registry()
         result = await registry.execute(_call("search_jobs", keyword="不存在的岗位xyz", limit=3))
         assert not result.ok
         assert "没有找到" in result.content

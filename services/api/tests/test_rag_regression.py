@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import pytest
 from app.rag.chunker import ChunkStrategy
+from app.rag.corpus import build_corpus
 from app.rag.evaluate import EvalSet, evaluate
 from app.rag.retriever import RetrievalMode, Retriever
 
@@ -59,15 +60,26 @@ def public_eval_set() -> EvalSet:
 
 @pytest.fixture(scope="module")
 def public_retriever() -> Retriever:
-    """基于**示例简历**构建检索器。
+    """基于**公开示例语料**构建检索器。
 
-    刻意用 `use_sample_resume=True`：CI 与协作者都必须能跑，
+    【为什么必须把 include_resume / include_jobs 显式写成 True】
+    这两个参数的默认值是 False（通用形态下知识库默认是空的）——
+    "系统替用户决定读什么"正是这次改动要修掉的行为。
+    但**评测与回归是那个约定的例外**：它需要一份确定的、不含隐私、
+    clone 下来就存在的语料，否则指标无从谈起。
+
+    所以这里把数据源声明出来，而不是走 `Retriever.from_default_corpus()` ——
+    那条路现在会产出**空语料**：不报错、指标全 0，看起来像"检索算法坏了"，
+    实际是"没有数据"。这类失败最贵的地方在于它会把人引向完全错误的排查方向。
+
+    `use_sample_resume=True`：CI 与协作者都必须能跑，
     不能依赖一个被 gitignore 的真实简历文件。
     """
-    return Retriever.from_default_corpus(
+    docs = build_corpus(include_resume=True, include_jobs=True, use_sample_resume=True)
+    return Retriever.from_documents(
+        docs,
         strategy=ChunkStrategy.SECTION,
         min_size=120,  # 消融实验确定的最优值
-        use_sample_resume=True,
         mode=RetrievalMode.HYBRID,
     )
 

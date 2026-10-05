@@ -325,8 +325,14 @@ class TestNonBlocking:
         # 0.4s / 0.02s ≈ 20 次；即使调度有抖动也应远大于 5
         assert ticks >= 5, f"事件循环被 CPU 密集任务阻塞了，心跳只跑了 {ticks} 次"
 
-    async def test_reindex_handler_reports_progress(self) -> None:
-        """真实的重建索引处理器：必须上报进度并返回可观测的统计。"""
+    async def test_reindex_handler_reports_progress(self, seeded_corpus: None) -> None:
+        """真实的重建索引处理器：必须上报进度并返回可观测的统计。
+
+        `seeded_corpus` 是**前提声明**，不是装饰：默认配置下知识库语料为空，
+        而空语料时 reindex 会主动失败（见 `handlers.handle_reindex`）——
+        那是有意行为（"成功但 0 块"会让用户以为索引建好了）。所以要测
+        "重建成功"这条路，就必须先给出数据源。
+        """
         queue = InProcessTaskQueue()
         await queue.start()
         try:
@@ -334,11 +340,47 @@ class TestNonBlocking:
             # 手动执行真实处理器（不走注册表，便于断言返回值）
             ctx = TaskContext(task_id=record.id, queue=queue, task_type="reindex")
             result = await handle_reindex(ctx)
-            assert result["chunk_count"] >= 0
+
+            assert result["chunk_count"] > 0
             assert "elapsed_ms" in result
             assert "bm25_vocab" in result
+
+            # 进度必须真的落到任务记录上 —— 否则前端只能看到一个永远停在 0% 的任务
+            refreshed = await queue.get(record.id)
+            assert refreshed is not None
+            assert refreshed.progress == 100
+            assert refreshed.message == "重建完成"
         finally:
             await queue.aclose()
+
+
+# ============================================================
+# 语料前提（reindex 的第一条路径）
+# ============================================================
+class TestReindexCorpusRequirement:
+    """空语料是**默认配置下用户最先撞上的那条路径**，所以它的行为必须被钉住。"""
+
+    async def test_empty_corpus_fails_with_actionable_hint(self, empty_corpus: None) -> None:
+        """空语料 → 失败，并且告诉用户**怎么做才能补上数据**。
+
+        不报成"成功但 chunk_count=0"是刻意的：那样用户会以为索引建好了，
+        然后困惑于"为什么检索不到东西"。失败态才有可能被看见、被修。
+
+        断言里点名 AGENT_CORPUS_PATHS：默认（general）profile **不会**
+        自动加载 data/resume.md，所以"把简历放进去"在通用形态下并不能解决问题 ——
+        指引必须指向真的有效的做法，否则用户照做一次、再失败一次。
+        """
+        queue = InProcessTaskQueue()
+        try:
+            record = await queue.submit("reindex")
+            ctx = TaskContext(task_id=record.id, queue=queue, task_type="reindex")
+            with pytest.raises(RuntimeError, match="语料为空") as excinfo:
+                await handle_reindex(ctx)
+            message = str(excinfo.value)
+        finally:
+            await queue.aclose()
+
+        assert "AGENT_CORPUS_PATHS" in message
 
 
 # ============================================================

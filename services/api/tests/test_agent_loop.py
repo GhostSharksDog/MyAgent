@@ -21,8 +21,8 @@ from typing import Any
 import pytest
 from app.agent.events import AgentRunResult, EventType
 from app.agent.loop import Agent
-from app.agent.prompts import SYSTEM_PROMPT
-from app.core.config import AgentSettings
+from app.agent.prompts import SYSTEM_PROMPT, build_system_prompt
+from app.core.config import AgentSettings, get_settings
 from app.llm.types import ChatMessage, StreamDelta, ToolCall, Usage
 from app.tools.base import Tool, ToolRegistry, ToolResult
 from app.tools.builtin import CalculatorParams, build_default_registry
@@ -144,11 +144,49 @@ class TestDirectAnswer:
         assert done.steps_used == 1
 
     async def test_system_prompt_is_first_message(self) -> None:
-        agent, fake = make_agent([text_turn("ok")])
+        """第一条消息必须是系统提示词，且是**当前 profile 解析出来的那一份**。
+
+        【为什么期望值要现算而不是抄一段文案】
+        提示词有两个动态来源：profile（决定通用/求职口径）与**实际注册的工具**
+        （`build_system_prompt` 会把引用了未注册工具的规则裁掉）。
+        把某一份文案复制进测试，等于把断言换成"这段文字没被改过"——
+        改提示词本身是正常迭代，而"提示词没被送进去"才是 bug。
+
+        前置条件：`Agent` 按 `get_settings().agent.profile` 解析，而这里的用例
+        跑在默认配置上，所以期望的是**通用**那一份。
+        """
+        tools = build_default_registry()
+        agent, fake = make_agent([text_turn("ok")], tools=tools)
+
         await collect(agent, "hi")
         first = fake.received[0][0]
         assert first.role == "system"
-        assert first.content == SYSTEM_PROMPT
+
+        assert get_settings().agent.profile == "general"
+        assert first.content == build_system_prompt("general", set(tools.names()))
+        # 默认形态不再是那份"求职顾问"提示词 —— 这正是本次改动的要害，
+        # 所以除了"等于通用提示词"，还要显式排除"又变回求职提示词"。
+        assert first.content != SYSTEM_PROMPT
+
+    async def test_jobhunt_profile_keeps_job_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """切回 jobhunt 时仍然拿得到求职提示词（只是不再默认加载）。
+
+        与上一条配对：一条守住"默认不是求职形态"，一条守住
+        "选了求职形态就真的回到求职形态"。只有前者会退化成功能被删掉。
+        """
+        settings = get_settings()
+        monkeypatch.setattr(
+            settings,
+            "agent",
+            settings.agent.model_copy(update={"profile": "jobhunt"}),
+            raising=False,
+        )
+
+        tools = build_default_registry(profile="jobhunt")
+        agent, fake = make_agent([text_turn("ok")], tools=tools)
+        await collect(agent, "hi")
+
+        assert fake.received[0][0].content == build_system_prompt("jobhunt", set(tools.names()))
 
     async def test_history_is_included_before_current_input(self) -> None:
         """多轮上下文：历史必须在当轮用户输入之前。"""
@@ -161,17 +199,25 @@ class TestDirectAnswer:
         assert fake.received[0][-1].content == "本轮问题"
 
     async def test_tools_are_passed_to_model(self) -> None:
-        agent, fake = make_agent([text_turn("ok")])
+        """传给模型的 tools 必须**就是注册表里的那些**。
+
+        【为什么不再写死五个工具名】
+        断言"模型收到的工具集合 == 注册表里的工具集合"才是这条用例要守的契约：
+        它同时能抓住"注册了却忘了传"和"传了没注册的"两类接线错误。
+        写死名单会把这条接缝测试变成"默认能力集的第二个副本" ——
+        能力集一变就要改两处，而其中一处改了另一处漏改时**没人会发现**。
+
+        默认能力集本身由 test_tools.py / test_api.py 守住，这里只补一句
+        核心三件套必须在场，避免"注册表恰好是空的"也让上面那条通过。
+        """
+        tools = build_default_registry()
+        agent, fake = make_agent([text_turn("ok")], tools=tools)
+
         await collect(agent, "hi")
         assert fake.received_tools[0] is not None
         names = {s["function"]["name"] for s in fake.received_tools[0]}
-        assert names == {
-            "calculator",
-            "get_current_time",
-            "read_resume",
-            "search_jobs",
-            "search_knowledge",
-        }
+        assert names == set(tools.names())
+        assert {"calculator", "get_current_time", "search_knowledge"} <= names
 
     async def test_globally_empty_tools_sends_none(self) -> None:
         """没有工具时不应传 tools 字段（部分服务端对空数组报 400）。"""

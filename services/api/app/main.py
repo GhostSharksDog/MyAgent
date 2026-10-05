@@ -31,6 +31,7 @@ from app.agent.loop import Agent
 from app.api.metrics import router as metrics_router
 from app.api.routes import router
 from app.api.sessions import router as sessions_router
+from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -64,7 +65,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 依赖注入顺序上最容易踩的坑。
     short_memory, long_term = build_memories(settings, llm=llm_client)
 
-    tools = build_default_registry(long_term_memory=long_term)
+    # 工具集与提示词都由 profile 决定：general（默认）只加载核心工具，
+    # jobhunt 才额外加载简历/岗位。见 build_default_registry 的分层说明。
+    tools = build_default_registry(long_term_memory=long_term, profile=settings.agent.profile)
     agent = Agent(
         llm_client,
         tools,
@@ -95,7 +98,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.replayer = replayer
 
     logger.info(
-        "装配完成：model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话=%s，任务队列=%s",
+        "装配完成：profile=%s，model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话=%s，任务队列=%s",
+        settings.agent.profile,
         settings.llm.model,
         len(tools.names()),
         "、".join(tools.names()),
@@ -197,6 +201,7 @@ app.include_router(router)
 app.include_router(sessions_router)
 app.include_router(tasks_router)
 app.include_router(metrics_router)
+app.include_router(settings_router)
 
 
 # ============================================================

@@ -19,6 +19,7 @@ import logging
 
 from app.core.config import RagSettings, Settings, get_settings
 from app.rag.chunker import ChunkStrategy
+from app.rag.corpus import build_corpus
 from app.rag.rerank import LexicalReranker, LLMReranker, Reranker
 from app.rag.retriever import RetrievalMode, Retriever
 from app.rag.rewrite import NoOpRewriter, QueryRewriter
@@ -83,13 +84,30 @@ def build_configured_retriever(
     """
     s = settings or get_settings()
     rag = s.rag
+    agent = s.agent
 
-    return Retriever.from_default_corpus(
+    # 【语料装配完全由配置驱动 —— 这是 P6 的核心修正】
+    # 原来这里调 `from_default_corpus()`，而它默认加载「简历 + 岗位库」，
+    # 于是用户一启动就发现自己的简历已经在知识库里了。
+    #
+    # 现在的规则很直白：
+    #   · 默认什么都不加载（通用形态）—— **数据源要用户显式声明，不是我们猜**
+    #   · jobhunt profile 才带上求职那两份内置数据
+    #   · 用户显式声明的路径（AGENT_CORPUS_PATHS）永远加载
+    want_jobhunt = agent.profile == "jobhunt"
+    docs = build_corpus(
+        include_resume=want_jobhunt or agent.corpus_include_seed,
+        include_jobs=want_jobhunt or agent.corpus_include_seed,
+        use_sample_resume=use_sample_resume,
+        extra_paths=agent.corpus_path_list,
+    )
+
+    return Retriever.from_documents(
+        docs,
         strategy=ChunkStrategy(rag.strategy),
         size=rag.chunk_size,
         overlap=rag.chunk_overlap,
         min_size=rag.min_chunk_size,
-        use_sample_resume=use_sample_resume,
         mode=RetrievalMode(rag.mode),
         reranker=build_reranker(rag),
         rrf_k=rag.rrf_k,
@@ -110,6 +128,7 @@ def get_shared_retriever(settings: Settings | None = None) -> Retriever:
 
     s = settings or get_settings()
     rag = s.rag
+    agent = s.agent
     key = (
         rag.mode,
         rag.reranker,
@@ -121,17 +140,26 @@ def get_shared_retriever(settings: Settings | None = None) -> Retriever:
         rag.query_rewrite,
         rag.rewrite_count,
         rag.rewrite_weight,
+        # 【profile 与语料配置必须进缓存 key】
+        # 它们决定加载哪些文档。漏掉的话，切了 profile 却拿到上一个
+        # profile 建好的索引 —— 表现是"我用 general 了，但简历还在知识库里"，
+        # 而配置看起来完全正确。**缓存 key 漏字段是这类幽灵问题的唯一来源。**
+        agent.profile,
+        agent.corpus_paths,
+        agent.corpus_include_seed,
     )
 
     if _cache is not None and _cache_key == key:
         return _cache
 
     logger.info(
-        "构建检索索引（mode=%s, reranker=%s, min_size=%d, 改写=%s）",
+        "构建检索索引（profile=%s, mode=%s, reranker=%s, min_size=%d, 改写=%s, 额外文档=%d）",
+        agent.profile,
         rag.mode,
         rag.reranker,
         rag.min_chunk_size,
         rag.query_rewrite,
+        len(agent.corpus_path_list),
     )
     _cache = build_configured_retriever(s, rewriter=build_rewriter(rag))
     _cache_key = key

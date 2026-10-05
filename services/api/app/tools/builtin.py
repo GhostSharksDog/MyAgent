@@ -265,20 +265,36 @@ def _search_jobs(params: BaseModel) -> ToolResult:
 # ============================================================
 # 注册入口
 # ============================================================
-def build_default_registry(long_term_memory: object | None = None) -> ToolRegistry:
-    """构造默认工具集。
+def build_default_registry(
+    long_term_memory: object | None = None,
+    *,
+    profile: str = "general",
+    include_file_tools: bool = True,
+) -> ToolRegistry:
+    """按 profile 构造工具集。
 
-    注意每个 description 的写法：**它同时是"给模型的 API 文档"**。
-    要写清：什么时候用它、参数含义、边界情况。
-    描述含糊是 Agent 表现差的第一大原因，比换模型有效得多。
+    【工具分三层，这个分层是"泛用化"的关键】
+
+        核心层    calculator / get_current_time / search_knowledge
+                  —— 任何场景都要用
+        文件层    list_dir / read_file / glob / grep
+                  —— 需要用户先指定工作区根目录，否则**一个都不注册**
+        技能包    read_resume / search_jobs（jobhunt 专属）
+                  —— 只在 profile=jobhunt 时加载
+
+    【为什么用"默认不注册"而不是"注册了但返回错误"】
+    "工具存在但永远失败"比"工具不存在"更糟：模型看到菜单里有它就会去调，
+    拿到错误、浪费一步、然后很可能**换一种方式硬编**。
+    **能力不存在时就不该出现在菜单上** —— 这与记忆工具的既有做法一致。
 
     Args:
-        long_term_memory: 传入 `LongTermMemory` 时会额外注册 `remember_fact`
-            工具。用依赖注入而不是在模块内自建实例，是因为记忆必须与
-            Agent 共用同一个对象 —— 否则工具"记住"的东西 Agent 读不到。
+        long_term_memory: 传入 `LongTermMemory` 时会额外注册 `remember_fact`。
+        profile: `general`（默认）或 `jobhunt`。
+        include_file_tools: 允许关掉文件工具（测试里用，避免依赖工作区配置）。
     """
     registry = ToolRegistry()
 
+    # ---------- 核心层：任何 profile 都有 ----------
     registry.register_fn(
         "calculator",
         "精确计算算术表达式。当你需要进行任何数字运算（求和、百分比、乘法、复利等）时"
@@ -294,22 +310,6 @@ def build_default_registry(long_term_memory: object | None = None) -> ToolRegist
         _current_time,
     )
 
-    registry.register_fn(
-        "read_resume",
-        "读取用户的简历原文。当需要分析、评价、改写简历，或需要了解用户背景、技能、工作经历时"
-        "必须先调用本工具获取真实内容，不要凭空猜测用户的经历。",
-        ReadResumeParams,
-        _read_resume,
-    )
-
-    registry.register_fn(
-        "search_jobs",
-        "在岗位数据库中按关键词和城市检索招聘岗位，返回岗位名称、公司、薪资、技能要求与岗位描述。"
-        "当用户想找岗位、做简历与岗位匹配分析、或想了解某类岗位的技能要求时使用。",
-        SearchJobsParams,
-        _search_jobs,
-    )
-
     # 语义检索工具（RAG）。延迟 import 的理由：knowledge 模块会拉起 rag 层，
     # 而 rag 层在导入时不做任何 I/O（索引是懒加载的），但让这条依赖
     # 显式出现在装配点，比散落在模块顶层更容易看懂。
@@ -317,9 +317,33 @@ def build_default_registry(long_term_memory: object | None = None) -> ToolRegist
 
     registry.register(KnowledgeSearchTool())
 
+    # ---------- 文件层：要有工作区根目录才注册 ----------
+    if include_file_tools:
+        from app.tools.files import build_file_tools
+
+        for tool in build_file_tools():
+            registry.register(tool)
+
+    # ---------- 技能包：只在 jobhunt 时加载 ----------
+    if profile == "jobhunt":
+        registry.register_fn(
+            "read_resume",
+            "读取用户的简历原文。当需要分析、评价、改写简历，或需要了解用户背景、技能、工作经历时"
+            "必须先调用本工具获取真实内容，不要凭空猜测用户的经历。",
+            ReadResumeParams,
+            _read_resume,
+        )
+
+        registry.register_fn(
+            "search_jobs",
+            "在岗位数据库中按关键词和城市检索招聘岗位，返回岗位名称、公司、薪资、技能要求与岗位描述。"
+            "当用户想找岗位、做简历与岗位匹配分析、或想了解某类岗位的技能要求时使用。",
+            SearchJobsParams,
+            _search_jobs,
+        )
+
     # 长期记忆工具：仅在提供了记忆实例时注册。
-    # 不提供就不注册 —— 而不是注册一个会报错的空工具。
-    # "工具存在但永远失败"比"工具不存在"更糟：模型会反复尝试调用它。
+    # 与上面同一条原则 —— 不提供就不注册，而不是注册一个会报错的空工具。
     if long_term_memory is not None:
         from app.agent.memory import LongTermMemory
         from app.tools.memory_tool import RememberFactTool

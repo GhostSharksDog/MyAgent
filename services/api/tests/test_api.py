@@ -141,6 +141,9 @@ class TestMetaEndpoints:
         body = r.json()
         assert body["status"] == "ok"
         assert "llm_configured" in body
+        # 形态必须可见：它决定提示词、工具集与知识库默认数据源，
+        # 而配错了不会报错（只会得到另一个形态的助手）。
+        assert body["profile"] == "general"
         assert isinstance(body["tools"], list)
         assert "calculator" in body["tools"]
 
@@ -149,20 +152,30 @@ class TestMetaEndpoints:
         assert r.status_code == 200
         body = r.json()
         assert body["service"] == "jobpilot-api"
-        assert body["tool_count"] == 5
+        assert body["tool_count"] == 3
         assert body["max_steps"] >= 1
 
-    def test_tools_lists_five_with_schemas(self, client: TestClient) -> None:
+    def test_meta_exposes_default_profile(self, client: TestClient) -> None:
+        """元信息里必须能看出当前是哪个形态。
+
+        【为什么断言写死 "general" 而不是"和配置相等"】
+        与 `tool_count == 3` 同一条前提：这套用例跑在**默认配置**下，
+        而"默认是通用形态"正是本次改动的核心约定（见 AgentSettings.profile）。
+        断言成"等于配置里的值"会让 `profile=jobhunt` 的环境也通过，
+        于是"默认被改回求职形态"这件事就没人守得住了。
+        """
+        body = client.get("/api/meta").json()
+        assert body["profile"] == "general"
+
+    def test_tools_lists_core_set_with_schemas(self, client: TestClient) -> None:
         r = client.get("/api/tools")
         assert r.status_code == 200
         tools = r.json()
-        assert len(tools) == 5
+        assert len(tools) == 3
         by_name = {t["name"]: t for t in tools}
         assert set(by_name) == {
             "calculator",
             "get_current_time",
-            "read_resume",
-            "search_jobs",
             "search_knowledge",
         }
         # 描述与参数结构必须完整，否则模型无法正确调用工具
@@ -293,7 +306,10 @@ class TestWiring:
 
         注意本用例必须**在替换 agent 之前**断言，所以它用独立的一次装配检查。
         """
-        assert len(app.state.tools.names()) == 5
+        names = app.state.tools.names()
+        # 默认（general）profile 只装核心三件套 —— 求职技能包不在默认能力集里
+        assert len(names) == 3
+        assert set(names) == {"calculator", "get_current_time", "search_knowledge"}
         assert app.state.settings is not None
         # app.state.agent 在本模块中可能已被其他用例替换，故只校验类型来源
         assert isinstance(app.state.agent, Agent | FakeAgent)

@@ -84,11 +84,14 @@ class TestTaskApi:
     def test_limit_clamped(self, client: TestClient) -> None:
         assert client.get("/api/tasks?limit=100000").status_code == 200
 
-    def test_task_actually_executes(self, client: TestClient) -> None:
+    def test_task_actually_executes(self, client: TestClient, seeded_corpus: None) -> None:
         """端到端：提交 reindex → 手动驱动 worker → 结果可查。
 
         这里直接调用队列的执行入口而不是启动 worker，
         让"任务执行"这一步变成确定性的，断言才有意义。
+
+        `seeded_corpus` 同样是前提声明：默认配置下语料为空，reindex 必然失败
+        （那是有意行为），所以"能成功执行"的前提要先摆出来。
         """
         import asyncio
 
@@ -105,7 +108,7 @@ class TestTaskApi:
         detail = client.get(f"/api/tasks/{task_id}").json()
         assert detail["status"] == "succeeded"
         assert detail["progress"] == 100
-        assert detail["result"]["chunk_count"] >= 0
+        assert detail["result"]["chunk_count"] > 0
         assert detail["duration_ms"] is not None
 
     def test_failed_task_exposes_error(self, client: TestClient) -> None:

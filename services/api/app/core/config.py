@@ -12,6 +12,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,6 +84,60 @@ class AgentSettings(BaseSettings):
     # 连续 N 次调用完全相同的工具+参数 => 判定为死循环，主动中止。
     # 这是生产环境必备的护栏：模型偶尔会陷入重复调用同一个工具。
     loop_guard: int = Field(default=3, ge=2, le=10)
+
+    # ---------- 身份 / 能力集（P6：从专用 Agent 改成通用 Agent） ----------
+    # general  —— 通用助手：核心工具（时间、计算、文件、知识库检索）
+    # jobhunt  —— 求职专用：额外加载简历 / 岗位 / 匹配相关的提示词与工具
+    #
+    # 【为什么做成 profile 而不是直接删掉求职功能】
+    # 求职那套代码是完整实现并测过的（简历诊断、岗位匹配、多智能体专家），
+    # 删掉等于把已经完成的工作扔掉；而且它对特定场景仍然有效。
+    # 做成"默认不加载的可选能力集"，既满足"日常是个通用 Agent"，
+    # 又保留了随时切回去的能力 —— 代价只是多一个配置项。
+    #
+    # **默认必须是 general**：一个工具会自动把用户私人文件（简历）
+    # 读进知识库、并且开口就自称"求职顾问"的助手，不该是默认形态。
+    # 默认值决定了"没读文档的人会得到什么"，那必须是最无害的那个。
+    profile: Literal["general", "jobhunt"] = "general"
+
+    # ---------- 文件能力 ----------
+    # Agent 可读写的工作区根目录。**所有文件工具都被限制在这个目录内。**
+    #
+    # 【为什么是"一个根目录"而不是"允许访问整个磁盘"】
+    # 给 Agent 文件权限，等于把一个"能读能写"的程序交给它驱动。
+    # 一旦它读到 ~/.ssh/id_rsa 或 .env 里的密钥，那些内容就会：
+    #   1. 进入提示词（发给模型厂商）
+    #   2. 进入会话历史（落盘）
+    #   3. 出现在前端（可能被截图/分享）
+    # 而且模型可能被文档里的内容诱导去读别的地方（提示词注入）。
+    #
+    # 限制在一个根目录内、并且**解析符号链接后再校验**，
+    # 能把上述风险收敛到"用户主动放进来的东西"。
+    # 空字符串 = 文件工具不启用。
+    workspace_root: str = ""
+    # 单个文件读取上限（字符）。防止一条 read_file 把上下文撑爆 ——
+    # 这个上限是**成本性质**的，不是优化。
+    file_max_chars: int = Field(default=20000, gt=0)
+    # 单次目录列举上限，防止在一个几十万文件的目录上卡死
+    file_max_entries: int = Field(default=500, gt=0)
+
+    # ---------- 知识库数据源 ----------
+    # 逗号分隔的额外文档路径（文件或目录）。**相对仓库根或绝对路径**。
+    #
+    # 【为什么默认是空的 —— 这是本次改动的起点】
+    # 原来知识库是写死的「data/resume.md + seed/jobs.json」，
+    # 于是用户一启动就发现"我的简历已经在知识库里了"。
+    # 一个通用 Agent 不该默认把用户的私人文件读进索引 ——
+    # **数据源应该是用户显式声明的，不是我们猜的。**
+    corpus_paths: str = ""
+    # 是否把内置的示例语料（seed/）加进知识库。
+    # 默认关：示例数据只该用来跑测试与演示，不该混进用户的知识库。
+    corpus_include_seed: bool = False
+
+    @property
+    def corpus_path_list(self) -> list[str]:
+        """把逗号分隔的配置解析成路径列表。"""
+        return [p.strip() for p in self.corpus_paths.split(",") if p.strip()]
 
 
 class TaskSettings(BaseSettings):

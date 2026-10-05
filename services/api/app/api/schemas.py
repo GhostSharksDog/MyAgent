@@ -72,6 +72,16 @@ class MetaResponse(BaseModel):
     model: str
     max_steps: int
     tool_count: int
+    # 当前的 Agent 形态（general / jobhunt）。
+    #
+    # 【为什么必须暴露出来】
+    # profile 决定三件事：system prompt 是哪一份、注册哪些工具、知识库默认加载
+    # 哪些文档。它的取值**只影响行为，不影响健康状态** —— 配错了不会报错，
+    # 只会得到另一个形态的助手。把它放进元信息，就是让"我现在是什么形态"
+    # 变成前端/运维能一眼看到的事实，而不是靠读 .env 反推。
+    #
+    # 与 rag_backend / session_backend 是同一条原则：**静默的形态差异必须可观测。**
+    profile: str = "general"
     session_backend: str = ""
     # 检索后端：`local` 表示在本进程内检索（单体），
     # `remote` 表示走独立的 RAG 服务。

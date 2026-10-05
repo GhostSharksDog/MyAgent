@@ -161,7 +161,48 @@ _SUPPORTED: dict[str, str] = {
     ".md": "plain",
     ".txt": "plain",
     ".markdown": "plain",
+    # 【为什么把常见文本格式都加上，包括代码与配置】
+    # P6 之后知识库的数据源由**用户自己声明**，而用户会加的不只是文档：
+    # 还可能有笔记（.rst）、导出的表格（.csv）、配置（.yaml/.toml）、
+    # 代码（.py/.ts）。这些"按纯文本读"就够用，而少支持一个后缀
+    # 的代价是用户加了路径却什么都没发生 —— 而且很容易被容错逻辑吞掉。
+    #
+    # 前面那种"白名单写 .json 但加载器不支持"的漂移，正是因为没有
+    # 单一来源。所以现在**只有这一份清单**，语料装配直接派生于它。
+    ".rst": "plain",
+    ".csv": "plain",
+    ".json": "plain",
+    ".yaml": "plain",
+    ".yml": "plain",
+    ".toml": "plain",
+    ".ini": "plain",
+    ".cfg": "plain",
+    ".log": "plain",
+    ".py": "plain",
+    ".ts": "plain",
+    ".tsx": "plain",
+    ".js": "plain",
+    ".jsx": "plain",
+    ".sql": "plain",
+    ".sh": "plain",
+    ".ps1": "plain",
 }
+
+
+def supported_suffixes() -> set[str]:
+    """当前加载器**真正**支持的扩展名。
+
+    【为什么要暴露它，而不是让调用方自己再写一份白名单】
+    语料装配那边原本自己维护了一份"文本文件后缀"清单，里面写了 `.json`，
+    而加载器根本不支持 JSON。两份清单漂移的后果是：
+    用户把 `jobs.json` 加进知识库，加载失败被逐个路径的容错逻辑吞掉，
+    界面上显示"已添加"，知识库里却是空的 ——
+    而且**只有真的去加一个 JSON 文件才会暴露**。
+
+    能派生的清单就不要手写第二份：手写的那份迟早会漂移，
+    而漂移的表现又恰好是最难归因的那种（两边单独看都对）。
+    """
+    return set(_SUPPORTED)
 
 
 def load_document(path: Path | str, doc_type: DocType | None = None) -> LoadedDocument:
