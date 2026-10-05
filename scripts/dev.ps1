@@ -16,6 +16,7 @@
 #   .\scripts\dev.ps1 check      # fmt + lint + test 一条龙（提交前跑）
 #   .\scripts\dev.ps1 cli        # 启动命令行 Agent
 #   .\scripts\dev.ps1 serve      # 启动 API 服务（含 /docs 交互文档）
+#   .\scripts\dev.ps1 serve -NoReload   # 同上，但不监视文件变化（更稳、启动更快）
 #   .\scripts\dev.ps1 tools      # 列出已注册的工具
 #
 #   # ---- 微服务拆分（P4）----
@@ -50,7 +51,12 @@ param(
 
     # 传给具体任务的额外参数，例如： .\scripts\dev.ps1 test -Extra "-k calculator"
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Extra
+    [string[]]$Extra,
+
+    # 关掉 uvicorn 的自动重载（serve / rag / serve-split 生效）。
+    # 默认开着（改后端代码时方便），但见 Task-Serve 里那段说明：
+    # 它监视的是整个仓库，包括 .venv 与 node_modules。
+    [switch]$NoReload
 )
 
 $ErrorActionPreference = 'Stop'
@@ -233,11 +239,53 @@ function Task-Cli {
     & $VenvPython (Join-Path $ApiDir 'cli.py') @Extra
 }
 
+# ============================================================
+# 前台服务的公共部分（serve / rag / serve-split）
+# ============================================================
+function Get-UvicornArgs {
+    <#
+      【为什么 --reload 默认开、但必须能关掉】
+
+      uvicorn 启动时会打印它监视的目录：
+
+          Will watch for changes in these directories: ['D:\\WXP\\简历\\MyAgent']
+
+      也就是**整个仓库** —— 包括 `.venv`（几万个文件）和 `node_modules`。
+      代价有三个，而且都不报错、只是"感觉不对"：
+
+        · 启动慢：要先把这棵树遍历一遍；
+        · Windows 上容易踩句柄/资源上限（文件监视是有限额的）；
+        · 前台运行时，一次误触的 Ctrl+C（或关掉那个窗口）就会把它带走 ——
+          而"服务自己退出了"这类问题，排查方向往往先落到代码上。
+
+      所以：正在改后端代码时开着它（默认）；只是要把服务跑起来用、
+      演示、或者这会儿在改前端（前端有自己的 HMR）时，用 -NoReload。
+
+      【为什么用参数拼接而不是写两条命令】
+      两条几乎相同的 uvicorn 命令，改一处忘一处是迟早的事；
+      而"启动命令"这种东西一旦漂移，症状是"某个模式下行为不一样"。
+    #>
+    param([string]$Module, [int]$Port, [switch]$NoReload)
+
+    $uvicornArgs = @(
+        '-m', 'uvicorn', $Module,
+        '--host', '127.0.0.1',
+        '--port', "$Port",
+        '--app-dir', $ApiDir
+    )
+    if (-not $NoReload) { $uvicornArgs += '--reload' }
+    return $uvicornArgs
+}
+
 function Task-Serve {
+    param([switch]$NoReload)
     Initialize-Environment
     Assert-Venv
     Write-Host "API 文档: http://127.0.0.1:8000/docs" -ForegroundColor Green
-    & $VenvPython -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --app-dir $ApiDir
+    if (-not $NoReload) {
+        Write-Host "（自动重载已开启；只是要把服务跑起来的话用 serve -NoReload）" -ForegroundColor DarkGray
+    }
+    & $VenvPython (Get-UvicornArgs -Module 'app.main:app' -Port 8000 -NoReload:$NoReload)
 }
 
 function Task-Tools {
@@ -252,16 +300,18 @@ function Task-Tools {
 # 微服务拆分（P4）
 # ============================================================
 function Task-Rag {
+    param([switch]$NoReload)
     Initialize-Environment
     Assert-Venv
     # 独立进程运行检索服务：它的 CPU 占用不再影响 API 的响应延迟。
     # 注意端口 8001 与 docker-compose 里 rag 服务的端口保持一致 ——
     # 本地与容器两套拓扑用同一个端口，可以少一类"本地能跑容器不行"的问题。
     Write-Host "RAG 文档: http://127.0.0.1:8001/docs" -ForegroundColor Green
-    & $VenvPython -m uvicorn app.rag_service.main:app --host 127.0.0.1 --port 8001 --reload --app-dir $ApiDir
+    & $VenvPython (Get-UvicornArgs -Module 'app.rag_service.main:app' -Port 8001 -NoReload:$NoReload)
 }
 
 function Task-ServeSplit {
+    param([switch]$NoReload)
     Initialize-Environment
     Assert-Venv
     # 关键就是这一个环境变量：它让 agent 走 HTTP 而不是本进程内检索。
@@ -270,7 +320,7 @@ function Task-ServeSplit {
     $env:RAG_SERVICE_URL = 'http://127.0.0.1:8001'
     Write-Host "拆分拓扑：API:8000 → RAG:8001" -ForegroundColor Green
     Write-Host "启动后请确认 /healthz 的 rag_backend=remote" -ForegroundColor Yellow
-    & $VenvPython -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --app-dir $ApiDir
+    & $VenvPython (Get-UvicornArgs -Module 'app.main:app' -Port 8000 -NoReload:$NoReload)
 }
 
 function Task-Worker {
@@ -402,10 +452,10 @@ switch ($Task) {
     'fmt'       { Task-Fmt }
     'check'     { Task-Check }
     'cli'       { Task-Cli }
-    'serve'     { Task-Serve }
+    'serve'     { Task-Serve -NoReload:$NoReload }
     'tools'     { Task-Tools }
-    'rag'       { Task-Rag }
-    'serve-split' { Task-ServeSplit }
+    'rag'       { Task-Rag -NoReload:$NoReload }
+    'serve-split' { Task-ServeSplit -NoReload:$NoReload }
     'worker'    { Task-Worker }
     'verify-split' { Task-VerifySplit }
     'loadtest'  { Task-LoadTest }

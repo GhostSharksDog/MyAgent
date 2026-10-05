@@ -47,7 +47,12 @@ def _build_fake() -> SessionStore:
 async def _build_real_redis(settings: Settings) -> SessionStore:
     from redis.asyncio import from_url
 
-    client = from_url(settings.redis_url, decode_responses=True)
+    client = from_url(
+        settings.redis_url,
+        decode_responses=True,
+        # 只限定**建连**阶段；命令本身的超时不受影响（socket_timeout 默认不限）
+        socket_connect_timeout=settings.redis_connect_timeout,
+    )
     # 必须显式 ping：`from_url` 是惰性的，不 ping 的话连接失败要等到
     # 第一次请求才暴露，而那时错误会以 500 的形式出现在用户面前
     await client.ping()
@@ -89,11 +94,18 @@ async def build_session_store(settings: Settings | None = None) -> SessionStore:
         store.ttl_seconds = cfg.ttl_seconds
         return store
     except Exception as exc:
+        # 【这条日志的措辞是刻意的：它描述的是"决定"，不是"故障"】
+        # 本地开发没有 Redis 是**正常状态**，而原来的写法读起来像出了错
+        # （"连接 Redis 失败…原因：Error 10061"），会让人去排查一个不存在的问题。
+        # 但也不能不提：静默降级会让人误以为多进程共享已经生效，
+        # 表现为"用户偶尔丢历史"这种极难定位的间歇性故障。
+        # 所以：先说清楚"现在用的是什么"，再说"什么情况下这才是问题"。
         logger.warning(
-            "连接 Redis 失败（%s），会话存储降级为**内存**。"
-            "多进程/多副本部署下会话将无法共享 —— 若这不是预期行为，"
-            "请启动 Redis 或显式设置 SESSION_BACKEND。原因：%s",
+            "未使用 Redis（%s，%.1fs 内没能连上）：会话存储用**内存**实现，"
+            "单进程可用。多副本部署必须启动 Redis，否则表现为「用户偶尔丢历史」。"
+            "（本地开发这是正常状态；建连超时可用 REDIS_CONNECT_TIMEOUT 调整）",
             s.redis_url,
-            exc,
+            s.redis_connect_timeout,
         )
+        logger.debug("探测 Redis 的具体原因：%s", exc)
         return InMemorySessionStore(max_sessions=cfg.max_sessions, ttl_seconds=cfg.ttl_seconds)

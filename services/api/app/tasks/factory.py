@@ -25,7 +25,12 @@ async def _build_real_redis(settings: Settings) -> TaskQueue:
 
     from app.tasks.redis_queue import RedisTaskQueue
 
-    client = from_url(settings.redis_url, decode_responses=True)
+    client = from_url(
+        settings.redis_url,
+        decode_responses=True,
+        # 只限定**建连**阶段；命令本身的超时不受影响（socket_timeout 默认不限）
+        socket_connect_timeout=settings.redis_connect_timeout,
+    )
     await client.ping()  # from_url 是惰性的，不 ping 的话失败要等到第一次请求
     return RedisTaskQueue(
         client,
@@ -83,12 +88,16 @@ async def build_task_queue(
         try:
             queue = await _build_real_redis(s)
         except Exception as exc:
+            # 与 session/factory.py 的措辞保持一致：先说清现在用的是什么，
+            # 再说什么情况下这才是问题（见那边的说明）
             logger.warning(
-                "连接 Redis 失败（%s），任务队列降级为**进程内**。"
-                "多副本部署下任务不会跨实例共享。原因：%s",
+                "未使用 Redis（%s，%.1fs 内没能连上）：任务队列用**进程内**实现，"
+                "单进程可用。多副本部署下任务不会跨实例共享，需要 Redis。"
+                "（本地开发这是正常状态；建连超时可用 REDIS_CONNECT_TIMEOUT 调整）",
                 s.redis_url,
-                exc,
+                s.redis_connect_timeout,
             )
+            logger.debug("探测 Redis 的具体原因：%s", exc)
             queue = _build_memory(s)
 
     # 注册必须先于启动：worker 一启动就会拉队列，
