@@ -190,6 +190,13 @@ export interface HealthStatus {
   model: string
   tools: string[]
   session_backend: string
+  /**
+   * 服务端是否要求访问密钥。
+   *
+   * `/healthz` 是**公开**端点，所以界面能在真正撞上 401 之前就知道这件事 ——
+   * 否则用户看到的只是"请求失败"，而该做的是"去设置里填密钥"。
+   */
+  auth_required?: boolean
 }
 
 /** GET /api/meta */

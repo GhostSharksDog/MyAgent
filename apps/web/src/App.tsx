@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getAccessKey, resolveAccessNotice } from './lib/access'
 import { startFolderPick } from './lib/picker'
 import { fetchPickerCapability, pickDirectory } from './lib/settings-api'
 import { AGENT_MODE_META } from './lib/types'
@@ -227,6 +228,14 @@ export default function App() {
   const offline = server.offline
   const hasMessages = chat.items.length > 0
 
+  // 服务端要不要密钥 × 本地有没有密钥 → 界面该不该提示（三态，见 lib/access.ts）。
+  // 用 healthz 里的 auth_required 而不是"撞到 401 再说"：撞到时用户看到的
+  // 只是"请求失败"，而该做的是去设置里填密钥。
+  const accessNotice = resolveAccessNotice(
+    server.health?.auth_required === true,
+    getAccessKey() !== '',
+  )
+
   return (
     <div className="app">
       <TopBar
@@ -350,6 +359,31 @@ export default function App() {
                   action={
                     <button type="button" className="btn" onClick={handleRefresh}>
                       重试
+                    </button>
+                  }
+                />
+              ) : null}
+
+              {/*
+                服务端启用了访问密钥、而本地还没填 —— 这是**唯一**能让用户
+                看懂"为什么什么都失败"的提示。
+
+                没有它的话，用户看到的是每个接口各报一条 401，
+                而真正该做的事是"去设置里填密钥"，那是完全不同的方向。
+                所以这里给的是**动作**，不是一句"出错了"。
+              */}
+              {accessNotice === 'required' && !offline ? (
+                <Notice
+                  tone="warn"
+                  title="这台服务要求访问密钥"
+                  text="后端启用了 SECURITY_API_KEY，因此 /api 请求都需要带上密钥。填入后立即生效，不需要重启服务。"
+                  action={
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => setSettingsOpen(true)}
+                    >
+                      去填写密钥
                     </button>
                   }
                 />

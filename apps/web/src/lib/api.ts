@@ -12,6 +12,7 @@
  *      解析在 lib/sse.ts。分开的理由：这一层只关心 HTTP 与错误状态码。
  */
 
+import { accessHeaders } from './access'
 import type {
   AgentMode,
   ApiMeta,
@@ -94,12 +95,16 @@ interface RequestOptions {
 /** 发一个 JSON 请求并解析响应。所有错误都收敛成 ApiError。 */
 export async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options
+  // 访问密钥放在**请求头**里（不放 URL、不放 Cookie，理由见 lib/access.ts）。
+  // 每次都现读：用户刚在设置里填完密钥，不该等到刷新页面才生效。
+  const headers: Record<string, string> = { ...accessHeaders() }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   let response: Response
   try {
     response = await fetch(apiUrl(path), {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     })
@@ -196,7 +201,11 @@ export async function openChatStream(
   try {
     response = await fetch(apiUrl('/api/chat/stream'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...accessHeaders(),
+      },
       body: JSON.stringify(body),
       signal,
     })

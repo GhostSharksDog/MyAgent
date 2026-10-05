@@ -12,6 +12,7 @@
  * 前端自己编一句"保存失败"就把这些信息全丢了。
  */
 
+import { accessHeaders } from './access'
 import { ApiError, apiUrl } from './api'
 import type {
   BrowseListing,
@@ -32,7 +33,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(apiUrl(path), {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        // 与 api.ts 一样带上访问密钥（服务端启用鉴权时它是必需的）
+        ...accessHeaders(),
+        ...(init?.headers ?? {}),
+      },
     })
   } catch {
     // 连接层失败（后端没起来）—— status 0 让调用方能区分"服务不可用"

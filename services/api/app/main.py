@@ -28,6 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.agent.factory import build_memories
 from app.agent.loop import Agent
+from app.api.auth import ApiKeyMiddleware, check_exposure_posture
 from app.api.files import router as files_router
 from app.api.metrics import router as metrics_router
 from app.api.routes import router
@@ -51,6 +52,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     # 日志形态跟着配置走：本地默认彩文本，部署时设 LOG_FORMAT=json 即可被采集器聚合
     setup_logging(settings.log_level, fmt=settings.log_format)
+
+    # 【安全姿态检查放在最前面，而且它会**抛异常**】
+    # 一个会暴露到网络、又没有访问控制的服务，不该被启动起来。
+    # 详见 app/api/auth.py：三条出路写在异常信息里。
+    posture = check_exposure_posture(settings)
+    logger.info("访问控制：%s", posture)
 
     logger.info("启动 Legacy API v%s（env=%s）", __version__, settings.app_env)
 
@@ -187,17 +194,85 @@ async def trace_middleware(request: Request, call_next: Callable[[Request], Any]
         logger.info("%s %s → %d（%.0fms）", request.method, request.url.path, status, duration_ms)
 
 
-# 开发期前端跑在 Vite 的 5173 端口，属于跨域。生产环境应改为精确白名单。
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # 前端要能读到 trace id，必须显式暴露 —— CORS 默认不允许 JS 读取
-    # 自定义响应头，不暴露的话前端拿到的永远是 null
-    expose_headers=["X-Trace-Id"],
-)
+# ============================================================
+# 中间件：访问控制（T03）与跨域（T14）
+# ============================================================
+# 【为什么这里在**导入时**读一次配置】
+# 中间件栈必须在应用构造时就定下来（Starlette 不支持运行期增删），
+# 所以"要不要鉴权、放行哪些来源"这类决定天生是**进程级**的：
+# 改了配置要重启才生效。这与界面里能即时生效的那些设置（模型、工作区、
+# 语料）是两类东西，**说清楚比假装能热更新更重要** ——
+# 用户改了 .env 却发现跨域规则没变，第一反应会是"改了没生效"。
+_settings = get_settings()
+_cors_origins = _settings.security.cors_origin_list
+_app_host_is_loopback = (_settings.app_host or "").strip().lower() in {
+    "127.0.0.1",
+    "::1",
+    "localhost",
+}
+
+# 【中间件顺序：这条最容易被写反，所以先把机制写清楚】
+#
+# Starlette 的 `add_middleware` 是 **insert(0)**（后添加的排在列表前面），
+# 而 `build_middleware_stack` 从列表尾部开始**倒着包装** ——
+# 两个效果叠起来：**最后添加的中间件在最外层**。
+#
+# 所以顺序是刻意反过来的：**先添加鉴权，后添加 CORS**，让 CORS 落在最外层。
+# 为什么必须这样：
+#
+#   · 预检（OPTIONS）由 CORS 层直接应答，不会进到鉴权层 ——
+#     而预检**不带自定义请求头**（这是规范），被鉴权拦掉的表现是
+#     "所有跨域请求都 401"，人会去怀疑密钥配错了；
+#   · 更重要的是：401 响应要带上 CORS 头，浏览器才读得到里面的提示文字。
+#     CORS 在内层时，前端拿到的只是一个"跨域被拦"的无语义错误 ——
+#     用户永远看不到"请带上 API Key"这句话。
+#
+# （`ApiKeyMiddleware` 里仍然跳过了 OPTIONS，那是第二道保险：
+# 即使将来有人调换了顺序，也不会把跨域整个废掉。）
+app.add_middleware(ApiKeyMiddleware, settings=_settings)
+
+# 开发期前端跑在 Vite 的 5173 端口，属于跨域。
+#
+# 【T14：这里从"放行任意 localhost 端口"改成了**按配置决定**】
+#
+# 原来的写法是一条正则放行所有本机来源。它对开发很方便，但它是
+# **一个无条件的放宽**：只要服务在跑，任何在你本机打开的页面
+# （包括你随手访问的一个网页）都能调用它。配合"无鉴权"就是双份风险。
+#
+# 现在的规则（都要与"绑定地址"一起看，见 check_exposure_posture）：
+#
+#   显式配了 SECURITY_CORS_ALLOW_ORIGINS → 用它（精确白名单）
+#   没配 + 绑定回环                    → 保留原来那条开发正则（零配置可用）
+#   没配 + 绑定非回环                  → **不放行任何跨域来源**
+#
+# 最后一条是关键：对外提供服务时，"任意本机来源"这个假设已经不成立了
+# （请求可能来自任何地方），此时应当由部署方显式声明谁可以跨域。
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Trace-Id"],
+    )
+elif _app_host_is_loopback:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # 前端要能读到 trace id，必须显式暴露 —— CORS 默认不允许 JS 读取
+        # 自定义响应头，不暴露的话前端拿到的永远是 null
+        expose_headers=["X-Trace-Id"],
+    )
+else:
+    logger.warning(
+        "以 %s 对外提供服务且未配置 SECURITY_CORS_ALLOW_ORIGINS："
+        "当前**不放行任何跨域来源**。若是前后端分离部署，请显式声明允许的来源。",
+        _settings.app_host,
+    )
 
 app.include_router(router)
 app.include_router(sessions_router)

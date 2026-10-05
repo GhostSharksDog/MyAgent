@@ -181,6 +181,12 @@ async def healthz(request: Request) -> dict[str, object]:
         "env": str(settings.app_env),
         "llm_configured": settings.llm.is_configured,
         "model": settings.llm.model,
+        # 【为什么把"要不要密钥"放在一个**公开**端点里】
+        # 界面上要是没有这个信息，用户在启用鉴权之后只会看到一堆 401，
+        # 而不知道"这是要求密钥"还是"服务坏了"。健康检查本来就是
+        # "本进程装配成了什么样"的答案，访问控制是它的一部分。
+        # 这里只说明"要不要"，**不会透露密钥本身**，也不透露长度。
+        "auth_required": settings.security.enabled,
         # 形态（general / jobhunt）决定提示词、工具集与知识库默认数据源，
         # 而它配错了不会报错 —— 与下面三个 backend 属于同一类"静默差异"。
         "profile": settings.agent.profile,

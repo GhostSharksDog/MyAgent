@@ -24,6 +24,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { getAccessKey, setAccessKey } from '../lib/access'
 import type { SettingsUpdatePayload } from '../lib/types'
 import type { useSettings } from '../hooks/useSettings'
 import { IconCheck, IconGear, IconX } from './Icons'
@@ -77,6 +78,10 @@ export function SettingsPanel({ open, onClose, settings }: SettingsPanelProps) {
   const [workspaceRoot, setWorkspaceRoot] = useState('')
   const [corpusPaths, setCorpusPaths] = useState('')
   const [corpusIncludeSeed, setCorpusIncludeSeed] = useState(false)
+  // 访问密钥（客户端那份，见 lib/access.ts）。它与上面的字段有一个本质区别：
+  // 它**不会**被 PUT 到服务端，只存在这个浏览器里。
+  const [accessKeyInput, setAccessKeyInput] = useState('')
+  const [accessSaved, setAccessSaved] = useState(false)
 
   const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -84,6 +89,14 @@ export function SettingsPanel({ open, onClose, settings }: SettingsPanelProps) {
     if (!open) return
     void load()
   }, [open, load])
+
+  // 访问密钥是**客户端**状态（存 localStorage），不是服务端配置，
+  // 所以它不在 load() 里取。每次打开面板重新读一次：它可能被另一个标签页改过。
+  useEffect(() => {
+    if (!open) return
+    setAccessKeyInput(getAccessKey())
+    setAccessSaved(false)
+  }, [open])
 
   // 已保存的值回来后灌进草稿。
   // 注意 apiKey 刻意**不灌** —— 后端只有掩码，灌进去就会变成"保存掩码"。
@@ -161,6 +174,61 @@ export function SettingsPanel({ open, onClose, settings }: SettingsPanelProps) {
 
         <div className="drawer__body">
           {loading && <p className="drawer__note">读取中…</p>}
+
+          {/* ---------- 访问控制（T03 / T14）---------- */}
+          <section className="settings__group">
+            <h3 className="settings__legend">访问控制</h3>
+            <p className="settings__hint">
+              服务端启用 <code className="mono">SECURITY_API_KEY</code> 之后，
+              所有 <code className="mono">/api</code> 请求都要带上密钥。
+              下面的密钥存在**这个浏览器**里（localStorage），不会被提交到服务端 ——
+              它是"我用哪个密钥访问"，而不是"服务端要求什么密钥"。
+            </p>
+            <label className="settings__field">
+              <span className="settings__label">访问密钥</span>
+              <input
+                className="settings__input"
+                type="password"
+                value={accessKeyInput}
+                placeholder="留空 = 不使用密钥"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setAccessKeyInput(event.target.value)
+                  setAccessSaved(false)
+                }}
+              />
+            </label>
+            <div className="settings__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  // 保存后**不需要重新加载页面**：请求层每次现读密钥（见 lib/api.ts）
+                  setAccessKey(accessKeyInput)
+                  setAccessSaved(true)
+                }}
+              >
+                保存到本浏览器
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  setAccessKey('')
+                  setAccessKeyInput('')
+                  setAccessSaved(true)
+                }}
+              >
+                清除
+              </button>
+              {accessSaved && (
+                <span className="settings__result settings__result--ok">
+                  <IconCheck /> 已保存（立即生效）
+                </span>
+              )}
+            </div>
+          </section>
 
           {/* ---------- 模型接入 ---------- */}
           <section className="settings__group">

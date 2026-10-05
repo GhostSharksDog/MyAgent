@@ -192,6 +192,65 @@ class AgentSettings(BaseSettings):
         return [p.strip() for p in self.corpus_paths.split(",") if p.strip()]
 
 
+class SecuritySettings(BaseSettings):
+    """访问控制：谁能调用这个服务（技术债 T03 / T14）。
+
+    【这一条为什么是"只能跑在本机"的替代品，而不是补充】
+
+    在它之前，本项目的安全边界只有一句话："只监听 127.0.0.1"。
+    那是**部署约束**，不是安全机制 —— 它没有任何东西阻止你把
+    `APP_HOST` 改成 `0.0.0.0`，而一旦改了，任何人都能用你的额度、
+    读你的文件工作区、看你的会话历史。而**改一个环境变量就能完成这件事，
+    界面上不会有任何提示**。
+
+    所以这里的策略是：**默认什么都不变（回环 + 无密钥照常跑），
+    但"暴露且有风险"的组合会被显式拒绝启动**。判断依据是
+    "绑定地址是否回环"，因为那正好就是"谁能访问到它"的准确答案。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SECURITY_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # 访问密钥。**空 = 不启用鉴权**（默认，本地开发零配置）。
+    #
+    # 非空时，`/api/*`、`/metrics`、`/docs` 都要求请求头带上它：
+    #     X-API-Key: <key>
+    # 或  Authorization: Bearer <key>
+    #
+    # 用 SecretStr 而不是 str：它会自动从 repr/日志里消失。
+    # 密钥泄露最常见的路径不是被攻击，而是**被日志打出来**。
+    api_key: SecretStr = SecretStr("")
+
+    # 跨域来源白名单（逗号分隔的完整 origin，如 http://localhost:5173）。
+    #
+    # 空 = 使用下面的开发默认值（放行本机任意端口）。这是为了
+    # `pnpm dev` 的 5173 端口开箱可用，而它同时也是一个**已知的放宽**：
+    # 任何在你本机跑的页面都能调用这个服务（配合"无鉴权"会叠加风险）。
+    # 部署时应当显式列出来源，那时这个默认值就不再被使用。
+    cors_allow_origins: str = ""
+
+    # 逃生舱：明知以非回环地址暴露、且没有密钥，仍然允许启动。
+    #
+    # 【为什么留这个开关，以及为什么名字这么长】
+    # 有一种正当场景：前面确实有网关/反向代理做鉴权，服务本身跑在私网里。
+    # 没有这个开关，那种部署就只能去改代码。
+    # 名字长到必须读完才能打对，是刻意的 —— 它不是一个"顺手打开"的开关，
+    # 打开它等于宣布"我确认过访问控制由别处负责"。
+    allow_unauthenticated_exposure: bool = False
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.api_key.get_secret_value())
+
+
 class TaskSettings(BaseSettings):
     """异步任务队列配置。
 
@@ -440,6 +499,7 @@ class Settings(BaseSettings):
     session: SessionSettings = Field(default_factory=SessionSettings)
     tasks: TaskSettings = Field(default_factory=TaskSettings)
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
 
     database_url: str = "sqlite+aiosqlite:///./data/legacy.db"
     redis_url: str = "redis://127.0.0.1:6379/0"
