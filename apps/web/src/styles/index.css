@@ -1,7 +1,7 @@
 /**
  * 样式入口。
  *
- * 拆成六个文件的顺序 = 层叠顺序，顺序有意义：
+ * 拆成八个文件的顺序 = 层叠顺序，顺序有意义：
  *   tokens 定义变量 → base 重置 → ui 原子 → layout 骨架 → 各功能区 → markdown。
  * 后加载的可以覆盖前面的，所以"功能区"一定在"原子"之后。
  *
@@ -18,3 +18,6 @@
 @import './markdown.css';
 @import './tools.css';
 @import './plan.css';
+/* 设置与文件浏览（P6）。放在最后：它复用 .drawer/.btn，
+   需要能覆盖前面定义的基础样式（比如抽屉宽度）。 */
+@import './settings.css';

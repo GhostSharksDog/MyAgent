@@ -228,3 +228,32 @@ export function IconScissors(props: IconProps) {
     </Base>
   )
 }
+
+/** 设置入口（齿轮）。 */
+export function IconGear(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5" />
+    </Base>
+  )
+}
+
+/** 文件夹（文件树里的目录节点）。 */
+export function IconFolder(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M1.8 4.2A1 1 0 0 1 2.8 3.2h3.1l1.4 1.6h5A1 1 0 0 1 13.3 5.8v6A1 1 0 0 1 12.3 12.8H2.8a1 1 0 0 1-1-1z" />
+    </Base>
+  )
+}
+
+/** 文件（文件树里的叶子节点）。 */
+export function IconFile(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M3.6 2.4h5l3.8 3.8v7.4a.8.8 0 0 1-.8.8H3.6a.8.8 0 0 1-.8-.8V3.2a.8.8 0 0 1 .8-.8z" />
+      <path d="M8.6 2.4v3.8h3.8" />
+    </Base>
+  )
+}

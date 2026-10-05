@@ -37,11 +37,14 @@ import { EmptyState } from './components/EmptyState'
 import { MessageList } from './components/MessageList'
 import { Notice } from './components/Notice'
 import { SessionSidebar } from './components/SessionSidebar'
+import { FileBrowser } from './components/FileBrowser'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ToolsDrawer } from './components/ToolsDrawer'
 import { TopBar } from './components/TopBar'
 import { useChat } from './hooks/useChat'
 import { useServerInfo } from './hooks/useServerInfo'
 import { useSessions } from './hooks/useSessions'
+import { useSettings } from './hooks/useSettings'
 import { useStickToBottom } from './hooks/useStickToBottom'
 import { useTheme } from './hooks/useTheme'
 
@@ -55,12 +58,29 @@ export default function App() {
   const { preference, cycle } = useTheme()
   const server = useServerInfo()
   const sessions = useSessions()
+  // 设置面板：模型接入 / 身份 / 知识库 / 工作区。
+  // 文件浏览器要读它的 workspaceRoot 与 configured，
+  // 所以提到同一个层级，而不是各自请求一遍。
+  const settings = useSettings()
 
   // 一轮结束后刷新列表：标题、轮次数、token 统计都在服务端更新了
   const chat = useChat({ onTurnSettled: sessions.refresh })
 
   const [draft, setDraft] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [filesOpen, setFilesOpen] = useState(false)
+
+  // 首次打开任一面板时拉一次设置 ——
+  // 文件浏览需要知道"工作区配了没有"，设置面板需要当前值。
+  // 放在 App 而不是各自组件里，是为了两个面板共享同一份数据：
+  // 用户在设置里改完工作区，文件浏览器立刻能用，不用重开。
+  useEffect(() => {
+    if (settingsOpen || filesOpen) void settings.load()
+    // settings.load 是 useCallback 稳定的；不把 settings 整个放进来，
+    // 否则每次渲染都会因为它返回新对象而重新触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsOpen, filesOpen, settings.load])
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow())
 
   /**
@@ -132,6 +152,11 @@ export default function App() {
     void sessions.refresh()
   }, [server, sessions])
 
+  // 文件功能是否可用。**两处用的是同一个判定**（顶栏按钮与文件面板）：
+  // 分开写迟早会漂移，而漂移的表现是"按钮能点但面板说未配置"这种自相矛盾。
+  const workspaceConfigured =
+    settings.saved != null && settings.saved.agent.workspace_root.trim() !== ''
+
   const offline = server.offline
   const hasMessages = chat.items.length > 0
 
@@ -147,6 +172,9 @@ export default function App() {
         themePreference={preference}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         onOpenTools={() => setToolsOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenFiles={() => setFilesOpen(true)}
+        filesAvailable={workspaceConfigured}
         onRefresh={handleRefresh}
         onCycleTheme={cycle}
       />
@@ -282,6 +310,21 @@ export default function App() {
         tools={server.tools}
         meta={server.meta}
         onClose={() => setToolsOpen(false)}
+      />
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+      />
+
+      <FileBrowser
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        configured={workspaceConfigured}
+        root={settings.saved?.agent.workspace_root ?? ''}
+        /* 未配置时引导到设置面板 */
+        onOpenSettings={() => setSettingsOpen(true)}
       />
     </div>
   )

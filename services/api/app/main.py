@@ -28,6 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.agent.factory import build_memories
 from app.agent.loop import Agent
+from app.api.files import router as files_router
 from app.api.metrics import router as metrics_router
 from app.api.routes import router
 from app.api.sessions import router as sessions_router
@@ -202,6 +203,7 @@ app.include_router(sessions_router)
 app.include_router(tasks_router)
 app.include_router(metrics_router)
 app.include_router(settings_router)
+app.include_router(files_router)
 
 
 # ============================================================

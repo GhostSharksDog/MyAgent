@@ -288,3 +288,107 @@ export type ChatItem =
       restored?: boolean
       at?: number
     }
+
+
+// ============================================================
+// 设置（P6）
+// ============================================================
+// ⚠ 这些类型**逐字对应后端的响应字段**（snake_case），不要改成 camelCase。
+//
+// 项目的约定是：**线上格式就是后端的字段名**，映射只发生在需要的地方。
+// api.ts 里请求体写的就是 `session_id`，响应类型里也是 `agent_modes`。
+// 组件 props 才用 camelCase。
+//
+// 我第一版把这里写成了 camelCase，后果是 PUT 直接 422（后端 extra="forbid"
+// 拒了未知字段）、读取全是 undefined —— 而 **typecheck 是绿的**，
+// 因为 TS 只保证前后端各自自洽，管不了两边字段名对不对得上。
+
+/**
+ * API Key 只会有掩码，**永远不会有原值**。
+ *
+ * 这是刻意的：界面需要知道"配了没有"和"是不是那一把"，
+ * 但不需要知道密钥是什么。原样返回意味着任何能打开页面的人
+ * （同事路过、投屏演示、浏览器里的一次快照）都能拿到它。
+ */
+export interface LLMSettingsView {
+  base_url: string
+  model: string
+  temperature: number
+  api_key_masked: string
+  api_key_set: boolean
+}
+
+export interface AgentSettingsView {
+  /** general（通用，默认）| jobhunt（求职技能包） */
+  profile: string
+  workspace_root: string
+  corpus_paths: string[]
+  corpus_include_seed: boolean
+  file_max_chars: number
+  /** 知识库实际加载了多少文档 —— 改完配置最想知道的就是"生效了没有" */
+  corpus_loaded: boolean
+  corpus_doc_count: number
+}
+
+export interface SettingsView {
+  llm: LLMSettingsView
+  agent: AgentSettingsView
+  /** .env 的绝对路径，显示给用户看（"你的配置存在这里"） */
+  env_path: string
+}
+
+/** PUT 的请求体。**全部可选**：只传要改的字段。 */
+export interface SettingsUpdatePayload {
+  /** 留空（或原样回传掩码）= 不修改已保存的密钥 */
+  api_key?: string
+  base_url?: string
+  model?: string
+  temperature?: number
+  profile?: string
+  workspace_root?: string
+  corpus_paths?: string[]
+  corpus_include_seed?: boolean
+  file_max_chars?: number
+}
+
+export interface TestConnectionResult {
+  ok: boolean
+  model: string
+  latency_ms: number
+  error: string
+  /** 失败时给出**可操作**的下一步，而不是一个裸异常 */
+  hint: string
+}
+
+// ============================================================
+// 文件浏览（P6）
+// ============================================================
+export interface FileEntry {
+  name: string
+  /** 相对工作区根的路径，可直接用于下钻 */
+  path: string
+  is_dir: boolean
+  size: number
+}
+
+export interface DirListing {
+  path: string
+  entries: FileEntry[]
+  truncated: boolean
+  can_go_up: boolean
+}
+
+export interface FileContent {
+  path: string
+  content: string
+  size: number
+  truncated: boolean
+  /** 二进制文件不返回内容 —— 前端显示"无法预览"而不是一堆乱码 */
+  is_binary: boolean
+}
+
+export interface WorkspaceInfo {
+  configured: boolean
+  root: string
+  reason: string
+}

@@ -1,0 +1,376 @@
+/**
+ * 设置面板与文件浏览器的样式（P6）。
+ *
+ * 只用 tokens.css 里的语义变量（--bg / --surface / --text / --accent …），
+ * 不写死颜色 —— 有一条测试专门守这条规则（组件里写死颜色会让浅色主题失效）。
+ *
+ * .drawer / .drawer__head / .drawer__body / .drawer__note / .btn 都复用
+ * tools.css 里已有的定义，这里只补这个面板特有的部分。
+ */
+
+/* 这两个面板的内容比工具面板宽（表单、文件树），所以抽屉加宽 */
+.drawer--wide {
+  width: min(1080px, 94vw);
+}
+
+.drawer__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.drawer__body--files {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ============================================================
+   设置表单
+   ============================================================ */
+.settings__group {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__group:last-of-type {
+  border-bottom: none;
+}
+
+.settings__legend {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.settings__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings__field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.settings__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+
+.settings__input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.14s ease;
+}
+
+.settings__input:focus {
+  border-color: var(--accent-border);
+}
+
+.settings__textarea {
+  resize: vertical;
+  min-height: 64px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.6;
+}
+
+.settings__hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.settings__hint--block {
+  display: block;
+  margin: 0 0 10px;
+  line-height: 1.7;
+}
+
+.settings__hint--warn {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  line-height: 1.7;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+}
+
+/* 服务商预设：一排小按钮，点一下就填好地址和模型名 */
+.settings__providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.settings__provider {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings__result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  flex-wrap: wrap;
+}
+
+.settings__result--ok {
+  color: var(--ok);
+}
+
+.settings__result--bad {
+  color: var(--danger);
+}
+
+/* 把原始错误压小一号并折行 —— 它是给排查用的，不该抢走提示的位置 */
+.settings__raw {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-3);
+  word-break: break-all;
+}
+
+.settings__alert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 18px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+.settings__alert--ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
+}
+
+.settings__alert--bad {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+}
+
+.settings__env {
+  margin: 14px 18px 18px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+/* ============================================================
+   文件浏览器
+   ============================================================ */
+.files__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.files__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 28px 22px;
+  max-width: 520px;
+}
+
+.files__empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+/* 左右分栏：左边目录树、右边预览。
+   min-height: 0 是必须的 —— 否则 flex 子项不会收缩，
+   长内容会把整个抽屉撑出视口，滚动条就跑到外层去了。 */
+.files__split {
+  display: grid;
+  grid-template-columns: minmax(240px, 34%) 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 720px) {
+  .files__split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.files__list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.files__crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+  z-index: 1;
+}
+
+.files__crumb-group {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3);
+}
+
+.files__crumb {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.files__entries {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+}
+
+.files__entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-2);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.files__entry:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.files__entry--active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.files__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files__size {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.files__preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.files__preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.files__code {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.files__markdown {
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--text);
+}

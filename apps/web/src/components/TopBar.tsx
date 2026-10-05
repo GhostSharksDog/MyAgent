@@ -23,14 +23,7 @@
 
 import type { ApiMeta, HealthStatus } from '../lib/types'
 import { shortId } from '../lib/format'
-import {
-  IconGrid,
-  IconMoon,
-  IconMonitor,
-  IconPanelLeft,
-  IconRefresh,
-  IconSun,
-} from './Icons'
+import { IconFolder, IconGear, IconGrid, IconMonitor, IconMoon, IconPanelLeft, IconRefresh, IconSun } from './Icons'
 import type { ThemePreference } from '../hooks/useTheme'
 
 export interface TopBarProps {
@@ -43,6 +36,10 @@ export interface TopBarProps {
   themePreference: ThemePreference
   onToggleSidebar: () => void
   onOpenTools: () => void
+  onOpenSettings: () => void
+  onOpenFiles: () => void
+  /** 文件功能是否可用（未配置工作区时按钮置灰并说明差什么） */
+  filesAvailable: boolean
   onRefresh: () => void
   onCycleTheme: () => void
 }
@@ -69,6 +66,9 @@ export function TopBar({
   themePreference,
   onToggleSidebar,
   onOpenTools,
+  onOpenSettings,
+  onOpenFiles,
+  filesAvailable,
   onRefresh,
   onCycleTheme,
 }: TopBarProps) {
@@ -146,6 +146,34 @@ export function TopBar({
           <IconGrid size={13} />
           工具
           {meta ? <span className="muted mono">{meta.tool_count}</span> : null}
+        </button>
+
+        {/* 文件入口。未配置工作区时**置灰而不是隐藏** ——
+            隐藏会让用户以为"这个产品没有文件功能"，
+            而置灰 + title 说明了"差什么才能用"，那是可操作的。 */}
+        <button
+          type="button"
+          className="btn"
+          onClick={onOpenFiles}
+          title={
+            filesAvailable
+              ? '浏览工作区文件并预览'
+              : '尚未配置工作区根目录 —— 点右侧「设置」配置后启用'
+          }
+          aria-disabled={!filesAvailable}
+        >
+          <IconFolder size={13} />
+          文件
+        </button>
+
+        <button
+          type="button"
+          className="btn"
+          onClick={onOpenSettings}
+          title="模型接入、知识库数据源、文件工作区"
+        >
+          <IconGear size={13} />
+          设置
         </button>
 
         <button
