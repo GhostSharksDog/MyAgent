@@ -339,6 +339,23 @@ export default function App() {
             </div>
           </div>
         </main>
+
+        {/* 文件栏必须**在 .workspace 网格里面** ——
+            它是网格的第三列。
+            我第一版把它渲染在 .workspace 之外（因为原来的抽屉就是放在那里的），
+            结果它成了一个普通块级元素，被堆在对话区**下方**，
+            而不是排在右侧。三列的 CSS 在，但那一列从来没有人站进去。
+
+            **网格子项的身份由"在不在这个容器里"决定，不由 CSS 决定。**
+            这类错误 typecheck 和构建都不会报 —— 只是看起来不对。 */}
+        {fileSidebarOpen && (
+          <FileSidebar
+            root={settings.saved?.agent.workspace_root ?? ''}
+            onClose={() => setFileSidebarOpen(false)}
+            onOpenFolder={() => setPickerOpen(true)}
+            onSwitchFolder={() => setPickerOpen(true)}
+          />
+        )}
       </div>
 
       <ToolsDrawer
@@ -353,16 +370,6 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         settings={settings}
       />
-
-      {/* 右侧常驻文件栏：与对话并排，不遮挡。见 FileSidebar 的说明 */}
-      {fileSidebarOpen && (
-        <FileSidebar
-          root={settings.saved?.agent.workspace_root ?? ''}
-          onClose={() => setFileSidebarOpen(false)}
-          onOpenFolder={() => setPickerOpen(true)}
-          onSwitchFolder={() => setPickerOpen(true)}
-        />
-      )}
 
       <FolderPicker
         open={pickerOpen}

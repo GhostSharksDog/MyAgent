@@ -217,6 +217,185 @@ def _count_children(p: Path) -> int:
         return 0
 
 
+class LocateRequest(BaseModel):
+    """用系统对话框选到的线索，请服务端反查绝对路径。"""
+
+    name: str = Field(min_length=1, description="文件夹名（系统对话框能给出的只有这个）")
+    samples: list[str] = Field(
+        default_factory=list,
+        description="相对于该文件夹的若干路径，如 'src/main.tsx'。用来在多个同名目录中确定是哪一个",
+    )
+
+
+class LocateCandidate(BaseModel):
+    path: str
+    matched: int = 0
+
+
+class LocateResponse(BaseModel):
+    candidates: list[LocateCandidate] = Field(default_factory=list)
+    scanned: int = 0
+    truncated: bool = False
+    hint: str = ""
+
+
+@router.post("/locate", response_model=LocateResponse, summary="按文件夹名反查绝对路径")
+async def locate(payload: LocateRequest) -> LocateResponse:
+    """用系统对话框选到的**文件夹名**，在磁盘上反查它的绝对路径。
+
+    ============================================================
+    为什么需要这么一个"绕一圈"的接口
+    ============================================================
+    浏览器**无法**打开一个返回服务端绝对路径的原生文件夹对话框 ——
+    这是浏览器的隐私设计，不是实现偷懒：
+
+        `<input type="file" webkitdirectory>` 弹的确实是**系统**文件夹选择器，
+        但拿到的每个文件只有 `webkitRelativePath`（形如 `MyAgent/src/main.tsx`）——
+        **绝对路径被浏览器剥掉了**，任何网页都拿不到。
+
+    （有人会想用 File System Access API。它同样只给一个目录 handle，
+    `handle.name` 是名字、不是路径，而且只有 Chromium 系支持。）
+
+    所以能做的极限是：**从对话框拿到名字和结构，反过来在磁盘上找到它。**
+    这条路可行，因为两者加起来基本能唯一定位：
+
+        name    = "MyAgent"            → 先筛出所有叫这个的目录
+        samples = ["src/App.tsx", ...] → 再验证哪些候选里真的有这些文件
+
+    **名字用来筛选，结构用来确认。** 只看名字会在有多个同名目录时选错
+    （比如 `node_modules/foo/` 和 `projects/foo/`），加上结构校验就能排除。
+
+    ============================================================
+    扫描的边界
+    ============================================================
+    只扫盘符根与用户主目录下的前几层，并且：
+      · 跳过噪音目录（node_modules / .git / Windows / Program Files…）
+      · 深度与访问数量都设上限
+    **用户的工程目录不会埋在 10 层深的系统目录里**，而全盘递归会让这个
+    操作从"等一秒"变成"等到放弃"。宁可扫不到（然后退回手动浏览），
+    也不要转三十秒。
+    """
+    import asyncio
+
+    return await asyncio.to_thread(_locate_sync, payload.name, payload.samples)
+
+
+# 扫描时跳过的目录名。两类：**噪音**（对定位无意义且数量巨大）
+# 与**系统目录**（用户的工程不可能在里面，但递归它们非常贵）。
+_SKIP_DIRS = {
+    "node_modules",
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "dist",
+    "build",
+    ".pnpm-store",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "$recycle.bin",
+    "system volume information",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "appdata",
+    "anaconda3",
+    "miniconda3",
+    "site-packages",
+}
+
+_MAX_DEPTH = 5
+_MAX_VISITED = 20000
+
+
+def _locate_sync(name: str, samples: list[str]) -> LocateResponse:
+    target = name.strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="文件夹名不能为空")
+
+    samples = [s.replace("\\", "/").lstrip("./") for s in samples if s.strip()][:8]
+
+    roots: list[Path] = []
+    if Path("C:/").exists():
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            d = Path(f"{letter}:/")
+            if d.exists():
+                roots.append(d)
+    if not roots:
+        roots.append(Path("/"))
+
+    candidates: list[LocateCandidate] = []
+    visited = 0
+    truncated = False
+
+    for root in roots:
+        if truncated:
+            break
+        # 逐层展开而不是递归 —— 便于在任何一层中断，且不会把栈压爆
+        frontier: list[tuple[Path, int]] = [(root, 0)]
+        while frontier:
+            if visited >= _MAX_VISITED:
+                truncated = True
+                break
+            current, depth = frontier.pop()
+            if depth >= _MAX_DEPTH:
+                continue
+            try:
+                children = list(current.iterdir())
+            except (OSError, PermissionError):
+                continue
+            for child in children:
+                visited += 1
+                if visited >= _MAX_VISITED:
+                    truncated = True
+                    break
+                try:
+                    if not child.is_dir():
+                        continue
+                except OSError:
+                    continue
+                if child.name.lower() in _SKIP_DIRS or child.name.startswith("."):
+                    continue
+
+                if child.name == target:
+                    matched = sum(1 for s in samples if _has_relative(child, s))
+                    # 没有 samples 时按名字收；有 samples 时只收真的对得上的
+                    if not samples or matched > 0:
+                        candidates.append(LocateCandidate(path=str(child), matched=matched))
+                frontier.append((child, depth + 1))
+
+    # 匹配数多的排前面，其次路径短的（更靠近根 = 更可能是用户自己的工程）
+    candidates.sort(key=lambda c: (-c.matched, len(c.path)))
+    candidates = candidates[:20]
+
+    hint = ""
+    if not candidates:
+        hint = (
+            f"没有在常见位置找到名为「{target}」的文件夹。"
+            "可能是它藏在更深的地方，或名字被浏览器改写过了 —— 用下面的目录浏览手动定位更稳妥。"
+        )
+    elif len(candidates) > 1:
+        hint = "找到多个同名文件夹，请选择实际的那一个。"
+    if truncated:
+        hint += "（扫描量已达上限，结果可能不全）"
+
+    return LocateResponse(candidates=candidates, scanned=visited, truncated=truncated, hint=hint)
+
+
+def _has_relative(base: Path, rel: str) -> bool:
+    """确认 base 下真的有这个相对路径。
+
+    这是"用结构确认名字"的那一半：光凭名字在有多个同名目录时会选错，
+    加上"它里面是否真的有 src/App.tsx"就能排除掉绝大多数误匹配。
+    """
+    try:
+        return (base / rel).exists()
+    except OSError:
+        return False
+
+
 def _require_root() -> Path:
     root = workspace_root()
     if root is None:

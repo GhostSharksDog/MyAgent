@@ -16,6 +16,7 @@ import { ApiError, apiUrl } from './api'
 import type {
   BrowseListing,
   DirListing,
+  LocateResponse,
   FileContent,
   SettingsUpdatePayload,
   SettingsView,
@@ -104,4 +105,22 @@ export function readFileContent(path: string): Promise<FileContent> {
 export function browseDirectories(path = ''): Promise<BrowseListing> {
   const q = new URLSearchParams({ path })
   return request<BrowseListing>(`/api/files/browse?${q.toString()}`)
+}
+
+/**
+ * 用「文件夹名 + 若干相对路径」反查绝对路径。
+ *
+ * 【为什么需要绕这一圈】
+ * `<input type="file" webkitdirectory>` 弹的是**系统**文件夹选择器，
+ * 但浏览器出于隐私**剥掉了绝对路径** —— 网页只能拿到 `webkitRelativePath`
+ * （形如 `MyAgent/src/App.tsx`）。任何网页都拿不到完整路径，这是浏览器设计，
+ * 不是能绕过去的实现细节。
+ *
+ * 所以：名字用来**筛选**，相对路径用来**确认**。两样加起来基本能唯一定位。
+ */
+export function locateFolder(name: string, samples: string[]): Promise<LocateResponse> {
+  return request<LocateResponse>('/api/files/locate', {
+    method: 'POST',
+    body: JSON.stringify({ name, samples }),
+  })
 }

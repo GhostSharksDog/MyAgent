@@ -421,3 +421,23 @@ export interface BrowseListing {
   /** 未指定路径时返回的起点（Windows 是盘符，其它平台是主目录） */
   roots: BrowseEntry[]
 }
+
+/**
+ * 按文件夹名反查绝对路径的结果。
+ *
+ * 这是"用系统对话框选文件夹"的中间产物：浏览器只给得出文件夹**名**，
+ * 绝对路径得由服务端在磁盘上找回来。`matched` 是有多少条相对路径
+ * 在该候选里真实存在 —— 它用来在同名目录之间做排除。
+ */
+export interface LocateCandidate {
+  path: string
+  matched: number
+}
+
+export interface LocateResponse {
+  candidates: LocateCandidate[]
+  /** 扫描了多少个目录（用于解释"为什么没找到"） */
+  scanned: number
+  truncated: boolean
+  hint: string
+}
