@@ -74,3 +74,68 @@ export function resolvePickerView(
     reason: detail || `这台服务提供的目录选择方式（${info.kind}）这个界面版本还不认识。`,
   }
 }
+
+// ============================================================
+// "打开文件夹"这一步到底做什么
+// ============================================================
+export type StartPickResult =
+  /** 用户选好了：直接拿到绝对路径 */
+  | { kind: 'picked'; path: string }
+  /** 用户取消了：什么都不该发生 */
+  | { kind: 'cancelled' }
+  /** 宿主弹不出对话框（远程部署等）：交给应用内浏览面板 */
+  | { kind: 'browse'; reason: string }
+  /** 出错了（服务不可达、对话框失败）：也该交给面板兜底，但要说明原因 */
+  | { kind: 'error'; message: string }
+
+export interface StartPickDeps {
+  fetchPickerCapability: () => Promise<{ kind: string; detail?: string }>
+  pickDirectory: () => Promise<{ path: string | null; cancelled: boolean; hint: string }>
+}
+
+/**
+ * 点"打开文件夹"时**直接**弹出系统对话框。
+ *
+ * ============================================================
+ * 为什么不先开一个面板、让用户在里面再点一次
+ * ============================================================
+ * 中间那一层面板是有代价的：用户点"打开文件夹"的意图是"我要选一个文件夹"，
+ * 而这个意图在能用系统对话框时**一步就能完成**。多出来的那一屏只是把
+ * 同一个动作拆成两次，还顺带把"系统对话框"包装成了一个需要理解的概念。
+ *
+ * 所以这里的默认路径是：点一下 → 系统对话框 → 选完 → 工作区就位、文件栏展开。
+ * 面板只在**宿主真的弹不出**（browse），或者弹的过程中出错时才出现 ——
+ * 那时它是唯一可行的兜底，而不是一道多余的门槛。
+ *
+ * 【依赖为什么是参数而不是 import】
+ * 这样这段决策就是纯的：不需要浏览器、不需要后端，就能把四条分支都断言一遍
+ * （见 test/picker.test.mjs）。它恰好是最容易写错的一段 ——
+ * 把"取消"当成"错误"弹红条、把"没有能力"当成"用户没选"，都是让人以为程序坏了
+ * 的那类错误。
+ */
+export async function startFolderPick(deps: StartPickDeps): Promise<StartPickResult> {
+  let capability: { kind: string; detail?: string } | null = null
+  try {
+    capability = await deps.fetchPickerCapability()
+  } catch (err) {
+    return {
+      kind: 'error',
+      message: err instanceof Error ? err.message : '无法确认目录选择能力',
+    }
+  }
+
+  const view = resolvePickerView(capability, null)
+  if (view.interaction !== 'native') {
+    // 没有系统对话框（或能力不认识）→ 交给面板；面板会显示原因
+    return { kind: 'browse', reason: view.reason || '当前部署没有系统文件夹对话框。' }
+  }
+
+  try {
+    const result = await deps.pickDirectory()
+    if (result.path) return { kind: 'picked', path: result.path }
+    // 取消是正常操作：不弹错、不提示，什么都不做
+    return { kind: 'cancelled' }
+  } catch (err) {
+    return { kind: 'error', message: err instanceof Error ? err.message : '打开系统对话框失败' }
+  }
+}

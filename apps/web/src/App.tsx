@@ -29,6 +29,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startFolderPick } from './lib/picker'
+import { fetchPickerCapability, pickDirectory } from './lib/settings-api'
 import { AGENT_MODE_META } from './lib/types'
 import type { AgentMode } from './lib/types'
 
@@ -74,6 +76,11 @@ export default function App() {
   // 但它是一条**常驻的一等区域**，展开后与对话并排，不遮挡。
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // 系统对话框正开着（等用户操作）。它会一直挂着，所以按钮必须显示"在等"，
+  // 否则用户会以为没反应而再点一次 —— 而第二次会被服务端拒绝（只允许一个对话框）。
+  const [folderPicking, setFolderPicking] = useState(false)
+  // 退回面板时要带过去的原因（为什么没能直接用系统对话框）
+  const [pickerNote, setPickerNote] = useState('')
 
   // 首次打开任一面板时拉一次设置 ——
   // 文件浏览需要知道"工作区配了没有"，设置面板需要当前值。
@@ -172,6 +179,7 @@ export default function App() {
   const handlePickFolder = useCallback(
     async (absolutePath: string) => {
       setPickerOpen(false)
+      setPickerNote('')
       const ok = await settings.save({ workspace_root: absolutePath })
       if (ok) setFileSidebarOpen(true)
     },
@@ -182,6 +190,39 @@ export default function App() {
     await settings.save({ workspace_root: '' })
     setFileSidebarOpen(false)
   }, [settings])
+
+  /**
+   * 点"打开文件夹"：**直接弹系统对话框**，不先开面板。
+   *
+   * 【为什么是"直接"，而不是"打开一个选择面板"】
+   * 用户点这个按钮的意图在能用系统对话框时一步就能满足。中间那一屏
+   * 只是把同一个动作拆成两次点击，还要求用户先理解"系统对话框"是什么。
+   *
+   * 面板只在两种情况下出现：宿主弹不出对话框（远程部署），或者弹的过程中
+   * 出错 —— 那时它是唯一可行的兜底，顺带把原因显示出来。
+   *
+   * 【为什么要有 folderPicking】
+   * 请求会一直挂着直到用户点完（可能几分钟），而对话框弹出来需要一点点时间。
+   * 这期间按钮必须是"正在等待"的样子：否则用户会以为没反应而再点一次，
+   * 而第二次会被服务端拒绝（同一时刻只允许一个对话框）——
+   * 那时他看到的是一个让人困惑的错误。
+   */
+  const handleOpenFolder = useCallback(async () => {
+    setFolderPicking(true)
+    try {
+      const result = await startFolderPick({ fetchPickerCapability, pickDirectory })
+      if (result.kind === 'picked') {
+        await handlePickFolder(result.path)
+        return
+      }
+      if (result.kind === 'cancelled') return  // 取消：什么都不做，也不提示
+
+      setPickerNote(result.kind === 'error' ? result.message : result.reason)
+      setPickerOpen(true)
+    } finally {
+      setFolderPicking(false)
+    }
+  }, [handlePickFolder])
 
   const offline = server.offline
   const hasMessages = chat.items.length > 0
@@ -226,7 +267,9 @@ export default function App() {
           }}
           workspaceRoot={settings.saved?.agent.workspace_root ?? ''}
           fileSidebarOpen={fileSidebarOpen}
-          onOpenFolder={() => setPickerOpen(true)}
+          folderPicking={folderPicking}
+          // 直接弹系统对话框 —— 面板只在弹不出时作为兜底出现
+          onOpenFolder={() => void handleOpenFolder()}
           onCloseFolder={() => void handleCloseFolder()}
           onToggleFileSidebar={() => setFileSidebarOpen((v) => !v)}
         />
@@ -374,7 +417,11 @@ export default function App() {
       <FolderPicker
         open={pickerOpen}
         current={settings.saved?.agent.workspace_root}
-        onClose={() => setPickerOpen(false)}
+        note={pickerNote}
+        onClose={() => {
+          setPickerOpen(false)
+          setPickerNote('')
+        }}
         onPick={(p) => void handlePickFolder(p)}
       />
     </div>

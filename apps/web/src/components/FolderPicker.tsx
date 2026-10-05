@@ -48,9 +48,19 @@ export interface FolderPickerProps {
   onPick: (absolutePath: string) => void
   /** 当前已配置的工作区，用于高亮"当前" */
   current?: string
+  /**
+   * 由调用方带进来的一句话：**为什么没直接用系统对话框**。
+   *
+   * 【为什么这句话必须由外面传进来，而不是面板自己推断】
+   * 面板是被"退回来"的 —— 决定用它的是上一步（点"打开文件夹"的那一下）：
+   * 宿主的 `capability` 说它弹不出，或者弹的过程中失败了。那两种原因
+   * 只有上一步知道；面板自己去猜只能猜出"没有对话框"，而说不出是为什么。
+   * 而"为什么"正是用户此刻唯一想知道的。
+   */
+  note?: string
 }
 
-export function FolderPicker({ open, onClose, onPick, current }: FolderPickerProps) {
+export function FolderPicker({ open, onClose, onPick, current, note }: FolderPickerProps) {
   const [listing, setListing] = useState<BrowseListing | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -227,6 +237,7 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
         {/* ---------- 主路径：由宿主进程弹出系统对话框 ---------- */}
         <PickerPrimary
           view={view}
+          note={note}
           waiting={waitingDialog}
           locating={locating}
           onServerDialog={() => void handleServerDialog()}
@@ -370,21 +381,28 @@ export function FolderPicker({ open, onClose, onPick, current }: FolderPickerPro
  */
 function PickerPrimary({
   view,
+  note,
   waiting,
   locating,
   onServerDialog,
   onBrowserDialog,
 }: {
   view: PickerView
+  note?: string
   waiting: boolean
   locating: boolean
   onServerDialog: () => void
   onBrowserDialog: () => void
 }) {
+  // 【为什么优先用外面传进来的 note】
+  // 它是**上一步真正失败/退让的原因**（"服务绑定在 0.0.0.0，对话框会开在你看不到的
+  // 屏幕上"），比这里能推断出的通用说法具体得多。而用户此刻唯一想知道的就是原因。
+  const reason = note || view.reason
+
   if (view.status === 'unavailable') {
     return (
       <div className="picker__native">
-        <p className="settings__alert settings__alert--bad">{view.reason}</p>
+        <p className="settings__alert settings__alert--bad">{reason}</p>
         <p className="picker__note picker__note--tight">
           下面的手动浏览目录仍然可用 —— 它不依赖系统对话框。
         </p>
@@ -395,7 +413,7 @@ function PickerPrimary({
   if (view.status === 'loading') {
     return (
       <div className="picker__native">
-        <p className="drawer__note">{view.reason}</p>
+        <p className="drawer__note">{reason}</p>
       </div>
     )
   }
@@ -439,7 +457,7 @@ function PickerPrimary({
         {locating ? '正在定位…' : '用浏览器选择文件夹'}
       </button>
       <p className="picker__note picker__note--tight">
-        {view.reason}
+        {reason}
         <br />
         浏览器只肯给出文件夹**名字**（这是它的隐私设计），所以我们会据名字和目录结构
         在你的磁盘上找回完整路径。定位不到时，用下面手动浏览 —— 那条路是**确定**的。

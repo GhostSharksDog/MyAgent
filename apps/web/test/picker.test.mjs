@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolvePickerView } from '../src/lib/picker.ts'
+import { resolvePickerView, startFolderPick } from '../src/lib/picker.ts'
 
 test('能力还没问到时不渲染任何入口，也不假装已经可用', () => {
   const view = resolvePickerView(null, null)
@@ -75,4 +75,74 @@ test('错误优先于能力：同时拿到两者时以错误为准', () => {
   assert.equal(view.status, 'unavailable')
   assert.equal(view.interaction, null)
   assert.equal(view.reason, '连接被重置')
+})
+
+// ============================================================
+// 点"打开文件夹"这一步做什么
+// ============================================================
+/** 造一个"宿主能弹对话框"的依赖替身。 */
+function nativeDeps(pick) {
+  return {
+    fetchPickerCapability: async () => ({ kind: 'native', detail: '本机回环' }),
+    pickDirectory: pick,
+  }
+}
+
+test('能用系统对话框时：一步拿到路径，不经过任何面板', async () => {
+  const result = await startFolderPick(
+    nativeDeps(async () => ({ path: 'D:/WXP/项目', cancelled: false, hint: '' })),
+  )
+  assert.deepEqual(result, { kind: 'picked', path: 'D:/WXP/项目' })
+})
+
+test('用户取消：既不是成功也不是错误', async () => {
+  // 取消是最容易被写成错误的正常操作。写成 error 的后果是：
+  // 用户点一下"取消"，界面上弹一条红色报错。
+  const result = await startFolderPick(
+    nativeDeps(async () => ({ path: null, cancelled: true, hint: '已取消选择。' })),
+  )
+  assert.deepEqual(result, { kind: 'cancelled' })
+})
+
+test('宿主弹不出对话框：交给应用内面板，并带上原因', async () => {
+  // 这里同时验证"不去尝试弹" —— 申请一次注定失败的对话框只会让用户多等一次
+  let picked = false
+  const result = await startFolderPick({
+    fetchPickerCapability: async () => ({ kind: 'browse', detail: '检测到 SSH 会话' }),
+    pickDirectory: async () => {
+      picked = true
+      return { path: null, cancelled: false, hint: '' }
+    },
+  })
+  assert.deepEqual(result, { kind: 'browse', reason: '检测到 SSH 会话' })
+  assert.equal(picked, false, '没有能力时不该去申请对话框')
+})
+
+test('不认识的能力：也走面板（由面板说明），而不是硬弹一次', async () => {
+  const result = await startFolderPick({
+    fetchPickerCapability: async () => ({ kind: 'native-v2', detail: '' }),
+    pickDirectory: async () => ({ path: 'D:/x', cancelled: false, hint: '' }),
+  })
+  assert.equal(result.kind, 'browse')
+  assert.ok(result.reason.includes('native-v2'))
+})
+
+test('问不到能力：报错并退回面板兜底', async () => {
+  const result = await startFolderPick({
+    fetchPickerCapability: async () => {
+      throw new Error('无法连接后端服务')
+    },
+    pickDirectory: async () => ({ path: null, cancelled: false, hint: '' }),
+  })
+  assert.deepEqual(result, { kind: 'error', message: '无法连接后端服务' })
+})
+
+test('对话框失败：把原因原样带出来（而不是"打开失败"四个字）', async () => {
+  const result = await startFolderPick(
+    nativeDeps(async () => {
+      throw new Error('系统对话框出错：OSError: E_FAIL')
+    }),
+  )
+  assert.equal(result.kind, 'error')
+  assert.ok(result.message.includes('E_FAIL'))
 })

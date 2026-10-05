@@ -42,6 +42,8 @@ export interface SessionSidebarProps {
   // 一处建立、一处使用，各归其位。
   workspaceRoot: string
   fileSidebarOpen: boolean
+  /** 系统对话框正开着（等用户操作）。期间按钮要显示"在等"，不能再触发第二次。 */
+  folderPicking: boolean
   onOpenFolder: () => void
   onCloseFolder: () => void
   onToggleFileSidebar: () => void
@@ -58,6 +60,7 @@ export function SessionSidebar({
   onRefresh,
   workspaceRoot,
   fileSidebarOpen,
+  folderPicking,
   onOpenFolder,
   onCloseFolder,
   onToggleFileSidebar,
@@ -109,8 +112,13 @@ export function SessionSidebar({
               {workspaceRoot}
             </div>
             <div className="ws__actions">
-              <button type="button" className="btn btn--ghost ws__btn" onClick={onOpenFolder}>
-                换一个
+              <button
+                type="button"
+                className="btn btn--ghost ws__btn"
+                onClick={onOpenFolder}
+                disabled={folderPicking}
+              >
+                {folderPicking ? '等待选择…' : '换一个'}
               </button>
               <button
                 type="button"
@@ -123,9 +131,14 @@ export function SessionSidebar({
             </div>
           </div>
         ) : (
-          <button type="button" className="ws__open" onClick={onOpenFolder}>
+          <button
+            type="button"
+            className="ws__open"
+            onClick={onOpenFolder}
+            disabled={folderPicking}
+          >
             <IconFolder size={13} />
-            打开文件夹
+            {folderPicking ? '等待你在系统对话框中选择…' : '打开文件夹'}
           </button>
         )}
       </div>
