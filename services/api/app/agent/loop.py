@@ -33,7 +33,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.memory import ConversationMemory, LongTermMemory
@@ -156,21 +156,56 @@ class Agent:
         tool_trace: list[dict[str, object]] = []
         recent_signatures: list[str] = []
 
+        # ---------- 单轮总时长预算（技术债 T15） ----------
+        # 用 loop.time() 而不是 time.time()：前者是**单调时钟**，
+        # 不受系统时间调整（NTP 校时、夏令时、用户改表）影响。
+        # 用挂钟时间算 deadline 的话，一次系统校时就可能让预算瞬间"到期"，
+        # 或者干脆永远不到期 —— 这类 bug 只在特定时刻出现，几乎无法复现。
+        loop = asyncio.get_running_loop()
+        budget = self._s.run_timeout
+        deadline = (loop.time() + budget) if budget > 0 else None
+
         yield AgentEvent(type=EventType.START, content=user_input)
 
         for step in range(1, self._s.max_steps + 1):
+            # 每步开始先看一眼预算。**这是一个防御性护栏，不是主机制**：
+            # 每一跳都被"剩余预算"包着（见下面两处 asyncio.timeout），
+            # 所以正常路径下这里不会触发 —— 它防的是"将来有人加了一条
+            # 没被包住的 await"。有它，那种改动最坏是"多花一步"，
+            # 而不是"彻底失去时间上限"。
+            if deadline is not None and loop.time() >= deadline:
+                for event in self._budget_exhausted(step, total_usage, budget):
+                    yield event
+                return
+
             yield AgentEvent(type=EventType.STEP, step=step)
 
             # ---------- 1. 调用模型（流式） ----------
             accumulator = StreamAccumulator()
             try:
-                async for delta in self._llm.stream_chat(
-                    messages, tools=self._tools.schemas() or None
-                ):
-                    accumulator.feed(delta)
-                    # 文本增量实时吐给前端 —— 这就是打字机效果的来源
-                    if delta.content:
-                        yield AgentEvent(type=EventType.TOKEN, step=step, content=delta.content)
+                # `asyncio.timeout(None)` 是合法的空操作，所以这里不需要分支：
+                # 有预算就用剩余时间包住这一步，没有就原样跑。
+                # 【为什么用 asyncio.timeout 而不是 wait_for】
+                # 这一步消费的是一个异步迭代器，wait_for 只能包住单个 await，
+                # 要包住 "async for" 得手写一层协程；timeout 是上下文管理器，
+                # 直接套住整段循环，而且它的取消会正确传播进 stream_chat。
+                async with asyncio.timeout(self._remaining(deadline, loop.time())):
+                    async for delta in self._llm.stream_chat(
+                        messages, tools=self._tools.schemas() or None
+                    ):
+                        accumulator.feed(delta)
+                        # 文本增量实时吐给前端 —— 这就是打字机效果的来源
+                        if delta.content:
+                            yield AgentEvent(type=EventType.TOKEN, step=step, content=delta.content)
+            except TimeoutError:
+                # 【必须在 `except Exception` 之前】
+                # TimeoutError 也是 Exception 的子类，放在后面就会被当成
+                # "模型调用失败"，于是终止原因变成 error —— 而"预算用完"
+                # 是可预期的运行结果，不是故障。把它算进错误率会让监控失真。
+                logger.warning("第 %d 步超出单轮总时长预算（%.1fs）", step, budget)
+                for event in self._budget_exhausted(step, total_usage, budget):
+                    yield event
+                return
             except Exception as exc:
                 logger.exception("第 %d 步模型调用失败", step)
                 for event in self._finish(
@@ -276,9 +311,17 @@ class Agent:
 
             if any(self._tools.is_serial(call.name) for call in tool_calls):
                 logger.debug("第 %d 步含不可并发的工具，整段串行执行", step)
-                results = [await self._execute_one(call) for call in tool_calls]
+                pending = self._execute_serially(tool_calls)
             else:
-                results = await self._execute_batch(tool_calls)
+                pending = self._execute_batch(tool_calls)
+
+            # 工具执行同样受总预算约束：某一步的工具卡住时，
+            # 光有单工具超时是不够的（3 个各 30s 的工具就是 90s）
+            results = await self._run_with_budget(pending, deadline, loop, step)
+            if results is None:
+                for event in self._budget_exhausted(step, total_usage, budget):
+                    yield event
+                return
 
             # 按**原始顺序**回灌（不是完成顺序）—— 见上面第 1 条
             for call, result in zip(tool_calls, results, strict=True):
@@ -382,6 +425,56 @@ class Agent:
                 return await self._execute_one(call)
 
         return list(await asyncio.gather(*(guarded(call) for call in calls)))
+
+    async def _execute_serially(self, calls: Sequence[ToolCall]) -> list[ToolResult]:
+        """串行执行（本回合里有 `serial` 工具时走这条路）。"""
+        return [await self._execute_one(call) for call in calls]
+
+    # ============================================================
+    # 单轮总时长预算（T15）
+    # ============================================================
+    @staticmethod
+    def _remaining(deadline: float | None, now: float) -> float | None:
+        """还剩多少预算。`None` 表示不限制（`asyncio.timeout(None)` 是合法的）。"""
+        if deadline is None:
+            return None
+        # 不允许负数：asyncio.timeout 收到负数会立刻超时，语义上正确，
+        # 但显式夹到 0 更清楚地表达"已经用完了"
+        return max(0.0, deadline - now)
+
+    async def _run_with_budget(
+        self,
+        coro: Awaitable[list[ToolResult]],
+        deadline: float | None,
+        loop: asyncio.AbstractEventLoop,
+        step: int,
+    ) -> list[ToolResult] | None:
+        """在剩余预算内等一批工具执行完；超预算返回 None（由调用方收尾）。
+
+        【为什么返回值是 None 而不是抛异常】
+        超时在这里是一个**正常的终止原因**，不是一个需要向上冒泡的错误。
+        用返回值表达它，调用方就没法"忘记处理" —— 类型上就必须想一下
+        `None` 是什么意思（漏掉的话，下一步会拿 None 当结果列表用，
+        那会是一句毫无线索的 TypeError）。
+        """
+        try:
+            async with asyncio.timeout(self._remaining(deadline, loop.time())):
+                return await coro
+        except TimeoutError:
+            logger.warning("第 %d 步的工具执行超出单轮总时长预算", step)
+            return None
+
+    def _budget_exhausted(self, step: int, usage: Usage, budget: float) -> list[AgentEvent]:
+        """预算用尽时的终结事件：说明"用完了多少、做到第几步、怎么放宽"。"""
+        msg = (
+            f"已达单轮总时长预算（{budget:.0f} 秒），在第 {step} 步中止。"
+            f"这通常意味着某一步的外部调用（模型或工具）耗时远超预期，"
+            f"或这个任务本身就需要更长时间。"
+            f"如确有必要，请在配置里调大 AGENT_RUN_TIMEOUT（0 表示不限制）。"
+        )
+        return self._finish(
+            stopped_reason="timeout", steps_used=step, usage=usage, step=step, error=msg
+        )
 
     # ============================================================
     # 终结事件

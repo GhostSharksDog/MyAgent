@@ -925,6 +925,128 @@ class TestTerminalInvariant:
             assert not errors
 
 
+# ============================================================
+# 场景 13：单轮总时长预算（T15）
+# ============================================================
+class TestRunBudget:
+    """`max_steps` 管住成本，但**管不住时间**：最坏情况 ≈ 30 分钟。
+
+    这里的每一条都在回答同一个问题："这个请求会不会永远挂在那里？"
+    """
+
+    async def test_slow_tool_is_cut_off_by_the_budget(self) -> None:
+        """工具比预算慢时，本轮以 timeout 收尾，而不是一直等下去。"""
+        registry = ToolRegistry()
+        registry.register(_SleepTool("alpha", 5.0))  # 工具自己允许 5s，但预算只有 0.3s
+        agent, _ = make_agent(
+            [multi_tool_turn([("alpha", {})]), text_turn("好了")],
+            tools=registry,
+            agent_settings=AgentSettings(max_steps=4, run_timeout=0.3),
+        )
+        events, elapsed = await _timed_run(agent, "x")
+
+        assert elapsed < 2.0, f"预算 0.3s，却跑了 {elapsed:.2f}s"
+        assert events[-1].type == EventType.DONE
+        assert events[-1].stopped_reason == "timeout"
+        # 终止原因要**说清楚怎么放宽**，否则用户除了重试没有别的办法
+        error = next(e for e in events if e.type == EventType.ERROR)
+        assert "总时长预算" in error.content
+        assert "AGENT_RUN_TIMEOUT" in error.content
+
+    async def test_budget_is_cumulative_not_per_hop(self) -> None:
+        """预算是**整轮累计**的：第二步只能用第一步剩下的时间。
+
+        【这条测试的第一版写错了，值得记下来】
+        我原本想断言"预算在步骤之间用完时不会启动第 2 步的模型调用"
+        （也就是代码里那个步骤开头的边界检查）。但那是**不可达**的：
+        每一次跳（模型调用、工具批次）都被 `剩余预算` 包着，
+        所以任何一跳都不可能让总耗时超过预算 —— 到第 2 步开头时
+        预算必然还剩一点点。边界检查是一个防御性护栏（防止将来有人
+        加了一条没被包住的 await），不是主机制。
+
+        主机制是这里测的这条：第 2 步的调用拿到的是**剩余**预算，
+        所以一个 1 秒的模型调用会在 0.05 秒左右被掐断，而不是各步各给 0.3 秒。
+        """
+        registry = ToolRegistry()
+        registry.register(_SleepTool("alpha", 0.25))
+
+        turns = [text_turn("答") for _ in range(3)]
+
+        class SlowSecondTurn(FakeLLM):
+            async def stream_chat(self, *a: Any, **kw: Any) -> AsyncIterator[StreamDelta]:
+                if self._idx == 1:  # 第二次调用：故意慢
+                    await asyncio.sleep(1.0)
+                async for d in super().stream_chat(*a, **kw):
+                    yield d
+
+        agent = Agent(
+            SlowSecondTurn([multi_tool_turn([("alpha", {})]), *turns]),  # type: ignore[arg-type]
+            registry,
+            AgentSettings(max_steps=5, run_timeout=0.3),
+        )
+        events, elapsed = await _timed_run(agent, "x")
+
+        assert events[-1].stopped_reason == "timeout"
+        # 关键断言：整轮没有跑到 1 秒 —— 第二步只拿到了剩下那点预算
+        assert elapsed < 1.0, f"预算 0.3s 却跑了 {elapsed:.2f}s（说明每步各给了 0.3s）"
+
+    async def test_default_is_no_budget(self) -> None:
+        """**默认必须是无害的**：`run_timeout=0` 时一个慢工具不会被掐断。
+
+        与限流、重排、改写同一条纪律：没有数据支持的默认值不开。
+        猜一个预算会把"本来就慢但正常"的请求打断 —— 那比慢更难排查。
+        """
+        registry = ToolRegistry()
+        registry.register(_SleepTool("alpha", 0.4))
+        agent, _ = make_agent(
+            [multi_tool_turn([("alpha", {})]), text_turn("好了")],
+            tools=registry,
+            agent_settings=AgentSettings(max_steps=4),  # 不传 run_timeout → 0
+        )
+        events = await collect(agent, "x")
+
+        assert events[-1].stopped_reason == "finished"
+        assert any(e.type == EventType.TOOL_RESULT and e.tool_ok for e in events)
+
+    async def test_generous_budget_does_not_change_normal_runs(self) -> None:
+        """给一个宽松的预算时，正常流程的行为与不开预算时完全一致。"""
+        agent, _ = make_agent(
+            [tool_turn("calculator", {"expression": "1+1"}), text_turn("2")],
+            agent_settings=AgentSettings(max_steps=4, run_timeout=30.0),
+        )
+        result = await agent.run("1+1=?")
+        assert result.stopped_reason == "finished"
+        assert result.answer == "2"
+
+    async def test_timeout_is_not_counted_as_an_error_stop(self) -> None:
+        """超预算要报成 `timeout`，而不是 `error`。
+
+        【为什么这条值得单独写】
+        `asyncio.TimeoutError` 是 `Exception` 的子类：如果它落在通用的
+        `except Exception` 后面，终止原因就会变成 `error`。
+        而"时间到了"是**可预期的运行结果**，不是故障 ——
+        混进错误率会让监控指标失真（本项目在 `stopped_reason` 上
+        已经踩过一次同样的坑：max_steps 曾被吞成 error）。
+        """
+        turns = [text_turn("答") for _ in range(3)]
+
+        class SlowLLM(FakeLLM):
+            async def stream_chat(self, *a: Any, **kw: Any) -> AsyncIterator[StreamDelta]:
+                await asyncio.sleep(1.0)
+                async for d in super().stream_chat(*a, **kw):
+                    yield d
+
+        agent = Agent(
+            SlowLLM(turns),  # type: ignore[arg-type]
+            build_default_registry(),
+            AgentSettings(max_steps=3, run_timeout=0.2),
+        )
+        events = await collect(agent, "x")
+        done = next(e for e in events if e.type == EventType.DONE)
+        assert done.stopped_reason == "timeout"
+        assert done.stopped_reason != "error"
+
+
 @pytest.mark.live
 class TestRealAPI:
     """真实 API 冒烟测试：只验证协议对接，不验证业务逻辑。
