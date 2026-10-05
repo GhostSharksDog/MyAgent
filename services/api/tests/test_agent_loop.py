@@ -102,12 +102,17 @@ def make_agent(
     tools: ToolRegistry | None = None,
     max_steps: int = 12,
     loop_guard: int = 3,
+    agent_settings: AgentSettings | None = None,
 ) -> tuple[Agent, FakeLLM]:
     fake = FakeLLM(turns)
     agent = Agent(
         fake,  # type: ignore[arg-type] - duck typing，正是依赖注入的好处
         tools or build_default_registry(),
-        AgentSettings(max_steps=max_steps, loop_guard=loop_guard),
+        # 显式传入的 settings 会**真的生效**（包括 profile）。
+        # 这一点值得单独写明：我第一版让 Agent 读全局单例，
+        # 于是这个参数在 profile 上静默失效 —— 参数看起来能控制行为、
+        # 实际不能，而且不报错。**参数既然存在就必须真的起作用。**
+        agent_settings or AgentSettings(max_steps=max_steps, loop_guard=loop_guard),
     )
     return agent, fake
 
@@ -168,22 +173,29 @@ class TestDirectAnswer:
         # 所以除了"等于通用提示词"，还要显式排除"又变回求职提示词"。
         assert first.content != SYSTEM_PROMPT
 
-    async def test_jobhunt_profile_keeps_job_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_jobhunt_profile_keeps_job_prompt(self) -> None:
         """切回 jobhunt 时仍然拿得到求职提示词（只是不再默认加载）。
 
         与上一条配对：一条守住"默认不是求职形态"，一条守住
         "选了求职形态就真的回到求职形态"。只有前者会退化成功能被删掉。
-        """
-        settings = get_settings()
-        monkeypatch.setattr(
-            settings,
-            "agent",
-            settings.agent.model_copy(update={"profile": "jobhunt"}),
-            raising=False,
-        )
 
+        【为什么这里是**传参**而不是 monkeypatch 全局单例】
+        我最初（经子代理）写的是 monkeypatch `get_settings().agent` ——
+        那能通过，是因为当时 `Agent.__init__` 读的是**全局单例**而不是
+        它自己收到的 `settings` 参数。也就是说：那个 `settings` 参数
+        在 profile 上是**静默失效**的，而这个测试恰好掩盖了它。
+
+        改成显式传 `AgentSettings(profile=...)` 之后，这条测试真正验证的是
+        "profile 可注入" —— 顺带把上面那个陷阱也钉住了：
+        如果有人把 `__init__` 改回读全局单例，这条会立刻红。
+        评测里要对比两种 profile 时，也正是靠这个可注入性。
+        """
         tools = build_default_registry(profile="jobhunt")
-        agent, fake = make_agent([text_turn("ok")], tools=tools)
+        agent, fake = make_agent(
+            [text_turn("ok")],
+            tools=tools,
+            agent_settings=AgentSettings(profile="jobhunt"),
+        )
         await collect(agent, "hi")
 
         assert fake.received[0][0].content == build_system_prompt("jobhunt", set(tools.names()))

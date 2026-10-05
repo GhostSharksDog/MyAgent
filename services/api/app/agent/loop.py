@@ -36,7 +36,7 @@ from collections.abc import AsyncIterator, Sequence
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.memory import ConversationMemory, LongTermMemory
 from app.agent.prompts import build_system_prompt
-from app.core.config import AgentSettings, get_settings
+from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
 from app.llm.types import ChatMessage, ToolCall, Usage
 from app.tools.base import ToolRegistry
@@ -91,8 +91,19 @@ class Agent:
         # 一个地方决定，所有调用点自动拿到正确的提示词 ——
         # **不需要每个构造 Agent 的地方都记得传 profile**。
         # 后者正是那种"加了新调用点就忘了传"的典型漏洞。
+        # 【为什么用 settings.profile 而不是 get_settings().agent.profile】
+        #
+        # 我第一版写的是后者（读全局单例），后果是：构造函数里的
+        # `settings: AgentSettings` 参数**在 profile 上完全失效** ——
+        # `AgentSettings(profile="jobhunt")` 会被静默忽略，拿到的还是全局配置。
+        #
+        # 这是个很危险的设计：参数看起来能控制行为，实际不能，而且不报错。
+        # 任何"想给某个 Agent 单独指定形态"的写法（评测里对比两种 profile、
+        # 测试里跑特定形态）都会得到错误结果却毫无提示。
+        #
+        # **参数既然存在，就必须真的起作用** —— 否则它是陷阱而不是接口。
         self._system_prompt = system_prompt or build_system_prompt(
-            get_settings().agent.profile, set(tools.names())
+            self._s.profile, set(tools.names())
         )
 
         # ---------- 记忆（可选） ----------

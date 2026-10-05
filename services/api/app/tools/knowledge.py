@@ -34,6 +34,7 @@ from app.rag.backend import (
     KnowledgeBackendError,
     build_knowledge_backend,
 )
+from app.rag.corpus import EMPTY_CORPUS_HINT
 from app.rag.loaders import DocType
 from app.tools.base import Tool, ToolResult
 
@@ -119,11 +120,11 @@ class KnowledgeSearchTool(Tool):
                 max_chars=settings.rag.max_context_chars,
             )
         except EmptyKnowledgeBase:
-            return ToolResult.failure(
-                "知识库为空，无法检索。请先准备数据："
-                "把简历保存为 data/resume.md，或运行 "
-                "python scripts/ingest.py <你的简历.pdf> --type resume"
-            )
+            # 指引来自**唯一的那一处定义**（corpus.EMPTY_CORPUS_HINT）。
+            # 不要在这里重写一遍：P6 改了知识库的默认数据源之后，
+            # 系统里四份抄写的指引同时失效，而用户照着做只会白忙 ——
+            # 且失败方式很隐蔽（照做了、重试了、还是失败的，看不出哪里错）。
+            return ToolResult.failure(EMPTY_CORPUS_HINT)
         except CircuitOpen as exc:
             # 熔断与"下游调用失败"必须给出不同的提示。
             #

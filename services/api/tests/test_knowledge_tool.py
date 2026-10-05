@@ -201,7 +201,19 @@ class TestRetrieval:
         result = await tool.run(SearchKnowledgeParams(query="任何"))
         assert not result.ok
         assert "知识库为空" in result.content
-        assert "ingest.py" in result.content
+        # 【断言的是"指引指向当前真正有效的入口"，不是某段具体文案】
+        #
+        # 原来这里断言包含 "ingest.py"。P6 把知识库默认数据源改成
+        # "什么都不加载"之后，`ingest.py` 只负责写 data/resume.md，
+        # 而那个文件在通用形态下**根本不会被加载** ——
+        # 于是这条测试还在绿着，而它守着的指引已经彻底失效了：
+        # 用户照着做、重试、再失败，看不出哪里错。
+        #
+        # **测试断言具体文案时会跟着文案一起过期。** 所以改成断言
+        # "指引指向了真正生效的配置入口"，那才是它要守的东西。
+        assert "AGENT_CORPUS_PATHS" in result.content, (
+            "空知识库的指引必须指向当前真正生效的数据源配置入口"
+        )
 
 
 # ============================================================

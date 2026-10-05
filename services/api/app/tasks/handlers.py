@@ -76,19 +76,18 @@ async def handle_reindex(ctx: TaskContext) -> dict[str, Any]:
 
     if stats["chunk_count"] == 0:
         # 语料为空不是"成功但结果为空"，而是明确的问题：
-        # 报成成功会让用户以为索引建好了，然后困惑于检索为什么没结果
+        # 报成成功会让用户以为索引建好了，然后困惑于检索为什么没结果。
         #
-        # 【提示必须指向**当前默认形态下真的有效**的做法】
-        # 默认（general）profile 不会自动加载 data/resume.md ——
-        # 数据源由 AGENT_CORPUS_PATHS 显式声明（见 rag/corpus.py 的说明）。
-        # 原来的提示只教用户"放简历 / 跑 ingest.py"，而这两件事在通用形态下
-        # 都不改变知识库内容：用户照做、重试、再失败，且**看不出哪里错了**。
-        # 一条无效的指引比没有指引更糟 —— 它会让人以为是自己操作得不对。
-        raise RuntimeError(
-            "语料为空，索引未建立。知识库的数据源需要显式声明："
-            "设置 AGENT_CORPUS_PATHS=<文件或目录路径> 后重试；"
-            "或用 AGENT_PROFILE=jobhunt 切到求职形态（会加载 data/resume.md 与 seed/jobs.json）"
-        )
+        # 提示统一取自 corpus.EMPTY_CORPUS_HINT —— 系统里原本有四份抄写的
+        # 指引，P6 改了知识库默认数据源之后它们**同时失效**：
+        # 用户照着"放简历 / 跑 ingest.py"做，而这两件事在通用形态下
+        # 都不改变知识库内容。照做 → 重试 → 再失败，且看不出哪里错了。
+        #
+        # **一条无效的指引比没有指引更糟** —— 它会让人以为是自己操作得不对。
+        # 收敛到一处定义，是为了下次改数据源时不会又漏掉几个地方。
+        from app.rag.corpus import EMPTY_CORPUS_HINT
+
+        raise RuntimeError(f"语料为空，索引未建立。{EMPTY_CORPUS_HINT}")
 
     await ctx.report(100, "重建完成")
     return stats

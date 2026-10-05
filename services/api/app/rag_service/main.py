@@ -39,6 +39,7 @@ from contextlib import asynccontextmanager
 
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, get_trace_id, set_trace_id
+from app.rag.corpus import EMPTY_CORPUS_HINT
 from app.rag.factory import get_shared_retriever, reset_shared_retriever
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -157,7 +158,7 @@ async def retrieve(payload: RetrieveRequest) -> RetrieveResponse:
         # 两者的处理方式完全不同（后者需要引导用户去准备数据）。
         raise HTTPException(
             status_code=503,
-            detail="知识库为空，尚未建立索引。请先运行 reindex 或准备 data/resume.md。",
+            detail=EMPTY_CORPUS_HINT,
         )
 
     hits = await retriever.aretrieve(
@@ -197,7 +198,7 @@ async def context(payload: RetrieveRequest) -> dict[str, str]:
     started = time.perf_counter()
     retriever = get_shared_retriever()
     if len(retriever.chunks) == 0:
-        raise HTTPException(status_code=503, detail="知识库为空，尚未建立索引。")
+        raise HTTPException(status_code=503, detail=EMPTY_CORPUS_HINT)
 
     text = await retriever.aretrieve_context(
         payload.query,
@@ -234,7 +235,7 @@ async def reindex() -> ReindexResponse:
     if stats.get("chunk_count", 0) == 0:
         raise HTTPException(
             status_code=422,
-            detail="语料为空，索引未建立。请准备 data/resume.md 或 seed/jobs.json。",
+            detail=EMPTY_CORPUS_HINT,
         )
 
     return ReindexResponse(
