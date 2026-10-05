@@ -381,6 +381,30 @@ class TestConfigGuards:
 # ============================================================
 # 7. 部署编排的拓扑自洽性
 # ============================================================
+def _app_host_mismatches(compose: dict) -> list[str]:  # type: ignore[type-arg]
+    """找出"启动命令绑定的地址"与 "APP_HOST" 不一致的服务。
+
+    抽成模块级函数是为了**能对它自己的反例写测试** —— 见
+    `test_the_check_itself_catches_a_mismatch`。一条永远为真的断言
+    比没有断言更糟（它给的是虚假的安全感）。
+    """
+    bad: list[str] = []
+    for name, service in compose.get("services", {}).items():
+        cmd = service.get("command")
+        if not cmd:
+            # 没覆盖 command 的服务用镜像默认 CMD —— 那个值在 Dockerfile 里，
+            # 由 TestDockerArtifacts 单独核对（它同样是 0.0.0.0）。
+            continue
+        parts = [str(c) for c in cmd] if isinstance(cmd, list) else str(cmd).split()
+        if "--host" not in parts:
+            continue
+        bound = parts[parts.index("--host") + 1]
+        declared = str((service.get("environment") or {}).get("APP_HOST", "")).strip()
+        if declared != bound:
+            bad.append(f"{name}: 绑定 {bound} 但 APP_HOST={declared!r}")
+    return bad
+
+
 class TestComposeTopology:
     """校验 docker-compose.yml 里那些**必须成对出现**的配置。
 
@@ -476,6 +500,93 @@ class TestComposeTopology:
         """worker 不该对外暴露端口：它没有 HTTP 接口，暴露只是扩大攻击面。"""
         assert not compose["services"]["worker"].get("ports")
 
+    def test_rag_does_not_publish_ports(self, compose: dict) -> None:  # type: ignore[type-arg]
+        """rag 也不能发布端口 —— **它没有访问控制**。
+
+        鉴权中间件只挂在 agent 服务上，而 rag 服务能读到语料内容。
+        把它 publish 出去等于开了一个任何人都能打的、无鉴权的检索接口。
+        要让它在 compose 网络之外可达，正确的顺序是**先给它加鉴权**。
+        """
+        assert not compose["services"]["rag"].get("ports"), (
+            "rag 没有鉴权，不能发布端口；要暴露请先加访问控制"
+        )
+
+    def test_app_host_matches_the_host_uvicorn_binds(self, compose: dict) -> None:  # type: ignore[type-arg]
+        """启动命令里的 `--host` 必须与 `APP_HOST` 一致。
+
+        【这条断言守的是一个"说反话"的事故】
+        访问控制检查（app/api/auth.py 的 check_exposure_posture）判定
+        "是否对外暴露"依据的是 **APP_HOST**，而真正决定监听地址的是
+        uvicorn 的 `--host`。两者不一致时不会报任何错，只会让启动日志写下
+        一句与事实相反的话：
+
+            访问控制：仅监听回环地址，未启用密钥鉴权（本地开发默认形态）
+
+        —— 而容器其实监听在 0.0.0.0 上。**一个说反了的结论比没有结论危险得多。**
+        """
+        bad = _app_host_mismatches(compose)
+        assert not bad, "启动命令的 --host 与 APP_HOST 不一致：\n  " + "\n  ".join(bad)
+
+        # 反证：这条检查本身必须会红（否则它可能只是"恰好没有服务声明 --host"）
+        fake = {
+            "services": {
+                "api": {
+                    "command": ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+                    "environment": {"APP_HOST": "127.0.0.1"},
+                }
+            }
+        }
+        assert _app_host_mismatches(fake), "检查没能发现明显的不一致 —— 它没有在起作用"
+
+    def test_the_check_itself_catches_a_mismatch(self) -> None:
+        """上一条的对照组：@code 0.0.0.0 vs 声明 127.0.0.1 必须被判为不一致。
+
+        【为什么单独写一条而不是混在上一条里】
+        上一条依赖真实的 compose 文件内容；如果哪天有人给 rag 去掉 `--host`、
+        这条检查就会变成"遍历零个服务然后通过"。单独一条对照组把
+        "检查逻辑本身有效"这件事独立钉住。
+        """
+        mismatch = _app_host_mismatches(
+            {
+                "services": {
+                    "svc": {
+                        "command": "uvicorn x:app --host 0.0.0.0 --port 1",
+                        "environment": {"APP_HOST": "127.0.0.1"},
+                    }
+                }
+            }
+        )
+        assert mismatch, "字符串形式的 command 也必须被解析"
+
+        ok = _app_host_mismatches(
+            {
+                "services": {
+                    "svc": {
+                        "command": ["uvicorn", "x:app", "--host", "0.0.0.0"],
+                        "environment": {"APP_HOST": "0.0.0.0"},
+                    }
+                }
+            }
+        )
+        assert not ok
+
+    def test_exposed_services_require_a_key(self, compose: dict) -> None:  # type: ignore[type-arg]
+        """发布了端口的服务必须要求访问密钥（除非显式认领风险）。
+
+        容器里 APP_HOST=0.0.0.0，所以 `check_exposure_posture` 会要求
+        SECURITY_API_KEY 或 SECURITY_ALLOW_UNAUTHENTICATED_EXPOSURE ——
+        编排层应当把同一件事表达出来，而不是让用户撞上启动失败才发现。
+        """
+        for name, service in compose["services"].items():
+            if not service.get("ports"):
+                continue
+            env = self._env(compose, name)
+            has_key = "SECURITY_API_KEY" in env
+            opted_out = "SECURITY_ALLOW_UNAUTHENTICATED_EXPOSURE" in env
+            assert has_key or opted_out, (
+                f"{name} 发布了端口，却没有 SECURITY_API_KEY（也没有显式豁免）"
+            )
+
     def test_dependencies_gate_on_health_not_just_start(self, compose: dict) -> None:  # type: ignore[type-arg]
         """依赖必须是 service_healthy，不能只是 service_started。
 
@@ -518,6 +629,51 @@ class TestDockerArtifacts:
         assert "app.rag_service.main:app" in compose
         assert "app.worker_main" in compose
         assert "app.main:app" in text
+
+    # ---------- T22：前端产物必须进镜像 ----------
+    def test_image_builds_and_ships_the_frontend(self) -> None:
+        """镜像里必须有前端构建阶段，并把产物复制进去。
+
+        【为什么这条能防住"部署成功但界面 404"】
+        前端产物缺失时 mount_frontend **不会报错**（它允许缺失，因为开发时
+        前端跑在 Vite 里）。于是镜像少一步 COPY 的后果是：容器 healthy、
+        接口 200、界面 404 —— 没有任何一处日志会说不对。
+        所以"镜像里有没有 dist"必须由测试盯住，而不能指望启动日志。
+        """
+        root = Path(__file__).resolve().parents[3]
+        text = (root / "docker" / "Dockerfile").read_text(encoding="utf-8")
+
+        assert "AS web" in text, "缺少前端构建阶段"
+        assert "pnpm" in text and "build" in text, "前端阶段没有真的执行构建"
+        assert "COPY --from=web" in text, "前端产物没有被复制进运行镜像"
+        assert "apps/web/dist" in text, "复制目标与 WEB_DIST 的约定不符"
+
+    def test_web_dist_is_declared_where_it_matters(self) -> None:
+        """镜像里必须显式告诉应用去哪找前端产物（靠路径推断在镜像里会落空）。"""
+        root = Path(__file__).resolve().parents[3]
+        dockerfile = (root / "docker" / "Dockerfile").read_text(encoding="utf-8")
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+        assert "ENV WEB_DIST=" in dockerfile
+        assert "WEB_DIST" in compose, "compose 里没有把 WEB_DIST 传给 api 服务"
+
+    def test_dependency_filter_uses_the_real_project_name(self) -> None:
+        """过滤自身依赖时按 pyproject 里的项目名，而不是写死一个会过期的名字。
+
+        【真实踩过的坑】原来写的是 `d.startswith("jobpilot")`，
+        项目改名成 legacy-api 之后这句话永远为真（没有任何依赖以它开头）——
+        它不会报错，只是在某天 pyproject 出现自引用时，让 pip 去 PyPI
+        找一个不存在的包。
+        """
+        root = Path(__file__).resolve().parents[3]
+        text = (root / "docker" / "Dockerfile").read_text(encoding="utf-8")
+        # 只看**代码**：注释里提到旧名字是有价值的（它记录了那个坑），
+        # 而"检查把解释性注释也当成违规"会让下一个人删掉注释而不是修代码。
+        code = "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("#"))
+        assert "jobpilot" not in code.lower(), "还留着旧项目名，说明过滤逻辑是写死的"
+        # 项目名必须是从 pyproject 里读出来的（写法可以是 p.get("name") 或 ["name"]）
+        assert 'get("name"' in code or '["name"]' in code, "应当从 pyproject 读取项目名来过滤"
+        assert "pyproject.toml" in code, "过滤的依据应当来自 pyproject.toml"
 
 
 class TestPowerShellEncoding:

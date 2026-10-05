@@ -35,7 +35,7 @@ from app.api.routes import router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, set_trace_id
 from app.demo.replay import build_replayer
@@ -401,10 +401,27 @@ def mount_frontend(application: FastAPI, dist: Path) -> bool:
     return True
 
 
-# 自动探测仓库内的 apps/web/dist。用相对 __file__ 的路径而不是
-# 当前工作目录 —— 后者会随"从哪个目录启动"变化，是配置里最常见的
-# "本地能跑、换个目录就找不到文件"的来源。
-_web_dist = Path(__file__).resolve().parents[3] / "apps" / "web" / "dist"
+def resolve_web_dist(settings: Settings) -> Path:
+    """前端产物目录：显式配置优先，否则按仓库结构推断。
+
+    【为什么要有"推断"这一半】
+    源码树里跑（`dev.ps1 serve`）是绝大多数场景，那时不该逼任何人多配一个变量。
+    推断用的是 `__file__` 而不是当前工作目录 —— 后者会随"从哪个目录启动"变化，
+    是"本地能跑、换个目录就找不到文件"的经典来源。
+
+    【为什么要有"配置"这一半】
+    镜像里的目录结构不是仓库结构（代码在 /app/app/），推断必然落空，
+    而落空的后果是**静默的**：mount_frontend 允许前端产物缺失（开发时
+    前端跑在 Vite 里，那个宽容是对的），于是容器起来了、接口也正常，
+    只有界面 404 —— 见 docs/01-architecture.md 的 T22。
+    """
+    configured = settings.web_dist.strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path(__file__).resolve().parents[3] / "apps" / "web" / "dist"
+
+
+_web_dist = resolve_web_dist(_settings)
 mount_frontend(app, _web_dist)
 
 

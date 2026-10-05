@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -17,8 +18,53 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# services/api/app/core/config.py -> parents[4] == 项目根目录
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+def _infer_project_root(here: Path) -> Path:
+    """推断项目根目录（`.env`、`data/` 都在那里）。
+
+    【为什么不能写死层数 —— 这是"从没跑过容器"留下的一个致命 bug】
+    原来是 `Path(__file__).resolve().parents[4]`：那串下标把**仓库的目录深度**
+    写进了代码（`services/api/app/core/config.py` 正好五层）。
+
+    镜像里代码在 `/app/app/core/config.py`（只有三层），于是这一行直接抛
+
+        IndexError: 4
+
+    —— **容器连启动都做不到**，而 rag / worker 两个服务会无限重启。
+    这个问题在源码树里永远看不到，单元测试也测不到（它们跑在源码树里）。
+
+    所以改成按**标记**推断，而不是数层数。规则要**分两遍**走：
+
+        第一遍（源码树）：某层有 services/api/pyproject.toml → 那层是仓库根
+        第二遍（镜像）：  某层同时有 pyproject.toml 与 app/ → 那层是 /app
+
+    【为什么必须分两遍，而不是在同一层上依次判断】
+    `services/api` 自己就长得像镜像的 `/app`（有 pyproject.toml、有 app/），
+    所以同一层里先判断第二条的话，**源码树会命中 services/api 而不是仓库根**。
+    后果是静默的：`.env` 会被找到 `services/api/.env` 去（不存在）→
+    用户的密钥读不到，而表现只是"未配置 LLM_API_KEY"。
+    这类"规则顺序"的错误不会报错，只会给出一个看起来合理的错误答案。
+
+    需要非常规布局时可以用 `PROJECT_ROOT` 环境变量直接指定。
+    """
+    override = os.environ.get("PROJECT_ROOT", "").strip()
+    if override:
+        return Path(override).expanduser()
+
+    parents = list(here.parents)
+    for candidate in parents:  # 第一遍：源码树的标记（更具体，优先级更高）
+        if (candidate / "services" / "api" / "pyproject.toml").exists():
+            return candidate
+    for candidate in parents:  # 第二遍：镜像布局（/app 下同时有 pyproject.toml 与 app/）
+        if (candidate / "pyproject.toml").exists() and (candidate / "app").is_dir():
+            return candidate
+
+    # 兜底：两种标记都没有（比如被复制到别处跑）。宁可给一个"看起来对"的目录，
+    # 也不要抛异常 —— 配置层在导入期就崩，会让所有排查手段都用不上。
+    return here.parents[min(4, len(here.parents) - 1)]
+
+
+PROJECT_ROOT = _infer_project_root(Path(__file__).resolve())
 
 
 class AppEnv(StrEnum):
@@ -490,6 +536,19 @@ class Settings(BaseSettings):
     # 而 JSON 是**部署到有采集器的地方**才需要的东西。
     # 反过来（默认 JSON）会让每个人第一次跑起来时对着满屏 JSON 皱眉。
     log_format: Literal["text", "json"] = "text"
+
+    # 前端产物（apps/web/dist）的位置。空 = 按仓库结构推断。
+    #
+    # 【为什么需要它】
+    # `mount_frontend` 原来用 `Path(__file__).parents[3]` 推仓库根 —— 那在
+    # 源码树里成立（services/api/app/main.py → 仓库根），但在**镜像里不成立**：
+    # 代码被复制到 /app/app/，父级只剩根目录，于是它会去找 `/apps/web/dist`。
+    # 结果不会报错，只会静默地"只提供 API"（mount_frontend 本来就允许前端产物
+    # 缺失，因为开发时前端跑在 Vite 里）——**于是容器起来了、界面 404**。
+    #
+    # 与其在镜像里迁就这个巧合的路径算术，不如把位置说清楚：
+    # 容器里设 WEB_DIST=/app/apps/web/dist，源码树里留空即自动推断。
+    web_dist: str = ""
 
     # 嵌套配置：pydantic-settings 会分别按各自 prefix 从环境变量读取
     llm: LLMSettings = Field(default_factory=LLMSettings)

@@ -26,6 +26,33 @@ x-app-env: &app-env
   LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
   APP_ENV: ${APP_ENV:-dev}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # 结构化日志：容器里的日志只能靠采集器收，彩文本对它没有意义（T05）
+  LOG_FORMAT: ${LOG_FORMAT:-json}
+
+  # ---------- 访问控制：这两个值必须与启动命令里的 --host 一致 ----------
+  #
+  # 【这是本项目最"安静"的一个坑】
+  # 访问控制检查（app/api/auth.py）判定"是否对外暴露"依据的是 **APP_HOST**，
+  # 而真正决定监听地址的是 uvicorn 的 `--host`（镜像 CMD 与下面的 rag 命令里
+  # 都是 0.0.0.0）。两者不一致时的后果是最糟的一种：**容器监听所有网卡，
+  # 而启动日志说"仅监听回环地址，未启用密钥鉴权（本地开发默认形态）"** ——
+  # 一个说反了的结论比没有结论危险得多。
+  # 所以这里显式写 0.0.0.0（说真话），随之而来的就是下面那条密钥要求。
+  # test_service_split.py 里有断言钉住这一对，改一边不改另一边会红。
+  APP_HOST: "0.0.0.0"
+
+  # 对外暴露就必须有密钥：没有它，`docker compose up` 会**拒绝启动**。
+  #
+  # 【为什么让它起不来，而不是打条 WARNING】
+  # WARNING 的设计意图就是"不阻断流程"，而这里的后果是
+  # "任何能访问到 8000 的人都能用你的模型额度、读你的文件工作区、看会话历史"。
+  # 确实有网关做鉴权时，显式认领风险：
+  #   SECURITY_ALLOW_UNAUTHENTICATED_EXPOSURE=true
+  #
+  # 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+  # 写进 .env 的 SECURITY_API_KEY 后重启 compose。界面打开时会提示
+  # "这台服务要求访问密钥"，把它填进「设置 → 访问控制」即可。
+  SECURITY_API_KEY: ${SECURITY_API_KEY:?请在 .env 中设置 SECURITY_API_KEY —— 对外暴露的服务不能没有访问密钥（或用 SECURITY_ALLOW_UNAUTHENTICATED_EXPOSURE=true 显式认领风险）}
 
   # ---------- 会话：必须跨进程共享 ----------
   # api 多副本时，会话写在一个副本的内存里，下一个请求打到别的副本就读不到 ——
@@ -47,6 +74,17 @@ x-app-env: &app-env
 
   REDIS_URL: redis://redis:6379/0
 
+# 【这里用 YAML 的**合并键**（`<<:`）而不是直接写别名】
+#
+# 这个锚点本身已经是一个映射（`redis: {condition: ...}`），所以引用它的地方
+# 必须是 `<<: *depends-on-redis`（把键合并进来）。写成 `redis: *depends-on-redis`
+# 会得到 `redis: {redis: {condition: ...}}` —— 多套了一层，
+# compose 校验直接报错：
+#
+#     services.api.depends_on.redis additional properties 'redis' not allowed
+#
+# 这个错从写出来那天起就在文件里，而**一直到真正执行 `docker compose up`
+# 才被发现**（技术债 T22 的具体代价：编排文件是代码，不跑就等于没写）。
 x-depends-on-redis: &depends-on-redis
   redis:
     condition: service_healthy
@@ -75,6 +113,12 @@ services:
 
   # ----------------------------------------------------------
   # RAG 检索服务：CPU 密集，可独立扩容
+  #
+  # ⚠ **它没有访问控制**（鉴权中间件只挂在 agent 服务上），
+  # 所以它**刻意不 publish 端口**：只在 compose 网络内可达。
+  # 要把它暴露出去，先给它加鉴权，而不是加一行 `ports:` ——
+  # 那会变成一个任何人都能打的、无鉴权的检索接口（能读到语料内容）。
+  # test_service_split.py 里有断言盯着这一点。
   # ----------------------------------------------------------
   rag:
     build:
@@ -117,16 +161,21 @@ services:
       dockerfile: docker/Dockerfile
     environment:
       <<: *app-env
+      # 前端产物在镜像里的位置（镜像的目录结构与仓库不同）。
+      # 不设也不会报错 —— 它会安静地"只提供 API"，于是容器 healthy、
+      # 接口 200、界面 404。所以这个变量与 Dockerfile 里的 COPY 是一对。
+      WEB_DIST: /app/apps/web/dist
       # ⚠ 这个值必须与 worker 服务成对出现：
       #   api 里 false（只投递） + worker 服务在跑（只消费）
       # 反过来的组合（两个都消费）不会报错，只会让任务被执行两次。
       TASK_RUN_WORKERS_IN_API: "false"
     ports:
+      # 只有这个端口对外。它是唯一的入口：界面、API、文档都在上面。
       - "${APP_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data
     depends_on:
-      redis: *depends-on-redis
+      <<: *depends-on-redis
       rag:
         condition: service_healthy
     healthcheck:
@@ -154,7 +203,7 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      redis: *depends-on-redis
+      <<: *depends-on-redis
     # 【为什么没有 healthcheck，也没有 ports】
     # worker 没有监听端口，"健康"的唯一判据是"它在消费队列"。
     # 用 HTTP 探针去测它会得到一个永远失败的检查 —— 那比没有检查更糟，

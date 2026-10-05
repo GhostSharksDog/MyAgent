@@ -305,6 +305,74 @@ def test_mypy_and_ruff_are_declared_as_dev_dependencies() -> None:
         assert tool in dev, f"dev 依赖里缺少 {tool}"
 
 
+class TestProjectRootInference:
+    """`PROJECT_ROOT` 的推断必须同时适配**源码树**与**镜像**两种目录布局。
+
+    【为什么这组测试值得存在 —— 它是"从没跑过容器"的直接产物】
+    原来是 `Path(__file__).resolve().parents[4]`，也就是把**仓库的目录深度**
+    写进了代码（services/api/app/core/config.py 正好五层）。
+    镜像里代码在 /app/app/core/config.py（三层）→ 取下标直接 IndexError
+    → rag / worker 两个容器无限重启，而单元测试全绿（它们跑在源码树里）。
+
+    更隐蔽的是**修法本身也会错**：`services/api` 恰好长得像镜像的 `/app`
+    （有 pyproject.toml、有 app/），所以"在同一层里依次判断两条规则"
+    会让源码树命中 services/api —— 后果是 `.env` 被找到不存在的地方，
+    表现为"未配置 LLM_API_KEY"。**规则顺序错了不会报错，只会给出一个
+    看起来合理的错误答案**，所以两种布局都要断言。
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path, layout: str) -> Path:
+        """按指定布局造一个假的项目树，返回"config.py 应该在哪"。"""
+        if layout == "source":
+            (tmp_path / "services" / "api" / "app" / "core").mkdir(parents=True)
+            (tmp_path / "services" / "api" / "pyproject.toml").write_text("", encoding="utf-8")
+            (tmp_path / "data").mkdir()
+            return tmp_path / "services" / "api" / "app" / "core" / "config.py"
+        # 镜像：/app/app/core/config.py + /app/pyproject.toml + /app/app/
+        (tmp_path / "app" / "core").mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+        (tmp_path / "data").mkdir()
+        return tmp_path / "app" / "core" / "config.py"
+
+    def test_source_tree_resolves_to_repo_root(self, tmp_path: Path) -> None:
+        """源码树里必须得到**仓库根**，而不是 services/api。
+
+        这是上面说的"规则顺序"陷阱：`services/api` 也满足镜像那条规则。
+        判断错的后果是 `.env` 找错地方 —— 密钥读不到，而报错说的是
+        "未配置 LLM_API_KEY"，排查方向直接歪掉。
+        """
+        from app.core.config import _infer_project_root
+
+        here = self._tree(tmp_path, "source")
+        assert _infer_project_root(here) == tmp_path
+
+    def test_image_layout_resolves_to_app_dir(self, tmp_path: Path) -> None:
+        """镜像布局里必须得到 /app（data/ 与 pyproject.toml 所在的那层）。"""
+        from app.core.config import _infer_project_root
+
+        assert _infer_project_root(self._tree(tmp_path, "image")) == tmp_path
+
+    def test_no_marker_does_not_raise(self, tmp_path: Path) -> None:
+        """两种标记都没有时也**不能抛异常**。
+
+        配置层在导入期崩掉会让所有排查手段都用不上（连 --help 都跑不起来）。
+        给一个"看起来对"的目录，比抛异常好。
+        """
+        from app.core.config import _infer_project_root
+
+        lonely = tmp_path / "a" / "b" / "c" / "d" / "e" / "config.py"
+        lonely.parent.mkdir(parents=True)
+        assert isinstance(_infer_project_root(lonely), Path)
+
+    def test_env_override_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非常规布局可以用 PROJECT_ROOT 环境变量直接指定。"""
+        from app.core.config import _infer_project_root
+
+        monkeypatch.setenv("PROJECT_ROOT", str(tmp_path / "custom"))
+        assert _infer_project_root(tmp_path / "whatever" / "config.py") == tmp_path / "custom"
+
+
 @pytest.mark.parametrize("module", ["fakeredis", "tiktoken"])
 def test_optional_helpers_are_declared_or_absent(module: str) -> None:
     """可选依赖：要么声明，要么代码里别用 —— 不能"本机碰巧装了"。

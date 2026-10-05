@@ -97,6 +97,35 @@ python scripts\ingest.py "D:\path\你的简历.pdf" --type resume
 .\scripts\dev.ps1 tools
 ```
 
+### Docker 一键部署（api / rag / worker / redis 四进程）
+
+```powershell
+# 1. 生成访问密钥并写进 .env（对外暴露必须有密钥，否则会拒绝启动）
+python -c "import secrets;print(secrets.token_urlsafe(32))"
+#    .env 里加两行：LLM_API_KEY=... 与 SECURITY_API_KEY=<上面生成的>
+
+# 2. 起整套拓扑（前端产物在构建期打进镜像，所以只有 8000 一个入口）
+docker compose up -d --build
+
+# 3. 验证拓扑真的对（见下）
+python scripts\verify_compose.py
+
+# 4. 收工
+docker compose down
+```
+
+`scripts/verify_compose.py` 检查的不是"容器起来了"，而是四件**配错了也不会报错**的事：
+
+| 检查 | 配错的后果（都不会报错） |
+|---|---|
+| `/healthz` 的 `session_backend=redis` | 静默退回内存 → 多副本下"用户偶尔丢历史" |
+| `task_backend=redis` 且 `task_workers_in_api=false` | 任务永远 pending，而所有容器都 healthy |
+| `rag_backend=remote` | 静默退回单体，拆分带来的资源隔离全部失效 |
+| 界面真的能打开 + 无密钥 401 / 带密钥 200 | 前端产物没进镜像 → 接口 200、**界面 404** |
+
+最后还会投递一个 `reindex` 任务并等它完成 —— api 里没有 worker，所以它能跑完就是
+**跨进程**的直接证据。这是拆分部署唯一无法用单进程测试证明的部分。
+
 提交前跑一遍门禁（格式化 + 静态检查 + 测试）：
 
 ```powershell
@@ -206,7 +235,7 @@ curl http://127.0.0.1:8000/api/tasks/<task_id>
 | **P5** | 求职转化：简历条目、STAR 故事、技术深挖问答；RAG 消融 + Query 改写（HyDE 的 Recall@5 0.869 → 0.964） | ✅ 完成 |
 | **P6** | 通用化：`general` / `jobhunt` 双形态（默认不加载求职能力）、文件工作区与右侧文件栏、设置界面、「打开文件夹」由**宿主进程**弹系统对话框 | ✅ 完成 |
 
-**810 个后端测试 + 78 个前端测试**，全部通过（`.\scripts\dev.ps1 check`）。
+**828 个后端测试 + 78 个前端测试**，全部通过（`.\scripts\dev.ps1 check`）。
 
 每个阶段的取舍与代价都写在 [`docs/01-architecture.md`](docs/01-architecture.md)：
 包括**已知技术债清单**（哪些还没做、为什么还没做、影响是什么），
