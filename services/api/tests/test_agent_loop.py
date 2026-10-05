@@ -692,7 +692,9 @@ class _SleepTool(Tool):
 
     params_model = _NoParams
 
-    def __init__(self, name: str, delay: float, *, serial: bool = False, boom: bool = False) -> None:
+    def __init__(
+        self, name: str, delay: float, *, serial: bool = False, boom: bool = False
+    ) -> None:
         self.name = name
         self.description = f"sleep {delay}s"
         self.timeout = 5.0
