@@ -900,50 +900,56 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 
 按"影响面 × 修复成本"排序。**这张表建议直接背下来**：面试官问"你这个项目有什么不足"，照着讲比临时想靠谱得多，而且展示的是"我知道我的取舍代价"。
 
-| # | 技术债 | 影响 | 现在的表现 / 绕过方式 | 解决阶段 |
+> **本节在 2026-10-05 重新核对过一遍。** 原稿锚定在 P1 基线上（20 条），其中大部分已经在 P2–P6 与随后几轮清理中修掉了 —— 一份"已经修完却还挂在债里"的清单，比没有清单更误导人。所以现在分成三部分：**8.1 仍未解决**、**8.2 已修复（含怎么修的）**、**8.3 一页答辩版**。每一条都对着当前代码重新验证过。
+
+### 8.1 仍未解决
+
+| # | 技术债 | 影响 | 现状 / 绕过方式 | 要做的话 |
 |---|---|---|---|---|
-| T01 | **工具串行执行**（`loop.py:155` 的 `for call in tool_calls`） | 多个互不依赖的工具调用延迟线性叠加（3T 而非 1T） | 代码注释里已标注为 P3 优化项；目前靠减少工具数量规避 | P3（`asyncio.gather` + 并发上限 + 失败隔离） |
-| T02 | **无持久化**：`config.py:107` 声明了 `database_url`，但没有任何代码使用；会话历史只在调用方内存（P2 的 `app/rag/store.py` 同样是 numpy 内存实现，不落盘） | 进程重启历史与索引全丢；无法做会话回放、无法做评测数据留存 | HTTP 依赖前端自己存历史并回传（`schemas.py:30`） | P2（SQLite 起步）/ P4（PostgreSQL + pgvector） |
-| T03 | **无鉴权**：没有 API key 校验、没有用户体系，`/api/chat` 完全开放 | **一旦公开部署，任何人都能刷光你的 API 额度** | 只在本机 `127.0.0.1` 运行（`config.py:98` 的默认值） | P3（简单 API key）/ P4（网关统一鉴权） |
-| T04 | **无限流与配额**：无 IP/用户级 QPS 限制、无单会话 token 预算 | 单个循环请求即可造成显著成本；且成本随步数平方增长（第 7.3 节） | 只有 `max_steps=12` 与死循环检测两道护栏 | P3（Redis 计数器）/ P4（网关限流 + 预算熔断） |
-| T05 | **无 trace id / 无结构化日志**：`logging.py` 只实现了彩色文本 formatter，"生产 json 模式"写在 docstring 里但没实现 | 多跳请求排障只能靠时间戳相邻性猜测；日志无法聚合查询 | 临时用 `--show-raw`（`cli.py:83-87`）看事件流排查 | P4（OpenTelemetry + JSON formatter） |
-| T06 | **没有 HTTP 层测试**：`tests/` 只有 `test_agent_loop.py` / `test_stream.py` / `test_tools.py`，**没有任何一处导入 `app.api` 或 `app.main`**（已验证：`grep -E "TestClient\|ASGITransport\|from app.api\|from app.main"` 在 tests 下零命中） | 路由签名、SSE 契约、状态码、CORS 行为全靠手工 curl 验证；改动 `routes.py` 无自动化保护 | 已手工验证 5 个端点可用（见 `00-roadmap.md` 第 0 节） | **P1.5（成本最低、收益最高，建议优先做）** |
-| T07 | **tool 消息不入历史**（ADR-006 的代价） | 多轮对话里模型"记不住上一轮查过什么"，会重复调用工具，既慢又费 token | `schemas.py:24` 用 `Literal` 从类型上禁止；`cli.py:129-131` 只写两条消息 | P2（改为保留结构化摘要） |
-| T08 | **`truncated` 标记未进事件流**：`base.py:57` 算了、`loop.py:175-182` 没传、`events.py:38-53` 没这个字段 | UI 与调用方都不知道观察结果被截断了（模型自己也不知道，因为 `as_observation()` 对成功结果不追加提示） | 无（静默截断） | **P2（约 3 行代码改动，建议顺手修）——截至本文写作仍存在** |
-| T09 | **上下文无 token 计数**：`MAX_OBSERVATION_CHARS = 8000` 是**字符**数；`tiktoken` 已安装但全仓未使用 | 中文场景下 8000 字符约 5k–8k token，明显偏大；无法做真正的 token 预算与超窗保护 | 靠 8000 字符的保守上限兜底 | P2（tiktoken 估算 + 动态预算） |
-| ~~T10~~ | ~~`stopped_reason` 语义丢失~~（`max_steps` / `loop_detected` 被统一吞成 `error`） | —— | —— | ✅ **已在 P1 加固中修复**：`AgentEvent.stopped_reason` + `done` 事件权威携带 |
-| T11 | **流式错误事件的 data 不是合法 JSON**：`routes.py:112` 用 f-string + `exc!r` 手工拼 JSON | 前端 `JSON.parse` 会抛异常（Python `repr` 用单引号、且未做转义），错误提示直接丢失 | 目前只在极端异常路径触发 | **P1.5（一行改成 `AgentEvent(type=EventType.ERROR, content=str(exc)).to_sse()`）** |
-| T12 | **CLI 访问私有属性**：`cli.py:174` 的 `agent._tools` 从外部读取受保护成员 | 破坏封装；`Agent` 想重构内部结构时会连带破坏 CLI | 无 | P1.5（`Agent` 暴露只读的 `tool_briefs()` 属性） |
-| ~~T13~~ | ~~`_parse_chunk` 只取 `delta.tool_calls[0]`~~ | 单个 delta 携带多个分片时静默丢弃其余调用 | —— | ✅ **已在 P1 加固中修复**：`StreamDelta.tool_call_deltas` 改为列表，`StreamAccumulator.feed` 遍历聚合 |
-| T14 | **CORS 放行任意 localhost 端口**（`main.py:81` 的 `allow_origin_regex`） | 开发方便，但生产环境若沿用则允许任意本地页面调用；配合 T03（无鉴权）风险叠加 | 代码注释已标注"生产环境应改为精确白名单" | P4（配置化白名单） |
-| T15 | **无请求级整体超时预算** | 最坏情况单请求 ≈ `max_steps(12) × (LLM 120s + 工具 30s) ≈ 30 分钟`；长期占用连接与额度 | 无（只有单跳超时） | P3（总 deadline + 剩余预算传递） |
-| T16 | **缺"配置项覆盖测试"** | ADR-007 的那个坑（嵌套 `env_file`）未来仍可能重犯，且症状静默 | 靠 `config.py:38-43` 的注释提醒 | P1.5（断言 `.env.example` 的每个键都能被 `Settings` 读到） |
-| T17 | **依赖未锁定**：`pyproject.toml` 只有 `>=` 下限，没有 lock 文件；且实际环境已装但未声明 `alembic` / `fakeredis` / `tiktoken` / `openai` | 别人 clone 后装出来的版本可能与本机不同，"在我机器上是好的"；P4 会用到的依赖没进清单 | 本机环境已固化（版本记录在 `00-roadmap.md` 附录 A） | P2（补声明）/ P4（lock 文件 + CI） |
-| T18 | **README 与代码不同步**：`README.md:69-70` 仍写着 P0"🔄 进行中"、P1"⏳"，而两者实际都已完成（70 测试通过、5 个端点验证可用） | 项目门面对读者的第一印象就是"过期的"——面试官打开仓库第一眼看的就是 README 的进度表 | 本文件与 `00-roadmap.md` 已按真实状态编写；`docs/03-journal/` 与 `docs/02-concepts/02-agent-loop.md` 也已补齐 | 立即（更新 README 进度表，10 分钟的事） |
-| T19 | **`error` 事件与 `done` 事件的配对靠约定**：`loop.py` 的四个 return 分支各自保证"先 error 再 done" | 新增分支时容易漏发 `done`，前端会一直等（无终态） | 目前 4 处都正确（`loop.py:115`、`:133`、`:150`、`:201`） | P2（把事件产出收敛到一个 `finish()` 辅助函数） |
-| T20 | **clone 后 demo 跑不通 + 演示数据含 PII**：`read_resume` 读的是 `data/resume.md`，而 `.gitignore:36` 的 `data/` 把整个 `data/` 排除在版本库外 | 任何人 clone 后第一次问简历相关问题，`read_resume` 必然返回"未找到简历文件"（`builtin.py:173-175`）——**这是一个求职作品集最不该有的第一印象**；反过来若把真实简历提交，就泄露手机号与邮箱 | 只有本机有真实简历；面试演示也只能在本机做 | **立即**：①补一个可提交的 `data/resume.sample.md`（脱敏、虚构内容）；②`_read_resume` 找不到真实简历时回退到示例文件并在观察结果里说明"当前为示例简历"；③在 README 里写清这一点 |
+| T03 | **没有鉴权** | 一旦公开部署，任何人刷光你的 API 额度 | 安全边界是"只监听 `127.0.0.1`"—— 那是**部署约束**，不是安全机制；限流已实现但默认关（阈值没标定，见 8.2） | 网关统一鉴权，或一个 API key 中间件 + "拒绝以非回环地址启动且无 key"的组合 |
+| T15 | **没有请求级整体超时预算** | 最坏单请求 ≈ `max_steps(12) × (LLM 120s + 工具 30s) ≈ 30 分钟`，长期占用连接与额度 | 只有单跳超时。工具并发（T01）缩短了**同一回合**的墙钟时间，但没有改变总预算问题 | 给每次 run 一个 deadline，每一跳用 `min(单项超时, 剩余预算)` |
+| T02 | **没有持久化** | 进程重启后**向量索引**全丢（会话其实已经在 SessionStore 里，Redis 后端是持久的）；另外 `DATABASE_URL` 声明了却**没有任何代码使用** | 会话走 `SessionStore`（memory / fake / redis）；索引在内存 | SQLite 起步（SQLAlchemy 已在依赖里）；同时决定 `DATABASE_URL` 是落地还是删掉 —— 一个"写在模板里但没人读"的配置项本身就是误导 |
+| T09 | **上下文没有 token 计数** | `MAX_OBSERVATION_CHARS = 8000` 是**字符**数：中文场景约 5k–8k token，偏大；也因此做不了真正的 token 预算与超窗保护 | 靠保守的字符上限兜底 | `tiktoken` 估算 + 动态预算（注意它只对 OpenAI 系编码准确，别的模型族要另配） |
+| T07 | **tool 消息不入历史**（ADR-006 的代价） | 多轮对话里模型"记不住上一轮查过什么"，会重复调用工具，既慢又费 token | 类型上就禁止（`Literal`），只写 user/assistant | 改为保留**结构化摘要**：原始 tool 消息会持续吃 token，全留是另一种浪费 |
+| T14 | **CORS 放行任意 localhost 端口**（`main.py` 的 `allow_origin_regex`） | 生产沿用则允许任意本地页面调用；与 T03 叠加后风险放大 | 代码注释已标注"生产应改为精确白名单" | 配置化白名单 —— 本身是一行的事，但**要和 T03 一起做才有意义** |
+| T21 | **依赖没有锁定** | 别人 clone 后装出来的版本可能与本机不同。对这个项目尤其要紧：`scikit-learn` / `numpy` 的小版本差异足以让**检索指标漂移**，而指标是这份项目的主要证据 | 只声明了下限（`>=`），仓库里没有 lock 文件 | `uv lock` / `pip-compile` 产出 lock，并在 CI 里按 lock 安装 |
+| T22 | **部署是纸面上的** | `docker compose up` **从未跑通**：前端产物根本没进镜像（`compose.yml` 里也没有 web 服务），`docker/Dockerfile` 里还留着一句按旧项目名（`jobpilot`）过滤依赖的过期代码 | 本地 `dev.ps1 serve` 完全可用 | 构建期加一个 node 阶段产出 `dist`、让 `mount_frontend` 的路径可配置，然后真跑一次并留下证据 |
 
-### 已在 P1 加固中修掉的（原稿记录过，现已不复存在）
+> **T04（限流与配额）不在这张表里**，它属于"已实现、按设计保持关闭"：`TokenBucket` 与全部配置项都在，默认 `RESILIENCE_RATE_LIMIT_ENABLED=false`。理由是**没有标定过的阈值比没有阈值更危险** —— 它只会拒掉正常用户，而不会挡住真正的滥用。谁部署谁标定。
 
-保留这张表是为了说明一件事：**这些 bug 都不是"写错了"，而是"没被想到"**——它们全都有一个共同特征：**静默失真**（数据看起来正常，实际是错的），因此只有靠对协议的精确理解才能发现。面试里这类例子比"我用过什么技术"有说服力得多。
+### 8.2 已修复（含怎么修的）
 
-| 原问题 | 为什么危险 | 修法 |
+保留这张表不是为了列成绩，而是因为**其中大多数不是"写错了"，而是"没想到"** —— 面试里这类例子比"我用过什么技术"有说服力得多。
+
+| # | 原问题 | 修法 |
 |---|---|---|
-| 同步工具直接在事件循环里跑（`FunctionTool.run` 原实现：`self._fn(params)` 后 `if inspect.isawaitable(...)`） | `asyncio.wait_for` **只能放弃等待协程，无法中断同步代码**——`calculator` / `read_resume` / `search_jobs` 全是同步函数，读大文件时整个服务（含 `/healthz`、其他请求、心跳）一起停摆，而 `timeout=30` 形同虚设 | 按 `inspect.iscoroutinefunction` 分流：同步函数走 `asyncio.to_thread`，与 `cli.py:141` 处理 `input()` 是同一套路 |
-| 失败路径的 `duration_ms` 恒为 0 | 一个跑了 30 秒才超时的工具在观测里显示 0ms，**排障会被假数据带偏** | 抽出 `stamp()`，所有 return 路径（校验失败 / 超时 / ToolError / 未知异常）统一记时 |
-| `_call_signature` 只哈希已解析的 `arguments` | 模型吐出非法 JSON 时 `arguments` 退化成空 dict，于是**参数完全不同的非法调用共享同一指纹**，被误判为"死循环"提前中止——本该触发自我修正的场景反而变成硬失败 | 解析失败时退回 `f"{name}\|{raw_arguments}"` |
-| 最后一步仍然执行工具 | 观察结果已不可能回灌给模型，执行它纯属浪费（读大文件、调外部 API 都可能很贵） | `step >= max_steps` 时直接 `break` 到预算耗尽分支，顺带让终止原因更准确 |
-| 流式分片只取 `delta.tool_calls[0]`（T13） | 一个 chunk 携带多个工具调用时会**静默丢掉其余调用**，表现为"模型明明要调两个工具，只执行了一个" | `StreamDelta.tool_call_deltas` 改为列表，`StreamAccumulator.feed` 遍历聚合 |
-| `stopped_reason` 语义丢失（T10） | `max_steps` / `loop_detected` 被统一吞成 `error`，"正常预算终止"被算进"错误率" | `AgentEvent.stopped_reason` 由 `done` 事件权威携带，`Agent.run()` 直接读取 |
+| T01 | 一个回合里的多个工具调用**串行** `await`，延迟线性叠加（3×T） | `asyncio.gather` + `Semaphore`（新增 `AGENT_TOOL_CONCURRENCY`，默认 4）。并发必须同时守住三件事：**结果仍按模型给出的顺序回灌**（不是完成顺序）、**失败隔离**（`_execute_one` 把异常就地收敛成"这一条失败" —— 并发后 gather 的异常会取消同批，失败范围会被放大）、**有上限**。另加 `Tool.serial`：有副作用的工具会让整个回合退回串行，因为混合策略需要调度保证，而这个循环给不出。测试用**时序**断言（3×0.25s：串行 vs 并发），并配一条 `tool_concurrency=1` 的对照 —— 两条合起来才证明机制在起作用 |
+| T19 | `error` 与 `done` 的配对靠约定，四个分支各写一遍，漏发 `done` 时前端会一直等 | 收敛到 `_finish()`：可选 error + 必定 done。`done` 的存在从"纪律"变成"结构性事实"，并配一组"每个出口恰好一个 done"的不变量测试 |
+| T05 | trace id 早就有了，但注释里承诺的 JSON 日志**并不存在** | `JsonFormatter`（JSON Lines）+ `LOG_FORMAT=text｜json`（默认 text）。异常单独放 `exc`（堆栈混进 message 会让它无法聚合）、`extra=` 字段进 JSON、`default=str` 兜底不丢日志。顺带发现拆出去的 **RAG 服务根本读不到日志配置**（裸 `setup_logging()`），以及 worker / CLI 两个入口点没传形态 |
+| T16 | 没有"配置项覆盖测试"，ADR-007 的坑（嵌套 `BaseSettings` 不继承 `env_file`）随时可能重犯，且症状静默 | 三层断言：文档里的每个键都能映射到真实字段、文档里的**示例值**真的落在那个字段上（能抓前缀写错）、每个嵌套配置类都声明了自己的 `env_prefix`/`env_file`。**验证过它有牙**：故意往 `.env.example` 加一个 `AGENT_MAX_STEPS_TYPO` 会让它红 |
+| T17 | 代码 import 了没声明的包 —— 本机装了所以跑得通，别人 clone 下来在运行期才炸 | 这条测试**第一次跑就报了 4 处**，修法分两类：`starlette` / `scipy` 是被**直接 import** 的传递依赖（直接 import 就必须直接声明，否则"能不能启动"押在别人的依赖树上）；`pypdf` / `python-docx`（`[formats]`）与 `fakeredis`（`[fake-redis]`）是**设计上可选**的，加载器里本来就有明确的安装指引 |
+| T12 | CLI 直接读 `agent._tools`（受保护成员） | 暴露只读的 `Agent.tool_briefs`。代价不是"不优雅"：Agent 一改内部结构就会连带改坏 CLI，而这种破坏不会出现在 Agent 自己的测试里 |
+| T18 | README 的进度表停在 P3（P4/P5 标着 ⏳，且缺 P6），而它决定第一印象 | 更新为 P0–P6 全部完成，并附上测试数、检索消融与压测两组实测数据 |
+| T06 | 没有 HTTP 层测试（没有任何一处导入 `app.api` / `app.main`） | 已在 P3–P6 补齐：`test_api` / `test_stream` / `test_session_api` / `test_settings_api` / `test_directory_picker` / `test_tasks_api` … |
+| T08 | `truncated` 算了、但没进事件流（静默截断） | `AgentEvent.truncated` 由 `tool_result` 携带 —— 模型和界面都能知道"观察结果被截断了" |
+| T11 | 流式错误事件的 data 不是合法 JSON（手工 f-string + `exc!r`），前端 `JSON.parse` 会抛异常、错误提示直接丢失 | 改为 `AgentEvent(...).to_sse()` |
+| T20 | clone 后 demo 跑不通：`read_resume` 读 `data/resume.md`，而 `data/` 被 gitignore | 回退到可提交的 `seed/resume.sample.md`，并在观察结果里**明确说明"当前为示例简历"** —— 让模型知道自己看的是示例 |
 
-### 建议的修复顺序（按性价比）
+### 8.3 一页答辩版
 
-1. **T20（示例简历回退）** —— 一小时以内，但直接决定"别人 clone 下来能不能跑通"，**优先级最高**。
-2. **T11 + T08（各 1–5 行）** —— 一个下午，修掉两个"静默失败"。
-3. **T06（HTTP 层测试）** —— 半天，从此 `routes.py` 有回归保护。
-4. **T18（README 进度表）** —— 十分钟，直接影响项目第一印象。
-5. **T02 + T09 + T07（P2 一组）** —— 持久化、token 预算、摘要历史，是 P2 的主线。
-6. **其余按阶段推进**。
+**问"你这个项目有什么不足"时，按这个顺序讲**：
+
+1. **T03 + T14（鉴权与 CORS）** —— 现在的安全边界是"只监听本机"，那是部署约束不是安全机制。要公开部署，先做这两条（它们必须一起做）。
+2. **T15（请求级超时预算）** —— 唯一"可能把服务拖垮"的缺口：`max_steps` 管住了成本，没管住时间。
+3. **T02 + T21（持久化与 lock 文件）** —— 前者是功能完整性；后者决定"别人能不能复现你的结果"，而这对本项目尤其要紧：RAG 指标会被依赖小版本影响。
+4. **T22（部署从未跑通）** —— 诚实地说："架构图是真的，`docker compose up` 还没验证过。"
+
+**已经解决、但更值得展开讲的是这四条**（都是"静默失真"类，不是写错）：
+
+- **工具并发（T01）**：延迟 3T → 1T 是收益，而真正的工作量在于**并发引入的三个新失败面**（顺序、隔离、上限）。
+- **终结事件收敛（T19）**：把一条只存在于脑子里的约定，变成结构性事实。
+- **JSON 日志（T05）**：补上注释承诺的能力时，顺手发现拆出去的那个服务根本读不到日志配置 —— **"配置了但没生效"比没有配置项更难发现**。
+- **配置与依赖覆盖率（T16/T17）**：两条清单类断言，第一次跑就抓到 4 个真实漂移。
 
 ---
 
