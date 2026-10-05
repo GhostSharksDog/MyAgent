@@ -31,6 +31,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -83,6 +84,50 @@ def _worker_log_has(task_id: str) -> bool:
     return task_id in (proc.stdout or "")
 
 
+# 与"是否打到容器"有关的字段：这些值在 compose 里是写死的，本地开发服务不会是它们
+_IDENTITY_FIELDS = ("session_backend", "task_backend", "rag_backend")
+
+
+def container_healthz() -> tuple[dict | None, str]:
+    """在**容器内部**问一次 `/healthz`，用来核对"我打到的到底是不是这个容器"。
+
+    【为什么需要它 —— 这个脚本曾经骗过我一次】
+
+    本机还开着 `dev.ps1 serve`（监听 `127.0.0.1:8000`），而 Docker 把容器端口
+    发布在 `0.0.0.0:8000`。**Windows 允许这两个绑定同时存在，而更具体的
+    127.0.0.1 会抢答** —— 于是脚本对着本地服务做完了全部检查，把
+    "容器里没有这些环境变量"报成了"拆分拓扑配错了"。
+
+    那是**结论正好相反**的一类失败：它会让人去改本来就是对的编排文件，
+    而真正的修复是"先停掉本地服务"。所以现在先问一次容器自己，
+    两边答案不一致就**立刻停下并说清原因**，而不是继续输出一屏看似有意义的 FAIL。
+    """
+    probe = (
+        "import urllib.request;"
+        "print(urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5).read().decode())"
+    )
+    try:
+        proc = subprocess.run(  # 命令是固定的字面量，不涉及用户输入
+            ["docker", "compose", "exec", "-T", "api", "python", "-c", probe],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(Path(__file__).resolve().parent.parent),
+            check=False,
+        )
+    except OSError as exc:
+        return None, str(exc)
+    if proc.returncode != 0:
+        return None, (proc.stderr or proc.stdout or "").strip()[:150]
+    for line in reversed((proc.stdout or "").splitlines()):
+        if line.strip().startswith("{"):
+            try:
+                return json.loads(line), ""
+            except ValueError:
+                continue
+    return None, "容器内没有返回 JSON"
+
+
 print("=" * 70)
 print(f"docker compose 拓扑验证（{BASE}）")
 print("=" * 70)
@@ -98,6 +143,35 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
         print("\n  先确认容器在跑：docker compose ps")
         sys.exit(1)
     check(health.get("status") == "ok", "GET /healthz 返回 ok")
+
+    print("\n=== 0.5 我打到的到底是不是这个容器 ===")
+    inside, why = container_healthz()
+    if inside is None:
+        print(f"  [WARN] 无法在容器内探测（{why}）—— 跳过这项核对")
+    else:
+        same = all(inside.get(f) == health.get(f) for f in _IDENTITY_FIELDS)
+        check(
+            same,
+            "主机端口上回答的就是 compose 起的那个容器",
+            f"容器内 {[(f, inside.get(f)) for f in _IDENTITY_FIELDS]}",
+        )
+        if not same:
+            # 停在这里，而不是继续输出一屏"拓扑配错了"。见 container_healthz 的说明：
+            # 那种输出的结论正好是反的，会让人去改本来正确的编排文件。
+            print("\n  诊断：主机端口上回答的服务**不是**这个容器。")
+            print(
+                "        最常见的原因：本机还开着 `dev.ps1 serve`（监听 127.0.0.1:8000），"
+            )
+            print(
+                "        而 Docker 把容器端口发布在 0.0.0.0:8000 —— Windows 允许两者并存，"
+            )
+            print("        且**更具体的 127.0.0.1 会抢答**。")
+            print(
+                "        先停掉本地服务再跑这个脚本：Get-Process python | Stop-Process"
+            )
+            print(f"\n  主机侧：{ {f: health.get(f) for f in _IDENTITY_FIELDS} }")
+            print(f"  容器内：{ {f: inside.get(f) for f in _IDENTITY_FIELDS} }")
+            sys.exit(1)
 
     print("\n=== 1. 三个 backend（配错了不会报错，只会静默退化）===")
     session_backend = health.get("session_backend")

@@ -47,8 +47,20 @@ RUN pnpm build
 # ------------------------------------------------------------
 FROM python:3.12-slim AS builder
 
-ENV PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# 【`PIP_NO_CACHE_DIR=1` 被移掉了 —— 它让"下载失败"变成不可续传】
+#
+# 一次真实失败：在慢链路上（实测 60–90 kB/s）构建时，pip 下载到第 27 分钟
+# 撞上 `ReadTimeoutError: files.pythonhosted.org Read timed out`。
+# 而 `PIP_NO_CACHE_DIR=1` 意味着**每次重试都从零开始下那 50MB** ——
+# 于是"网络慢"变成"永远构建不成功"，重试多少次都一样。
+#
+# 现在的做法是给 pip 挂一个 BuildKit 缓存卷（见下面的 RUN --mount）：
+# 下载过的 wheel 留在缓存里，**重试是接着下，而不是重下**。
+# 慢网络下这一点比任何"优化"都实在。
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # 默认 15s 的读超时对慢链路太紧；拉到 60s，并把重试次数加大。
+    # 这两个值只影响"网络抖动时会不会失败"，不影响装出来的东西。
+    PIP_DEFAULT_TIMEOUT=60
 
 WORKDIR /build
 
@@ -89,8 +101,16 @@ COPY services/api/README.md* ./
 #     heredoc 只能作为 RUN 的整段内容，不能这样嵌在 `$( )` 命令替换里。
 # 所以这里保持最普通的写法：一条 `python -c` + 一条 pip，中间用 `&&` 连起来，
 # 仍然是同一层、同一份缓存键。
-RUN python -c 'import pathlib,re,sys,tomllib; n=lambda s:re.sub("[-_.]+","-",s).lower(); k=lambda d:n(re.split(r"[<>=!~@;\[( ]",d)[0]); p=tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]; want={k(d) for d in p.get("dependencies",[]) if k(d)!=n(p.get("name",""))}; have={n(l.split("==")[0]) for l in pathlib.Path("requirements.lock").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}; lost=sorted(want-have); sys.exit("requirements.lock 没有覆盖这些运行时依赖（改了 pyproject 却忘了重新生成 lock？）："+", ".join(lost)) if lost else print("lock 覆盖了全部 %d 个运行时依赖"%len(want))' \
- && pip install --prefix=/install -r requirements.lock
+#
+# 【`--mount=type=cache` 是给慢链路准备的，不是性能优化】
+# 它把 pip 的下载缓存留在**构建缓存**里，而不是留在这层文件系统里 ——
+# 于是"下载到一半超时"之后重试是**接着下**，而不是从零重下 50MB。
+# 这个项目的实测网速是 60–90 kB/s，一次 `scipy`（35MB）+ `scikit-learn`（9MB）
+# 就要十几分钟，没有这个挂载，任何一次网络抖动都等于白等半小时。
+# （BuildKit 的内置 frontend 已支持 `RUN --mount`，不需要额外的 syntax 指令。）
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -c 'import pathlib,re,sys,tomllib; n=lambda s:re.sub("[-_.]+","-",s).lower(); k=lambda d:n(re.split(r"[<>=!~@;\[( ]",d)[0]); p=tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]; want={k(d) for d in p.get("dependencies",[]) if k(d)!=n(p.get("name",""))}; have={n(l.split("==")[0]) for l in pathlib.Path("requirements.lock").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}; lost=sorted(want-have); sys.exit("requirements.lock 没有覆盖这些运行时依赖（改了 pyproject 却忘了重新生成 lock？）："+", ".join(lost)) if lost else print("lock 覆盖了全部 %d 个运行时依赖"%len(want))' \
+ && pip install --prefix=/install --retries 10 -r requirements.lock
 
 # ------------------------------------------------------------
 FROM python:3.12-slim AS runtime
