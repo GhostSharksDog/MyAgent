@@ -37,6 +37,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, get_trace_id, set_trace_id
 from app.rag.corpus import EMPTY_CORPUS_HINT
@@ -103,8 +104,16 @@ class ReindexResponse(BaseModel):
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    setup_logging()
-    logger.info("RAG 检索服务启动")
+    # 【为什么必须读配置，而不是用默认值起日志】
+    # 这里原来是裸的 `setup_logging()` —— 意味着这个服务**永远**是
+    # INFO + 彩色文本：LOG_LEVEL=DEBUG 对它无效，LOG_FORMAT=json 也无效。
+    #
+    # 而它恰恰是最需要被配置的那个服务：拆出去之后它跑在自己的容器里，
+    # 日志只能靠采集器收（那里需要 JSON），排查检索问题时又最需要 DEBUG。
+    # 一个"配置了但没生效"的入口点，比没有配置项更难发现。
+    settings = get_settings()
+    setup_logging(settings.log_level, fmt=settings.log_format)
+    logger.info("RAG 检索服务启动（日志 %s/%s）", settings.log_level, settings.log_format)
     # 不在启动时建索引：语料可能还没准备好，而且启动不该被数据准备拖慢。
     # 第一次检索请求会触发懒加载（见 rag/factory.py）。
     yield

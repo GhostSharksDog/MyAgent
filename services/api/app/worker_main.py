@@ -43,7 +43,9 @@ logger = logging.getLogger(__name__)
 
 async def main() -> int:
     settings = get_settings()
-    setup_logging(settings.log_level)
+    # 形态跟着配置走：worker 是部署态进程，它的日志同样要被采集器聚合 ——
+    # 一个进程写彩文本、另一个写 JSON，采集器只会收到一半的结构化数据。
+    setup_logging(settings.log_level, fmt=settings.log_format)
 
     tasks = await build_task_queue(settings)
 

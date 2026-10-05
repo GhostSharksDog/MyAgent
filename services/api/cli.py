@@ -187,7 +187,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     settings = get_settings()
-    setup_logging(settings.log_level, colorful=True)
+    setup_logging(settings.log_level, colorful=True, fmt=settings.log_format)
 
     if not settings.llm.is_configured:
         print(f"{RED}✗ 未配置 LLM_API_KEY{RESET}")

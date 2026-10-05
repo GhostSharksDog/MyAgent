@@ -405,6 +405,13 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_env: AppEnv = AppEnv.DEV
     log_level: str = "INFO"
+    # 日志形态：text（给人看，带颜色）| json（给机器看，每行一个 JSON 对象）。
+    #
+    # 【为什么默认是 text】
+    # 默认值决定"没读文档的人会得到什么"：本地开发时一屏彩色日志最好用，
+    # 而 JSON 是**部署到有采集器的地方**才需要的东西。
+    # 反过来（默认 JSON）会让每个人第一次跑起来时对着满屏 JSON 皱眉。
+    log_format: Literal["text", "json"] = "text"
 
     # 嵌套配置：pydantic-settings 会分别按各自 prefix 从环境变量读取
     llm: LLMSettings = Field(default_factory=LLMSettings)

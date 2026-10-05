@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    setup_logging(settings.log_level)
+    # 日志形态跟着配置走：本地默认彩文本，部署时设 LOG_FORMAT=json 即可被采集器聚合
+    setup_logging(settings.log_level, fmt=settings.log_format)
 
     logger.info("启动 Legacy API v%s（env=%s）", __version__, settings.app_env)
 
