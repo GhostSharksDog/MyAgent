@@ -42,7 +42,7 @@ import { Notice } from './components/Notice'
 import { SessionSidebar } from './components/SessionSidebar'
 import { FileSidebar } from './components/FileSidebar'
 import { FolderPicker } from './components/FolderPicker'
-import { SettingsPanel } from './components/SettingsPanel'
+import { SettingsDialog } from './components/SettingsDialog'
 import { ToolsDrawer } from './components/ToolsDrawer'
 import { TopBar } from './components/TopBar'
 import { useChat } from './hooks/useChat'
@@ -50,6 +50,7 @@ import { useServerInfo } from './hooks/useServerInfo'
 import { useSessions } from './hooks/useSessions'
 import { useSettings } from './hooks/useSettings'
 import { useStickToBottom } from './hooks/useStickToBottom'
+import { usePreferences } from './hooks/usePreferences'
 import { useTheme } from './hooks/useTheme'
 
 const MOBILE_BREAKPOINT = 760
@@ -59,7 +60,8 @@ function isNarrow(): boolean {
 }
 
 export default function App() {
-  const { preference, cycle } = useTheme()
+  const theme = useTheme()
+  const prefs = usePreferences()
   const server = useServerInfo()
   const sessions = useSessions()
   // 设置面板：模型接入 / 身份 / 知识库 / 工作区。
@@ -120,7 +122,7 @@ export default function App() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // 依赖整个 items 数组：流式时它每个 token 都会换新引用，从而触发黏底滚动
-  useStickToBottom(scrollRef, chat.items)
+  useStickToBottom(scrollRef, chat.items, prefs.prefs.autoScroll)
 
   // 载入会话历史：详情变化（切换/新建会话）时重建对话区
   useEffect(() => {
@@ -245,7 +247,7 @@ export default function App() {
         streaming={chat.isStreaming}
         loading={sessions.loading || server.loading}
         sidebarOpen={sidebarOpen}
-        themePreference={preference}
+        themePreference={theme.preference}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         onOpenTools={() => setToolsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -253,7 +255,7 @@ export default function App() {
         filesOpen={fileSidebarOpen}
         filesAvailable={workspaceConfigured}
         onRefresh={handleRefresh}
-        onCycleTheme={cycle}
+        onCycleTheme={theme.cycle}
       />
 
       <div
@@ -321,7 +323,7 @@ export default function App() {
             ) : (
               <div className="chat__inner">
                 {hasMessages ? (
-                  <MessageList items={chat.items} />
+                  <MessageList items={chat.items} showMeta={prefs.prefs.showMeta} />
                 ) : (
                   <EmptyState meta={server.meta} health={server.health} onPick={setDraft} />
                 )}
@@ -399,6 +401,7 @@ export default function App() {
                 modes={availableModes}
                 current={mode}
                 onModeChange={setMode}
+                sendWith={prefs.prefs.sendWith}
               />
 
               {!offline && sessions.activeId === null ? (
@@ -442,10 +445,15 @@ export default function App() {
         onClose={() => setToolsOpen(false)}
       />
 
-      <SettingsPanel
+      <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         settings={settings}
+        themePreference={theme.preference}
+        onThemeChange={theme.setPreference}
+        prefs={prefs.prefs}
+        onPrefChange={prefs.set}
+        onResetPrefs={prefs.reset}
       />
 
       <FolderPicker

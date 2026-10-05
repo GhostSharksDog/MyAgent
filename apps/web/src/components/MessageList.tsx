@@ -24,20 +24,28 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
   )
 })
 
-const MessageRow = memo(function MessageRow({ item }: { item: ChatItem }) {
+const MessageRow = memo(function MessageRow({
+  item,
+  showMeta,
+}: {
+  item: ChatItem
+  showMeta: boolean
+}) {
   if (item.kind === 'user') return <UserMessage content={item.content} />
-  return <AssistantTurn item={item} />
+  return <AssistantTurn item={item} showMeta={showMeta} />
 })
 
 export interface MessageListProps {
   items: ChatItem[]
+  /** 显示耗时/token 元信息（通用设置）。 */
+  showMeta?: boolean
 }
 
-export function MessageList({ items }: MessageListProps) {
+export function MessageList({ items, showMeta = true }: MessageListProps) {
   return (
     <>
       {items.map((item) => (
-        <MessageRow key={item.id} item={item} />
+        <MessageRow key={item.id} item={item} showMeta={showMeta} />
       ))}
     </>
   )

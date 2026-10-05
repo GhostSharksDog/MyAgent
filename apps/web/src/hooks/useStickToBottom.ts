@@ -20,6 +20,14 @@ const STICK_THRESHOLD = 80
 export function useStickToBottom<T extends HTMLElement>(
   ref: RefObject<T | null>,
   dependency: unknown,
+  /**
+   * 是否允许自动跟随（通用设置里的开关）。
+   *
+   * 关掉之后行为是"什么都不做"，而不是"滚到别处"：用户想自己翻看时，
+   * 任何自动滚动都是干扰。注意它与下面的 `stickRef` 是**两层**判断 ——
+   * 那一层管"用户是不是翻上去了"，这一层管"用户根本不想被跟随"。
+   */
+  enabled = true,
 ): void {
   const stickRef = useRef(true)
 
@@ -38,7 +46,7 @@ export function useStickToBottom<T extends HTMLElement>(
 
   useEffect(() => {
     const element = ref.current
-    if (!element || !stickRef.current) return
+    if (!element || !enabled || !stickRef.current) return
     element.scrollTop = element.scrollHeight
-  }, [ref, dependency])
+  }, [ref, dependency, enabled])
 }

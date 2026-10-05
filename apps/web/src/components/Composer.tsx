@@ -29,6 +29,11 @@ export interface ComposerProps {
   modes: AgentMode[]
   current: AgentMode
   onModeChange: (mode: AgentMode) => void
+  /**
+   * 发送键偏好（通用设置里可改）。
+   * `enter` = 回车发送（默认）；`mod-enter` = 回车换行、Ctrl/⌘+Enter 才发送。
+   */
+  sendWith?: 'enter' | 'mod-enter'
 }
 
 const MAX_HEIGHT = 220
@@ -43,6 +48,7 @@ export function Composer({
   modes,
   current,
   onModeChange,
+  sendWith = 'enter',
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   // 输入法组合状态：true 表示用户正在用拼音/日文等输入法选词
@@ -60,7 +66,20 @@ export function Composer({
     if (event.key !== 'Enter') return
     // 输入法组合中的回车是"选词"，不是"发送"
     if (composingRef.current || event.nativeEvent.isComposing) return
-    if (event.shiftKey) return // Shift+Enter 换行
+
+    // 【为什么 Ctrl/Cmd+Enter 在两种偏好下都发送】
+    // 它是"我确定要发"的强信号，不存在误触可能。用户从默认切到
+    // "Ctrl+Enter 才发送"之后，肌肉记忆还会按一会儿 Ctrl+Enter ——
+    // 此时不发送只会让人以为键盘坏了。
+    const modified = event.ctrlKey || event.metaKey
+    if (modified) {
+      event.preventDefault()
+      if (!streaming && !disabled) onSend()
+      return
+    }
+
+    if (event.shiftKey) return // Shift+Enter 一律是换行
+    if (sendWith === 'mod-enter') return // 该偏好下裸回车就是换行
 
     event.preventDefault()
     if (!streaming && !disabled) onSend()
@@ -73,7 +92,11 @@ export function Composer({
         className="composer__input"
         value={value}
         rows={1}
-        placeholder="问我任何求职相关的问题…（Enter 发送，Shift+Enter 换行）"
+        placeholder={
+          sendWith === 'enter'
+            ? '问我任何问题…（Enter 发送，Shift+Enter 换行）'
+            : '问我任何问题…（Ctrl/⌘+Enter 发送，Enter 换行）'
+        }
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
         onCompositionStart={() => {
@@ -87,8 +110,18 @@ export function Composer({
 
       <div className="composer__bar">
         <span className="composer__hint">
+          {/* 提示跟着偏好走：这里的按键说明与"设置 → 通用 → 发送键"必须一致，
+              否则用户会照着一个不成立的说明去按键。 */}
           <span className="composer__keys">
-            <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
+            {sendWith === 'enter' ? (
+              <>
+                <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
+              </>
+            ) : (
+              <>
+                <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送 · <kbd>Enter</kbd> 换行
+              </>
+            )}
           </span>
           {value.length > 0 ? ` · ${value.length} 字` : ''}
         </span>

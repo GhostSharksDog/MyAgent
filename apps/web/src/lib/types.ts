@@ -368,6 +368,41 @@ export interface TestConnectionResult {
 }
 
 // ============================================================
+// 模型管理（多供应商）
+// ============================================================
+export interface ModelView {
+  id: string
+  label: string
+  provider: string
+  base_url: string
+  model: string
+  /** 只回掩码；原文永远不出后端 */
+  api_key_masked: string
+  api_key_set: boolean
+  temperature: number | null
+  /** 当前进程正在用的是不是这一条（后端按地址+模型名+密钥算出来的） */
+  active: boolean
+}
+
+export interface ModelListResponse {
+  models: ModelView[]
+  /** 当前 `.env` 里的配置不在清单里 —— 界面据此提示"保存为模型" */
+  current_unsaved: boolean
+  current: ModelView
+}
+
+export interface ModelSavePayload {
+  id?: string
+  label: string
+  provider?: string
+  base_url: string
+  model: string
+  /** 留空 = 不改动已保存的密钥（与 /api/settings 同一语义） */
+  api_key?: string
+  temperature?: number
+}
+
+// ============================================================
 // 文件浏览（P6）
 // ============================================================
 export interface FileEntry {

@@ -125,9 +125,11 @@ function RunSummary({
 
 export interface AssistantTurnProps {
   item: AssistantItem
+  /** 是否显示耗时/token 元信息（通用设置里的开关，默认开）。 */
+  showMeta?: boolean
 }
 
-export function AssistantTurn({ item }: AssistantTurnProps) {
+export function AssistantTurn({ item, showMeta = true }: AssistantTurnProps) {
   const { state } = item
   const view = computeTurnView(state)
   const streaming = isStreaming(state)
@@ -212,7 +214,7 @@ export function AssistantTurn({ item }: AssistantTurnProps) {
         ) : null}
       </div>
 
-      {item.restored ? null : (
+      {item.restored || !showMeta ? null : (
         <RunSummary state={state} toolCount={view.toolCallCount} streaming={streaming} />
       )}
     </article>

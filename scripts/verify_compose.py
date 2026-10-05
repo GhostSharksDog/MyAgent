@@ -48,7 +48,10 @@ ok = True
 
 def check(condition: bool, label: str, extra: str = "") -> None:
     global ok
-    print(f"  [{'PASS' if condition else 'FAIL'}] {label}" + (f"  {extra}" if extra else ""))
+    print(
+        f"  [{'PASS' if condition else 'FAIL'}] {label}"
+        + (f"  {extra}" if extra else "")
+    )
     if not condition:
         ok = False
 
@@ -88,7 +91,9 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
     print("\n=== 0. 服务可达 ===")
     try:
         health = c.get("/healthz").json()
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
+        # 只接网络层与解析错误：这个位置要的是"连不上就说清怎么查"，
+        # 而不是把所有异常都吞成同一句话（那会掩盖脚本自己的 bug）
         print(f"  [FAIL] 连不上 {BASE}：{exc}")
         print("\n  先确认容器在跑：docker compose ps")
         sys.exit(1)
@@ -112,7 +117,10 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
     page = c.get("/")
     check(page.status_code == 200, f"GET / → {page.status_code}")
     body = page.text
-    check("<div id=\"root\">" in body or "root" in body, "返回的是前端页面而不是空的目录列表")
+    check(
+        '<div id="root">' in body or "root" in body,
+        "返回的是前端页面而不是空的目录列表",
+    )
     # 只提供 API 时这里会 404 —— 那正是"镜像里没有 dist"的症状
     asset = None
     for token in body.split('"'):
@@ -122,13 +130,22 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
     check(asset is not None, "页面里引用了构建产物", asset or "")
     if asset:
         r = c.get(asset)
-        check(r.status_code == 200 and len(r.content) > 1000, f"静态资源可访问（{asset}）")
+        check(
+            r.status_code == 200 and len(r.content) > 1000, f"静态资源可访问（{asset}）"
+        )
 
     print("\n=== 3. 访问控制（对外暴露必须有密钥）===")
-    check(health.get("auth_required") is True, "服务声明自己要求密钥", str(health.get("auth_required")))
+    check(
+        health.get("auth_required") is True,
+        "服务声明自己要求密钥",
+        str(health.get("auth_required")),
+    )
     check(c.get("/api/meta").status_code == 401, "无密钥访问 /api/meta → 401")
     if KEY:
-        check(c.get("/api/meta", headers=headers()).status_code == 200, "带密钥访问 /api/meta → 200")
+        check(
+            c.get("/api/meta", headers=headers()).status_code == 200,
+            "带密钥访问 /api/meta → 200",
+        )
     else:
         check(False, "SECURITY_API_KEY 未设置 —— 无法验证带密钥的路径")
     check(c.get("/healthz").status_code == 200, "/healthz 仍然免密钥（探针不需要凭据）")
@@ -159,7 +176,8 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
             try:
                 detail = c.get(f"/api/tasks/{task_id}", headers=headers()).json()
                 status = str(detail.get("status", "?"))
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
+                # 轮询期间的抖动不该终止等待：记下来继续轮，超时后再判
                 status = f"读取失败：{exc}"
             if status in ("succeeded", "failed", "error"):
                 break
@@ -171,7 +189,9 @@ with httpx.Client(base_url=BASE, timeout=60.0) as c:
         if status == "failed":
             # 说清"失败是业务原因"，否则读日志的人会以为是部署问题
             business = "语料" in err or "corpus" in err.lower()
-            check(business, "失败原因是业务层的（语料为空），不是投递/连接问题", err[:60])
+            check(
+                business, "失败原因是业务层的（语料为空），不是投递/连接问题", err[:60]
+            )
         check(
             _worker_log_has(task_id),
             "worker 容器日志里出现了这个 task_id（执行者是独立进程，不是 api）",

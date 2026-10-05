@@ -26,6 +26,10 @@
 #   .\scripts\dev.ps1 verify-split # 跨进程验证：证明调用真的走了 HTTP
 #   .\scripts\dev.ps1 loadtest   # 并发压测，给出 P50/P95/P99 与 QPS
 #
+#   # ---- 部署与多模型（P7）----
+#   .\scripts\dev.ps1 verify-models  # 演练多模型流程（需 serve 在跑；跑完还原 .env）
+#   .\scripts\dev.ps1 verify-compose # 校验 compose 拓扑（需先 docker compose up -d）
+#
 #   # ---- 求职转化（P5）：演示 ----
 #   .\scripts\dev.ps1 record-demo  # 录一次真实对话的事件流（含 PII 闸门）
 #   .\scripts\dev.ps1 demo        # **离线演示模式**：重放录制的事件流，不调模型
@@ -45,7 +49,8 @@ param(
     [ValidateSet(
         'setup', 'install', 'test', 'test-live', 'lint', 'fmt', 'check', 'cli', 'serve', 'tools',
         'rag', 'worker', 'serve-split', 'verify-split', 'loadtest',
-        'record-demo', 'demo', 'verify-demo', 'install-hooks', 'scan-pii', 'push', 'help'
+        'record-demo', 'demo', 'verify-demo', 'install-hooks', 'scan-pii', 'push', 'help',
+        'verify-models', 'verify-compose'
     )]
     [string]$Task = 'help',
 
@@ -342,6 +347,23 @@ function Task-VerifySplit {
     & $VenvPython (Join-Path $PSScriptRoot 'verify_split.py')
 }
 
+function Task-VerifyModels {
+    Initialize-Environment
+    Assert-Venv
+    # 这个演练会真的写 .env（切换模型），脚本自己负责备份与还原。
+    Write-Host "演练多模型流程（会临时改动 .env，结束时还原）" -ForegroundColor Cyan
+    Write-Host "前提：另一个窗口跑着 .\scripts\dev.ps1 serve" -ForegroundColor Yellow
+    & $VenvPython (Join-Path $PSScriptRoot 'verify_models.py')
+}
+
+function Task-VerifyCompose {
+    Initialize-Environment
+    Assert-Venv
+    # 需要容器已经起着，且 SECURITY_API_KEY 与 compose 里的一致（compose 会强制要求它）
+    Write-Host "校验 docker compose 拓扑（前提：docker compose up -d 已完成）" -ForegroundColor Cyan
+    & $VenvPython (Join-Path $PSScriptRoot 'verify_compose.py')
+}
+
 function Task-LoadTest {
     Initialize-Environment
     Assert-Venv
@@ -458,6 +480,8 @@ switch ($Task) {
     'serve-split' { Task-ServeSplit -NoReload:$NoReload }
     'worker'    { Task-Worker }
     'verify-split' { Task-VerifySplit }
+    'verify-models' { Task-VerifyModels }
+    'verify-compose' { Task-VerifyCompose }
     'loadtest'  { Task-LoadTest }
     'record-demo' { Task-RecordDemo }
     'demo'      { Task-Demo }
