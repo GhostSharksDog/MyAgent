@@ -26,11 +26,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.agent.factory import build_memories
-from app.agent.loop import Agent
+from app.agent.factory import build_agent_stack, mount_agent_stack
 from app.api.auth import ApiKeyMiddleware, check_exposure_posture
 from app.api.files import router as files_router
 from app.api.metrics import router as metrics_router
+from app.api.models import router as models_router
 from app.api.routes import router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
@@ -39,10 +39,8 @@ from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, set_trace_id
 from app.demo.replay import build_replayer
-from app.llm.client import LLMClient
 from app.session.factory import build_session_store
 from app.tasks.factory import build_task_queue
-from app.tools.builtin import build_default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -67,23 +65,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "请复制 .env.example 为 .env 并填写密钥。"
         )
 
-    llm_client = LLMClient(settings.llm)
-
-    # 记忆要先于工具表构造：`remember_fact` 工具需要与 Agent 共享同一个
-    # 长期记忆实例，否则工具"记住"的东西 Agent 读不到 —— 这是
-    # 依赖注入顺序上最容易踩的坑。
-    short_memory, long_term = build_memories(settings, llm=llm_client)
-
-    # 工具集与提示词都由 profile 决定：general（默认）只加载核心工具，
-    # jobhunt 才额外加载简历/岗位。见 build_default_registry 的分层说明。
-    tools = build_default_registry(long_term_memory=long_term, profile=settings.agent.profile)
-    agent = Agent(
-        llm_client,
-        tools,
-        settings.agent,
-        memory=short_memory,
-        long_term=long_term,
-    )
+    # 【Agent 全栈的装配只有一份，见 build_agent_stack】
+    # 换模型（POST /api/models/{id}/activate）要重跑完全相同的装配，
+    # 所以它不能留在这里手写一遍 —— 两份迟早漂移，而漂移的表现是
+    # "界面切了模型，但某条路径还在用旧的"。
+    stack = build_agent_stack(settings)
 
     # 会话存储：`auto` 会优先连真 Redis，失败则降级到内存（并打 WARNING）
     sessions = await build_session_store(settings)
@@ -97,11 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     replayer = build_replayer(settings.demo_replay_file)
 
     app.state.settings = settings
-    app.state.llm = llm_client
-    app.state.tools = tools
-    app.state.agent = agent
-    app.state.memory = short_memory
-    app.state.long_term = long_term
+    mount_agent_stack(app, stack)
     app.state.sessions = sessions
     app.state.tasks = tasks
     app.state.replayer = replayer
@@ -110,10 +92,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "装配完成：profile=%s，model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话=%s，任务队列=%s",
         settings.agent.profile,
         settings.llm.model,
-        len(tools.names()),
-        "、".join(tools.names()),
+        len(stack.tools.names()),
+        "、".join(stack.tools.names()),
         settings.agent.max_steps,
-        "开启" if short_memory else "关闭",
+        "开启" if stack.memory else "关闭",
         sessions.backend,
         tasks.backend,
     )
@@ -122,13 +104,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         # 退出前落盘长期记忆：Agent 在交互中积累的事实不该因重启而丢失
-        if long_term is not None:
-            long_term.save()
-            logger.info("长期记忆已落盘：%d 条", len(long_term))
+        # （注意用 `app.state.long_term` 而不是装配时那个局部变量：
+        #   换模型会重建全栈，局部变量指向的已经是**被替换下来的**旧实例，
+        #   往它身上 save 等于把记忆存进一个没人再读的对象里。）
+        current_long_term = getattr(app.state, "long_term", None)
+        if current_long_term is not None:
+            current_long_term.save()
+            logger.info("长期记忆已落盘：%d 条", len(current_long_term))
         # 先停队列再关连接池：队列的 worker 可能正在用 LLM 客户端
         await tasks.aclose()
         await sessions.aclose()
-        await llm_client.aclose()
+        # 关闭要**宽容**：这个位置拿到的是鸭子类型的客户端（测试里注入的是替身）。
+        # 少一个方法就让关闭抛异常，代价不只是"没关成" —— 它会把整场测试的结果
+        # 变成一个 teardown ERROR（828 个用例通过，报告却说失败），
+        # 而那种报告会让人从完全错误的方向开始排查。
+        current_llm = getattr(app.state, "llm", None)
+        close = getattr(current_llm, "aclose", None)
+        if close is not None:
+            await close()
         logger.info("HTTP 连接池已关闭，服务退出")
 
 
@@ -279,6 +272,7 @@ app.include_router(sessions_router)
 app.include_router(tasks_router)
 app.include_router(metrics_router)
 app.include_router(settings_router)
+app.include_router(models_router)
 app.include_router(files_router)
 
 
