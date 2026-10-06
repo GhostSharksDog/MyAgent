@@ -1,0 +1,569 @@
+{
+  "calc-01": {
+    "answer": {
+      "value": 576
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "(128+64)*3"
+        }
+      }
+    ]
+  },
+  "calc-02": {
+    "answer": {
+      "value": 142.8
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "168*0.85"
+        }
+      }
+    ]
+  },
+  "calc-03": {
+    "answer": {
+      "value": 1060
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "1000*1.06"
+        }
+      }
+    ]
+  },
+  "calc-04": {
+    "answer": {
+      "value": 84
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "(72+84+96)/3"
+        }
+      }
+    ]
+  },
+  "calc-05": {
+    "answer": {
+      "value": 2560
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "2.5*1024"
+        }
+      }
+    ]
+  },
+  "calc-06": {
+    "answer": {
+      "value": 25
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "(150-120)/120*100"
+        }
+      }
+    ]
+  },
+  "calc-07": {
+    "answer": {
+      "value": 6
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "(23+4-1)//4"
+        }
+      }
+    ]
+  },
+  "calc-08": {
+    "answer": {
+      "value": 3380
+    },
+    "calls": [
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "5000-(3*420+2*180)"
+        }
+      }
+    ]
+  },
+  "extract-01": {
+    "answer": {
+      "owner": "成员A",
+      "deadline": "2026-10-12",
+      "deliverables": [
+        "评测任务集",
+        "基线报告"
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-02": {
+    "answer": {
+      "port": 8080,
+      "version": 2,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-03": {
+    "answer": {
+      "active_services": [
+        "api",
+        "rag"
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-04": {
+    "answer": {
+      "urgent": [
+        "T1",
+        "T3"
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-05": {
+    "answer": {
+      "stock": 12,
+      "restock_date": null,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-06": {
+    "answer": {
+      "same_day": false,
+      "cutoff": "16:00",
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-07": {
+    "answer": {
+      "root_cause": "连接池未释放",
+      "recovery": "关闭旧客户端并重新建立连接池",
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "extract-08": {
+    "answer": {
+      "tags": [
+        "分析",
+        "核验",
+        "整理"
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-01": {
+    "answer": {
+      "steps": [
+        "收集样本",
+        "标注答案",
+        "运行基线",
+        "分析失败"
+      ],
+      "days": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-02": {
+    "answer": {
+      "steps": [
+        "确认范围",
+        "整理初稿",
+        "核验来源",
+        "发布文档"
+      ],
+      "days": [
+        1,
+        2,
+        1,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-03": {
+    "answer": {
+      "steps": [
+        "确认预算",
+        "预订场地",
+        "通知参与者",
+        "现场检查"
+      ],
+      "days": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-04": {
+    "answer": {
+      "steps": [
+        "备份原表",
+        "清理重复",
+        "校验结果",
+        "交付结果"
+      ],
+      "days": [
+        1,
+        1,
+        2,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-05": {
+    "answer": {
+      "steps": [
+        "冻结变更",
+        "运行检查",
+        "生成产物",
+        "确认发布"
+      ],
+      "days": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-06": {
+    "answer": {
+      "steps": [
+        "明确假设",
+        "设计实验",
+        "记录结果",
+        "撰写结论"
+      ],
+      "days": [
+        1,
+        2,
+        2,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "plan-07": {
+    "answer": {
+      "steps": [
+        "列出事项",
+        "补齐说明",
+        "接手演练",
+        "确认交接"
+      ],
+      "days": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-01": {
+    "answer": {
+      "choice": "B",
+      "cost": 90,
+      "latency_ms": 40,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-02": {
+    "answer": {
+      "choice": "B",
+      "memory_mb": 40,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-03": {
+    "answer": {
+      "choice": "B",
+      "score": 80,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      },
+      {
+        "name": "calculator",
+        "arguments": {
+          "expression": "80*0.6+80*0.4"
+        }
+      }
+    ]
+  },
+  "compare-04": {
+    "answer": {
+      "choice": "A",
+      "cost": 50,
+      "minutes": 10,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-05": {
+    "answer": {
+      "choice": null,
+      "eligible": [],
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-06": {
+    "answer": {
+      "choice": "B",
+      "quality": 85,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  },
+  "compare-07": {
+    "answer": {
+      "choice": "A",
+      "score": 90,
+      "citations": [
+        "sample.md"
+      ]
+    },
+    "calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "sample.md"
+        }
+      }
+    ]
+  }
+}

@@ -20,6 +20,7 @@ Python 3.12 / FastAPI + React 19 / TypeScript 全栈项目，面向 AI 应用与
 | Web | 暖白／石墨简约界面、统一执行过程、预算终态与用量完整性、停止按钮、五类设置、工作区与响应式抽屉 |
 | 服务工程 | 内存/Redis 队列、trace id、指标、熔断、限流、已有 api/rag/worker/Redis Compose 拆分 |
 | 可复现性 | Windows CI、Python 运行时 lock、pnpm lock、默认离线测试、公开样本评测、Edge 冒烟 |
+| 任务评测 | 30 个通用公开任务、三模式统一评分；合成模型驱动真实内核与工具，保存原始事件、目标检查、覆盖率及已知用量；真实模型成绩尚未采集 |
 
 SQLite 已落地；PostgreSQL/pgvector、生产阈值标定、TLS 与 Redis 鉴权属于后续工作。
 本轮没有扩展部署；历史路线图中的构想不算作当前实现。
@@ -102,6 +103,7 @@ ReAct 可传 session_id/history；Plan/Supervisor 即使传入也按独立任务
 & .venv\Scripts\python.exe -X utf8 -m pytest services/api/tests -q
 & .venv\Scripts\python.exe -X utf8 scripts/lock_deps.py --check
 & .venv\Scripts\python.exe -X utf8 scripts/eval_rag.py --compare --sample
+& .venv\Scripts\python.exe -X utf8 scripts/eval_agent.py --offline
 Set-Location apps/web
 pnpm test
 pnpm run typecheck
@@ -130,6 +132,12 @@ TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 全部参数见 [证据记录](docs/05-reliability-evidence.md)。小样本结果不推断生产效果；
 历史 LLM 重排/HyDE 数字见 [检索日志](docs/03-journal/2026-09-13-P2-检索基线评测.md)，本轮未复测。
 
+同日评测补强：NDCG 改为按完整语料归一化，报告标记 `ndcg-corpus-v2`；RRF NDCG@5 校正为 0.692，Recall/MRR 不变。
+30 个通用任务覆盖计算、提取、规划、比较；默认合成运行 **90/90 轮执行与评分链路检查通过**，不作为模型成功率。
+`eval_agent.py` 输出 `data/agent-eval/report.md`、`report.json` 与 `records.json`；也可 `--records <已有记录>` 离线重新评分。
+不读取 `.env` 或私人语料，无联网执行入口；真实模型成绩待新额度。用法、记录格式和限制见 [任务评测记录](docs/07-agent-evaluation.md)。
+评测补强后的最终门禁：**1058 后端通过 + 1 live 跳过、159 前端通过**，格式、lint、lock、类型与构建通过。
+
 GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线检查与前端构建。
 远端 CI 首跑需用户推送后确认；当前只报告本地检查。
 
@@ -137,6 +145,7 @@ GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线�
 
 - [可靠性证据与未验证项](docs/05-reliability-evidence.md)
 - [界面设计、验收与演示截图](docs/06-ui-design.md)
+- [通用任务评测、运行记录与指标校正](docs/07-agent-evaluation.md)
 - [架构、设计决策与历史修复](docs/01-architecture.md)（第 8/10 节为当前补充）
 - [交接说明](AGENTS.md)
 - [项目一页纸](docs/04-career/01-onepager.md)

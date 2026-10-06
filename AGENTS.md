@@ -19,12 +19,14 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1005 后端通过 + 1 live 跳过、159 前端通过**；NDCG 校正见 `docs/05-reliability-evidence.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-06 **1058 后端通过 + 1 live 跳过、159 前端通过**；任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - Plan/Supervisor 本轮不使用会话历史；HTTP/SSE 只持久化 `finished`。缺 Usage 时 `usage_complete=false`
 - Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近
+- `scripts/eval_agent.py` 默认离线：30 个通用公开任务 × 三模式，合成 LLM 驱动真实内核和只读工具。90 轮通过是框架验收，不是模型成功率；可离线重新评分已有 RunBundle
+- RAG NDCG 已按全语料相关块校正，报告标记 `ndcg-corpus-v2`；历史 top-k 命中数分母的数字不能与新版本直接比较
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -116,6 +118,7 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 | `python scripts\bench_session_store.py [--memory]` | 无 | 会话后端延迟分布。`sqlite_store.py` 里的性能结论就是这个脚本量的 |
 | `python scripts\loadtest.py` | 服务在跑 | 并发压测（P50/P95/P99、QPS） |
 | `python scripts\eval_rag.py` | 无 | RAG 消融评测（指标是简历上的数字，别随手改语料/参数后不重跑） |
+| `python scripts\eval_agent.py --offline` | 无 | 30 个通用任务的合成模型／真实内核链路验收；`--records` 只评分已有记录。没有联网执行入口，不读取用户配置；报告在 `data/agent-eval` |
 
 ---
 

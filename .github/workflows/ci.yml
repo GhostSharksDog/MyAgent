@@ -40,13 +40,15 @@ jobs:
       - name: Verify runtime lock
         run: python scripts/lock_deps.py --check
       - name: Check format without modifying files
-        run: python -m ruff format services/api --check
+        run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py --check
       - name: Lint
-        run: python -m ruff check services/api
+        run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py
       - name: Backend offline tests
         run: python -m pytest services/api/tests -q --junitxml=backend-tests.xml
       - name: Public RAG sample evaluation
-        run: python scripts/eval_rag.py --compare --sample
+        run: python scripts/eval_rag.py --compare --sample --json-out data/rag-eval.json
+      - name: Agent evaluation with synthetic model and real orchestration
+        run: python scripts/eval_agent.py --offline
       - name: Install frontend
         working-directory: apps/web
         run: pnpm install --frozen-lockfile
@@ -65,5 +67,9 @@ jobs:
           name: offline-check-results
           path: |
             backend-tests.xml
+            data/rag-eval.json
+            data/agent-eval/report.json
+            data/agent-eval/report.md
+            data/agent-eval/records.json
             apps/web/dist
           if-no-files-found: warn

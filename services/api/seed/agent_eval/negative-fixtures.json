@@ -1,0 +1,6 @@
+{
+  "calc-01": {
+    "answer": {"value": 575},
+    "calls": [{"name": "calculator", "arguments": {"expression": "(128+64)*3"}}]
+  }
+}

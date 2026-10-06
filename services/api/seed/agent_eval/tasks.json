@@ -1,0 +1,1256 @@
+{
+  "id": "legacy-general-tasks",
+  "version": 1,
+  "description": "30个人工编写的公开合成任务；不包含私人资料。用于三种编排同题评分；fixture成功率不是模型能力。",
+  "tasks": [
+    {
+      "id": "calc-01",
+      "category": "calculation",
+      "prompt": "两批分别有128和64件，每件3元。用 calculator 核验总金额，字段 value（元）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 576
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-02",
+      "category": "calculation",
+      "prompt": "原价168元，打85折。用 calculator 核验实付金额，字段 value（元）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 142.8
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-03",
+      "category": "calculation",
+      "prompt": "未税价1000元，税率6%。用 calculator 核验含税价，字段 value（元）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 1060
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-04",
+      "category": "calculation",
+      "prompt": "三次成绩72、84、96。用 calculator 计算平均分，字段 value。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 84
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-05",
+      "category": "calculation",
+      "prompt": "按1GiB=1024MiB，把2.5GiB转换为MiB。用 calculator，字段 value。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 2560
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-06",
+      "category": "calculation",
+      "prompt": "数量从120增长到150。用 calculator 计算增长百分比，字段 value（百分数）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 25
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-07",
+      "category": "calculation",
+      "prompt": "23个任务，每轮最多并行4个。用 calculator 求最少轮数，字段 value。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 6
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "calc-08",
+      "category": "calculation",
+      "prompt": "预算5000元，住宿3晚每晚420元，交通2次每次180元。用 calculator 核验剩余预算，字段 value（元）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {},
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "value"
+          ],
+          "expected": 3380
+        }
+      ],
+      "required_tools": [
+        "calculator"
+      ]
+    },
+    {
+      "id": "extract-01",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。提取负责人 owner、截止时间 deadline、交付物 deliverables（列表）和引用 citations（文件名列表）。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成会议记录\n负责人：成员A。截止：2026-10-12。交付物：评测任务集、基线报告。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "owner"
+          ],
+          "expected": "成员A"
+        },
+        {
+          "kind": "equals",
+          "path": [
+            "deadline"
+          ],
+          "expected": "2026-10-12"
+        },
+        {
+          "kind": "unordered",
+          "path": [
+            "deliverables"
+          ],
+          "expected": [
+            "评测任务集",
+            "基线报告"
+          ]
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-02",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。以最新版本为准提取 port、version，注明引用 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 版本记录\n版本1：端口8000。版本2：端口改为8080，版本1已废弃。\n"
+      },
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "port"
+          ],
+          "expected": 8080
+        },
+        {
+          "kind": "number",
+          "path": [
+            "version"
+          ],
+          "expected": 2
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-03",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。把表格整理为 active_services 列表，只保留状态为运行的服务，注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成服务清单\n|名称|状态|\n|api|运行|\n|worker|停止|\n|rag|运行|\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "active_services"
+          ],
+          "expected": [
+            "api",
+            "rag"
+          ]
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-04",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。列出优先级P0的任务ID，字段 urgent，注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 任务清单\nT1 P0 修复错误计费。T2 P2 调整间距。T3 P0 修复取消泄漏。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "urgent"
+          ],
+          "expected": [
+            "T1",
+            "T3"
+          ]
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-05",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。提取库存 stock 和预计补货日期 restock_date。原文没给出的字段必须为 null，不得猜测。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成库存记录\n商品X库存12件。\n"
+      },
+      "checks": [
+        {
+          "kind": "number",
+          "path": [
+            "stock"
+          ],
+          "expected": 12
+        },
+        {
+          "kind": "equals",
+          "path": [
+            "restock_date"
+          ],
+          "expected": null
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-06",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。按原文规则判断16:00下单是否当天发货，字段 same_day（布尔）、cutoff，注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成发货规则\n仅在16:00之前下单可当天发货；16:00及之后次日发货。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "same_day"
+          ],
+          "expected": false
+        },
+        {
+          "kind": "equals",
+          "path": [
+            "cutoff"
+          ],
+          "expected": "16:00"
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-07",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。提取 root_cause、recovery，不要把症状当根因。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成故障记录\n症状：请求超时。根因：连接池未释放。恢复：关闭旧客户端并重新建立连接池。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "root_cause"
+          ],
+          "expected": "连接池未释放"
+        },
+        {
+          "kind": "equals",
+          "path": [
+            "recovery"
+          ],
+          "expected": "关闭旧客户端并重新建立连接池"
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "extract-08",
+      "category": "extraction",
+      "prompt": "读取工作区公开文件 sample.md 后回答。删除重复标签并按首次出现顺序返回 tags，注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成标签\n分析、核验、分析、整理、核验。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "tags"
+          ],
+          "expected": [
+            "分析",
+            "核验",
+            "整理"
+          ]
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-01",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：评测准备\n阶段依次为：收集样本 → 标注答案 → 运行基线 → 分析失败。\n总工期最多4天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "收集样本",
+            "标注答案",
+            "运行基线",
+            "分析失败"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "收集样本",
+            "标注答案"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "标注答案",
+            "运行基线"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "运行基线",
+            "分析失败"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-02",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：文档发布\n阶段依次为：确认范围 → 整理初稿 → 核验来源 → 发布文档。\n总工期最多5天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "确认范围",
+            "整理初稿",
+            "核验来源",
+            "发布文档"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 5
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "确认范围",
+            "整理初稿"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "整理初稿",
+            "核验来源"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "核验来源",
+            "发布文档"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-03",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：小型活动\n阶段依次为：确认预算 → 预订场地 → 通知参与者 → 现场检查。\n总工期最多4天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "确认预算",
+            "预订场地",
+            "通知参与者",
+            "现场检查"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "确认预算",
+            "预订场地"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "预订场地",
+            "通知参与者"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "通知参与者",
+            "现场检查"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-04",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：数据整理\n阶段依次为：备份原表 → 清理重复 → 校验结果 → 交付结果。\n总工期最多5天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "备份原表",
+            "清理重复",
+            "校验结果",
+            "交付结果"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 5
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "备份原表",
+            "清理重复"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "清理重复",
+            "校验结果"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "校验结果",
+            "交付结果"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-05",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：版本发布\n阶段依次为：冻结变更 → 运行检查 → 生成产物 → 确认发布。\n总工期最多4天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "冻结变更",
+            "运行检查",
+            "生成产物",
+            "确认发布"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "冻结变更",
+            "运行检查"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "运行检查",
+            "生成产物"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "生成产物",
+            "确认发布"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-06",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：实验报告\n阶段依次为：明确假设 → 设计实验 → 记录结果 → 撰写结论。\n总工期最多6天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "明确假设",
+            "设计实验",
+            "记录结果",
+            "撰写结论"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 6
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "明确假设",
+            "设计实验"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "设计实验",
+            "记录结果"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "记录结果",
+            "撰写结论"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "plan-07",
+      "category": "planning",
+      "prompt": "读取工作区公开文件 sample.md 后回答。制定满足工期与依赖约束的计划。字段 steps 为阶段名列表，days 为对应天数列表，每个阶段至少1天。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成约束：团队交接\n阶段依次为：列出事项 → 补齐说明 → 接手演练 → 确认交接。\n总工期最多4天，每个阶段至少1天，不得跳过阶段。\n"
+      },
+      "checks": [
+        {
+          "kind": "unordered",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "列出事项",
+            "补齐说明",
+            "接手演练",
+            "确认交接"
+          ]
+        },
+        {
+          "kind": "sum_lte",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "all_gte",
+          "path": [
+            "days"
+          ],
+          "expected": 1
+        },
+        {
+          "kind": "length",
+          "path": [
+            "days"
+          ],
+          "expected": 4
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "列出事项",
+            "补齐说明"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "补齐说明",
+            "接手演练"
+          ]
+        },
+        {
+          "kind": "before",
+          "path": [
+            "steps"
+          ],
+          "expected": [
+            "接手演练",
+            "确认交接"
+          ]
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-01",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。预算100元以内，先满足延迟不超过50ms，再选费用最低者。字段 choice、cost、latency_ms、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nA：费用80元，延迟60ms。B：费用90元，延迟40ms。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "B"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "cost"
+          ],
+          "expected": 90
+        },
+        {
+          "kind": "number",
+          "path": [
+            "latency_ms"
+          ],
+          "expected": 40
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-02",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。必须支持重启后保留数据，在满足条件的方案中选占用内存最低者。字段 choice、memory_mb、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nA：持久化否，内存20MB。B：持久化是，内存40MB。C：持久化是，内存80MB。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "B"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "memory_mb"
+          ],
+          "expected": 40
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-03",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。总分=质量分*0.6+速度分*0.4。用 calculator 核验，选总分最高者。字段 choice、score、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成评分\nA：质量分90，速度分60。B：质量分80，速度分80。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "B"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "score"
+          ],
+          "expected": 80
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file",
+        "calculator"
+      ]
+    },
+    {
+      "id": "compare-04",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。费用和耗时越小越好。若一个方案两项都优于另一个，选择它。字段 choice、cost、minutes、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nA：费用50元，耗时10分钟。B：费用60元，耗时15分钟。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "A"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "cost"
+          ],
+          "expected": 50
+        },
+        {
+          "kind": "number",
+          "path": [
+            "minutes"
+          ],
+          "expected": 10
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-05",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。同时要求费用不超过100元且延迟不超过30ms。不满足则 choice=null，eligible=[]，不得硬选。注明 citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nA：费用120元，延迟20ms。B：费用80元，延迟40ms。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": null
+        },
+        {
+          "kind": "equals",
+          "path": [
+            "eligible"
+          ],
+          "expected": []
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-06",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。预算上限100元。满足预算后选择质量最高者。字段 choice、quality、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nA：费用110元，质量95。B：费用90元，质量85。C：费用70元，质量80。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "B"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "quality"
+          ],
+          "expected": 85
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    },
+    {
+      "id": "compare-07",
+      "category": "comparison",
+      "prompt": "读取工作区公开文件 sample.md 后回答。选分数最高者；同分按ID字母顺序选择。字段 choice、score、citations。 只输出一个 JSON 对象，不要代码围栏。",
+      "assets": {
+        "sample.md": "# 合成方案\nB：分数90。A：分数90。C：分数85。\n"
+      },
+      "checks": [
+        {
+          "kind": "equals",
+          "path": [
+            "choice"
+          ],
+          "expected": "A"
+        },
+        {
+          "kind": "number",
+          "path": [
+            "score"
+          ],
+          "expected": 90
+        },
+        {
+          "kind": "contains",
+          "path": [
+            "citations"
+          ],
+          "expected": "sample.md"
+        }
+      ],
+      "required_tools": [
+        "read_file"
+      ]
+    }
+  ]
+}
