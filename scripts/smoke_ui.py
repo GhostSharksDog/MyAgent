@@ -688,6 +688,74 @@ def configuration_refresh_checks(cdp: Cdp) -> None:
     )
 
 
+def composer_focus_checks(cdp: Cdp) -> None:
+    """Exercise real pointer/Tab focus; typing fields also match :focus-visible."""
+    print("\n=== 输入框焦点边界（真实鼠标与键盘）===")
+    cdp.eval("document.activeElement?.blur()")
+    time.sleep(0.2)
+    blur_border = cdp.eval(
+        "getComputedStyle(document.querySelector('.composer')).borderTopColor"
+    )
+    bounds = cdp.eval(
+        f"(()=>{{const r=({composer_expression()}).getBoundingClientRect();"
+        "return {x:r.left+Math.min(r.width/2,80),y:r.top+r.height/2};})()"
+    )
+    for event_type in ("mouseMoved", "mousePressed", "mouseReleased"):
+        params = {"type": event_type, "x": bounds["x"], "y": bounds["y"]}
+        if event_type != "mouseMoved":
+            params.update({"button": "left", "clickCount": 1})
+        cdp.call("Input.dispatchMouseEvent", params)
+    check(
+        cdp.eval(
+            f"document.activeElement===({composer_expression()})"
+            f"&&({composer_expression()}).matches(':focus-visible')"
+        ),
+        "真实鼠标点击聚焦文本框并匹配 focus-visible",
+    )
+    check(
+        cdp.eval(f"getComputedStyle({composer_expression()}).boxShadow==='none'"),
+        "鼠标输入没有把框分成两段的内部焦点阴影",
+        str(cdp.eval(f"getComputedStyle({composer_expression()}).boxShadow")),
+    )
+    check(
+        cdp.wait(
+            "document.querySelector('.composer').matches(':focus-within')"
+            "&&getComputedStyle(document.querySelector('.composer')).borderTopColor!=="
+            + json.dumps(blur_border)
+        ),
+        "整个输入容器的边框仍明确标示焦点",
+    )
+    # Start immediately before the textarea in the actual visible Tab order.
+    prepared = cdp.eval(
+        f"(()=>{{const box=({composer_expression()});"
+        "const targets=[...document.querySelectorAll('button,input,select,textarea,a[href],summary,[tabindex]')]"
+        ".filter(e=>e.tabIndex>=0&&!e.matches(':disabled')&&!e.closest('[inert]')&&e.getClientRects().length>0);"
+        "const previous=targets[targets.indexOf(box)-1];"
+        "if(!previous)return false;previous.focus();return true;})()"
+    )
+    check(bool(prepared), "输入框前一项存在于真实 Tab 顺序")
+    press_key(cdp, "Tab")
+    check(
+        cdp.eval(
+            f"document.activeElement===({composer_expression()})"
+            f"&&({composer_expression()}).matches(':focus-visible')"
+            f"&&getComputedStyle({composer_expression()}).boxShadow==='none'"
+        ),
+        "Tab 聚焦输入时也只使用整个容器的焦点边框",
+    )
+    press_key(cdp, "Tab")
+    check(
+        cdp.eval(
+            "document.activeElement?.tagName==='BUTTON'"
+            "&&document.activeElement.matches(':focus-visible')"
+            "&&getComputedStyle(document.activeElement).boxShadow!=='none'"
+        ),
+        "对照组：Tab 到按钮仍保留可见键盘焦点环",
+    )
+    cdp.eval("document.activeElement?.blur()")
+    time.sleep(0.2)
+
+
 def keyboard_checks(cdp: Cdp) -> None:
     print("\n=== 中文输入保护与两种发送键（合成 SSE）===")
     cdp.eval("window.__fixture.case='finished'")
@@ -768,6 +836,7 @@ def visual_checks(cdp: Cdp, directory: Path) -> None:
         "历史列表具有独立滚动区域",
     )
     layout_check(cdp, "1440×900 首屏")
+    composer_focus_checks(cdp)
     cdp.screenshot(directory, "01-home-light-1440")
     # Suggestion controls fill a draft, they must not trigger an API call.
     before = cdp.eval(

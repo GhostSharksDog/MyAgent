@@ -91,8 +91,8 @@ kbd {
   font-variant-ligatures: none;
 }
 
-/* 统一的键盘焦点环。只在键盘导航时出现（:focus-visible），
-   鼠标点击不会留下难看的描边。 */
+/* 统一的可见焦点环。按钮通常在键盘导航时匹配 :focus-visible；
+   文本输入即使鼠标点击也会匹配，组合输入区由外容器标示焦点。 */
 :focus-visible {
   outline: none;
   box-shadow: var(--ring);

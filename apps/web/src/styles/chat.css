@@ -358,7 +358,7 @@
   overflow: hidden;
 }
 .composer:focus-within{
-  border-color: var(--accent-border);
+  border-color: var(--accent);
 }
 .composer[data-disabled='true']{
   opacity: .7;
@@ -374,6 +374,8 @@
   line-height: 1.6;
   color: var(--text);
   outline: none;
+  /* 焦点由整个 composer 的外边框标示，避免内部焦点环成为横线。 */
+  box-shadow: none;
   max-height: 220px;
   overflow-y: auto;
 }

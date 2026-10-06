@@ -103,3 +103,9 @@ pnpm build
 | 浅色首屏，390×844 | [07-home-light-390](screenshots/ui-redesign/07-home-light-390.png) |
 | 浅色聊天，390×844 | [08-chat-light-390](screenshots/ui-redesign/08-chat-light-390.png) |
 | 文件抽屉，390×844 | [09-files-light-390](screenshots/ui-redesign/09-files-light-390.png) |
+
+## 5. 输入框焦点修复（2026-10-06）
+
+点击文本框时，浏览器同样会匹配 `:focus-visible`。原全局焦点阴影的底边被输入容器裁切后形成横线，把文本与操作区分成两段；仅设置 `outline: none` 无法去掉该阴影。现在文本框清除内部阴影，整个输入容器通过强调色外边框标示焦点；按钮继续保留键盘焦点环。
+
+`scripts/smoke_ui.py --visual` 新增 6 项真实鼠标／Tab 焦点检查，包含按钮焦点环对照。修改前，鼠标与 Tab 的内部阴影检查均失败；修改后，在浅色／深色 × 1440×900／390×844 下定向重复执行，24 项全部通过，4 张聚焦截图逐张复核。前端 159 项、类型检查与构建通过；后端离线 998 项通过、1 live 跳过，格式与 lint 通过。验证使用隔离 Edge 与合成 API，未调用模型或修改 `.env`。
