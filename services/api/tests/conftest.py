@@ -31,6 +31,26 @@ from app.main import app
 from fastapi.testclient import TestClient
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-live",
+        action="store_true",
+        default=False,
+        help="显式允许真实模型测试（会计费）；pytest -m live 也保留为入口",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    # marker 只负责分类，不会自动跳过。有密钥的机器也必须默认离线，
+    # 并且不能让 -o addopts='' 绕过这条纪律。
+    if config.getoption("--run-live") or config.getoption("-m").strip() == "live":
+        return
+    skip = pytest.mark.skip(reason="真实模型测试默认关闭；使用 pytest -m live 显式运行")
+    for item in items:
+        if item.get_closest_marker("live") is not None:
+            item.add_marker(skip)
+
+
 @pytest.fixture(scope="session")
 def client() -> Iterator[TestClient]:
     """全测试会话共享的 HTTP 客户端（含 lifespan）。"""

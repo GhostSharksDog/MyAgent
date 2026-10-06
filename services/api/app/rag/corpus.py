@@ -64,6 +64,7 @@ def build_corpus(
     include_resume: bool = False,
     include_jobs: bool = False,
     use_sample_resume: bool = False,
+    include_notes: bool = True,
     extra_paths: list[str] | None = None,
 ) -> list[LoadedDocument]:
     """收集知识库文档。
@@ -107,7 +108,8 @@ def build_corpus(
     if include_jobs:
         docs.extend(_load_jobs())
 
-    docs.extend(_load_notes())
+    if include_notes:
+        docs.extend(_load_notes())
 
     # 用户显式声明的路径。**一个一个加载并逐个容错** ——
     # 一个路径写错不该让整个知识库建不起来（那是"因为一个文件打不开，

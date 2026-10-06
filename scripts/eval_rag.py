@@ -38,8 +38,9 @@ for _stream in (sys.stdout, sys.stderr):
 
 from app.core.config import get_settings  # noqa: E402
 from app.rag.chunker import ChunkStrategy  # noqa: E402
+from app.rag.corpus import build_corpus  # noqa: E402
 from app.rag.evaluate import EvalReport, EvalSet, _is_relevant, evaluate  # noqa: E402
-from app.rag.rerank import LexicalReranker, LLMReranker, NoOpReranker, Reranker  # noqa: E402
+from app.rag.rerank import LexicalReranker, LLMReranker, Reranker  # noqa: E402
 from app.rag.retriever import RetrievalMode, Retriever  # noqa: E402
 
 EVAL_SET_PUBLIC = ROOT / "services" / "api" / "seed" / "eval_set.json"
@@ -179,7 +180,9 @@ async def cmd_run(
                 print(f"  备注: {f['note']}")
 
     if json_out:
-        json_out.write_text(report.model_dump_json(indent=2), encoding="utf-8", newline="\n")
+        await asyncio.to_thread(
+            json_out.write_text, report.model_dump_json(indent=2), encoding="utf-8", newline="\n"
+        )
         print(f"\n[OK] 报告已写入 {json_out}")
 
     return report
@@ -302,11 +305,12 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
 
     if args.json_out:
         payload = [
-            {"label": label, "pipeline": r.pipeline(), "metrics": r.metrics}
-            for label, r in rows
+            {"label": label, "pipeline": r.pipeline(), "metrics": r.metrics} for label, r in rows
         ]
         args.json_out.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+            newline="\n",
         )
         print(f"\n[OK] 对比结果已写入 {args.json_out}")
 
@@ -330,7 +334,8 @@ def build_reranker(kind: str) -> Reranker | None:
 
 def build_rewriter(kind: str):  # type: ignore[no-untyped-def]
     """按 kind 构造改写器。none 返回 None（= 功能不启用）。"""
-    from app.rag.rewrite import NoOpRewriter, build_rewriter as _build
+    from app.rag.rewrite import NoOpRewriter
+    from app.rag.rewrite import build_rewriter as _build
 
     if (kind or "none").lower() in ("none", "", "off"):
         return None
@@ -355,12 +360,23 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
             raise ValueError("--rrf-weights 需要两个逗号分隔的数字，例如 '1.0,0.3'")
         weights = [float(parts[0]), float(parts[1])]
 
-    return Retriever.from_default_corpus(
+    agent = get_settings().agent
+    # --sample 是完整的数据源声明，不只是替换简历文件名。
+    # 公开基准必须排除私人笔记及 .env 中声明的私人路径。
+    include_seed = args.sample or agent.profile == "jobhunt" or agent.corpus_include_seed
+    docs = build_corpus(
+        include_resume=include_seed,
+        include_jobs=include_seed,
+        use_sample_resume=args.sample,
+        include_notes=not args.sample,
+        extra_paths=[] if args.sample else agent.corpus_path_list,
+    )
+    return Retriever.from_documents(
+        docs,
         strategy=ChunkStrategy(args.strategy),
         size=args.size,
         overlap=args.overlap,
         min_size=args.min_size,
-        use_sample_resume=args.sample,
         mode=RetrievalMode(args.mode),
         reranker=build_reranker(args.rerank),
         rrf_k=args.rrf_k,
