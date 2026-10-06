@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, RefObject } from 'react'
 
 import { AGENT_MODE_META } from '../lib/types'
 import type { AgentMode } from '../lib/types'
@@ -34,6 +34,7 @@ export interface ComposerProps {
    * `enter` = 回车发送（默认）；`mod-enter` = 回车换行、Ctrl/⌘+Enter 才发送。
    */
   sendWith?: 'enter' | 'mod-enter'
+  inputRef?: RefObject<HTMLTextAreaElement | null>
 }
 
 const MAX_HEIGHT = 220
@@ -49,8 +50,10 @@ export function Composer({
   current,
   onModeChange,
   sendWith = 'enter',
+  inputRef,
 }: ComposerProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const internalRef = useRef<HTMLTextAreaElement | null>(null)
+  const textareaRef = inputRef ?? internalRef
   // 输入法组合状态：true 表示用户正在用拼音/日文等输入法选词
   const composingRef = useRef(false)
 
@@ -87,19 +90,13 @@ export function Composer({
 
   return (
     <div className="composer" data-disabled={disabled}>
-      {current !== 'react' && (
-        <p className="composer__hint" role="note">独立任务：本轮不使用会话历史，请在消息中提供所需背景。</p>
-      )}
       <textarea
         ref={textareaRef}
         className="composer__input"
+        aria-label="消息"
         value={value}
         rows={1}
-        placeholder={
-          sendWith === 'enter'
-            ? '问我任何问题…（Enter 发送，Shift+Enter 换行）'
-            : '问我任何问题…（Ctrl/⌘+Enter 发送，Enter 换行）'
-        }
+        placeholder="描述问题，或贴入你想整理的内容…"
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
         onCompositionStart={() => {
@@ -112,23 +109,6 @@ export function Composer({
       />
 
       <div className="composer__bar">
-        <span className="composer__hint">
-          {/* 提示跟着偏好走：这里的按键说明与"设置 → 通用 → 发送键"必须一致，
-              否则用户会照着一个不成立的说明去按键。 */}
-          <span className="composer__keys">
-            {sendWith === 'enter' ? (
-              <>
-                <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
-              </>
-            ) : (
-              <>
-                <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送 · <kbd>Enter</kbd> 换行
-              </>
-            )}
-          </span>
-          {value.length > 0 ? ` · ${value.length} 字` : ''}
-        </span>
-
         {/* 形态选择器。放在输入区而不是顶栏：它是**每次发送时**的一个选择，
             与"当前会话"同级，而不是全局设置。 */}
         {modes.length > 1 ? (
@@ -151,10 +131,13 @@ export function Composer({
             })}
           </div>
         ) : null}
+        <span className="composer__hint composer__keys">
+          {sendWith === 'enter' ? 'Enter 发送 · Shift+Enter 换行' : 'Ctrl/⌘+Enter 发送 · Enter 换行'}
+        </span>
 
         {streaming ? (
-          <button type="button" className="btn composer__stop" onClick={onStop}>
-            <IconStop size={11} />
+          <button type="button" className="btn composer__stop" onClick={onStop} aria-label="停止生成">
+            <IconStop size={15} />
             停止生成
           </button>
         ) : (
@@ -162,13 +145,17 @@ export function Composer({
             type="button"
             className="btn btn--primary composer__send"
             onClick={onSend}
+            aria-label="发送消息"
+            title="发送消息"
             disabled={disabled || value.trim() === ''}
           >
-            <IconArrowUp size={13} />
-            发送
+            <IconArrowUp size={19} />
           </button>
         )}
       </div>
+      {current !== 'react' && (
+        <p className="composer__task-note" role="note">独立任务 · 本轮不使用会话历史，请提供所需背景。</p>
+      )}
     </div>
   )
 }

@@ -126,7 +126,7 @@ export function DelegationPanel({ delegations, streaming }: DelegationPanelProps
       {/* 参与者与最终答案的关系必须说清楚，否则用户会以为
           上面这些结论就是最终答案。 */}
       <div className="experts__footnote">
-        以上为各专家的独立分析；下方「最终答案」是协调者对它们的综合与取舍。
+        各专家结论供参考，回答由协调者汇总。
       </div>
     </section>
   )

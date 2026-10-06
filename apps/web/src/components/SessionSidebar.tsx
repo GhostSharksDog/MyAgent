@@ -1,229 +1,144 @@
-/**
- * 左侧会话列表。
- *
- * 后端契约里有两点会直接影响这里的呈现，值得写下来：
- *
- * 1. **列表项不含对话内容**（`SessionSummary` 只有元信息）。
- *    所以这里只显示标题、轮次数、token 和更新时间 —— 不是偷懒，
- *    而是顺着后端"列表轻、详情重"的设计走。
- *
- * 2. **新建的会话标题一开始是空的**。后端只有在**第一轮对话成功落库**之后
- *    才会用首句用户输入生成标题（`Session.append_turn` 里做的）。
- *    因此列表里会先看到"（未命名会话）"，发完第一句才变成有意义的标题。
- *    界面不掩盖这件事：未命名就用灰色斜体显示，让它是"还没开始"的状态。
- *
- * 删除做了二次确认：会话是不可恢复的（内存/Redis 都直接删），
- * 而且在作品集演示时误删当场丢失上下文非常尴尬。
- */
-
-import { useState } from 'react'
-
-import { formatCompact, formatRelativeTime } from '../lib/format'
+import { useRef, useState } from 'react'
+import { useDialogFocus } from '../hooks/useDialogFocus'
+import { formatRelativeTime } from '../lib/format'
 import type { SessionSummary } from '../lib/types'
-import { IconFolder, IconPlus, IconRefresh, IconTrash } from './Icons'
+import { IconChevronRight, IconFolder, IconPlus, IconRefresh, IconTrash, IconX } from './Icons'
 
 export interface SessionSidebarProps {
   sessions: SessionSummary[]
   backend: string
   activeId: string | null
   loading: boolean
+  open: boolean
+  modal: boolean
+  onClose: () => void
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
   onRefresh: () => void
-
-  // ---------- 工作区（P6 布局改造） ----------
-  // 【为什么工作区入口放在会话栏，而不是顶栏或设置里】
-  // "打开文件夹"是一个**建立上下文**的动作，和"新建会话"是同一类事情：
-  // 它们都决定了接下来这场对话在什么范围内发生。
-  // 放在一起，用户一眼就能看懂"左边这块是管上下文的"。
-  //
-  // 而文件浏览是**使用**这个上下文的地方，所以它在右侧边栏常驻 ——
-  // 一处建立、一处使用，各归其位。
+  onOpenTools: () => void
+  onOpenSettings: () => void
+  status: 'loading' | 'offline' | 'unconfigured' | 'ready'
   workspaceRoot: string
+  workspaceLoaded: boolean
+  workspaceLoading: boolean
+  workspaceError: string | null
+  workspaceWritable: boolean
   fileSidebarOpen: boolean
-  /** 系统对话框正开着（等用户操作）。期间按钮要显示"在等"，不能再触发第二次。 */
   folderPicking: boolean
   onOpenFolder: () => void
   onCloseFolder: () => void
   onToggleFileSidebar: () => void
 }
 
-export function SessionSidebar({
-  sessions,
-  backend,
-  activeId,
-  loading,
-  onSelect,
-  onCreate,
-  onDelete,
-  onRefresh,
-  workspaceRoot,
-  fileSidebarOpen,
-  folderPicking,
-  onOpenFolder,
-  onCloseFolder,
-  onToggleFileSidebar,
-}: SessionSidebarProps) {
-  const hasWorkspace = workspaceRoot.trim() !== ''
+export function SessionSidebar(props: SessionSidebarProps) {
+  const {
+    sessions, backend, activeId, loading, open, modal, onClose, onSelect, onCreate, onDelete,
+    onRefresh, onOpenTools, onOpenSettings, status, workspaceRoot, workspaceLoaded,
+    workspaceLoading, workspaceError, workspaceWritable, fileSidebarOpen,
+    folderPicking, onOpenFolder, onCloseFolder, onToggleFileSidebar,
+  } = props
+  const containerRef = useRef<HTMLElement | null>(null)
+  useDialogFocus({ open: open && modal, containerRef, onClose })
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const hasWorkspace = workspaceRoot.trim() !== ''
+  const labels = { loading: '连接中…', offline: '服务未连接', unconfigured: '待配置模型', ready: '服务已就绪' }
 
   return (
-    <aside className="sidebar" aria-label="会话列表">
+    <aside id="session-sidebar" ref={containerRef} className="sidebar"
+      aria-label="会话列表" aria-hidden={!open} inert={!open}
+      role={modal ? 'dialog' : undefined} aria-modal={modal && open ? true : undefined}>
       <div className="sidebar__head">
-        <span className="sidebar__heading">会话</span>
-        <span className="sidebar__count">{sessions.length}</span>
-        <button
-          type="button"
-          className="btn btn--ghost btn--icon"
-          onClick={onRefresh}
-          title="刷新列表"
-          aria-label="刷新会话列表"
-          disabled={loading}
-        >
-          <IconRefresh size={13} className={loading ? 'spin' : undefined} />
+        <button type="button" className="btn sidebar__new" onClick={onCreate} disabled={loading}
+          aria-label="新建对话">
+          <IconPlus size={17} />新建对话
         </button>
+        <button type="button" className="btn btn--ghost btn--icon sidebar__close"
+          onClick={onClose} aria-label="收起会话列表"><IconX size={17} /></button>
       </div>
-
-      {/* ---------- 工作区 ---------- */}
-      <div className="sidebar__section">
-        <div className="sidebar__section-head">
-          <span className="sidebar__heading">工作区</span>
-          {hasWorkspace && (
-            <button
-              type="button"
-              className="btn btn--ghost btn--icon"
-              onClick={onToggleFileSidebar}
-              title={fileSidebarOpen ? '收起文件栏' : '展开文件栏'}
-              aria-pressed={fileSidebarOpen}
-            >
-              <IconFolder size={13} />
-            </button>
-          )}
-        </div>
-
-        {hasWorkspace ? (
-          <div className="ws">
-            <div className="ws__path" title={workspaceRoot}>
-              <IconFolder size={12} />
-              <span className="ws__name">{workspaceRoot.split(/[\\/]/).filter(Boolean).pop()}</span>
-            </div>
-            <div className="ws__full" title={workspaceRoot}>
-              {workspaceRoot}
-            </div>
-            <div className="ws__actions">
-              <button
-                type="button"
-                className="btn btn--ghost ws__btn"
-                onClick={onOpenFolder}
-                disabled={folderPicking}
-              >
-                {folderPicking ? '等待选择…' : '换一个'}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost ws__btn ws__btn--danger"
-                onClick={onCloseFolder}
-                title="关闭工作区（Agent 将不能再访问文件）"
-              >
-                关闭
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="ws__open"
-            onClick={onOpenFolder}
-            disabled={folderPicking}
-          >
-            <IconFolder size={13} />
-            {folderPicking ? '等待你在系统对话框中选择…' : '打开文件夹'}
-          </button>
-        )}
-      </div>
-
-      <div className="sidebar__divider" />
-
+      <div className="sidebar__caption">最近的对话</div>
       <div className="sidebar__list">
         {sessions.length === 0 ? (
           <div className="sidebar__empty">
-            {loading ? '加载中…' : '还没有会话。新建一个会话，对话历史就会保存在服务端。'}
+            {loading ? '正在读取对话…' : <><p>还没有对话</p><span>新建一个，留住你的思路。</span></>}
           </div>
-        ) : (
-          sessions.map((session) => {
-            const active = session.id === activeId
-            const unnamed = session.title.trim() === '' || session.title.includes('未命名')
-            return (
-              <div
-                key={session.id}
-                className="session-item"
-                aria-current={active}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelect(session.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onSelect(session.id)
-                  }
-                }}
-              >
-                <div className="session-item__body">
-                  <span
-                    className="session-item__title"
-                    style={unnamed ? { color: 'var(--text-3)', fontStyle: 'italic' } : undefined}
-                    title={session.title}
-                  >
-                    {session.title || '（未命名会话）'}
-                  </span>
-                  <span className="session-item__meta">
-                    <span>{session.turn_count} 轮</span>
-                    {session.total_tokens > 0 ? (
-                      <span>· {formatCompact(session.total_tokens)} tok</span>
-                    ) : null}
-                    <span>· {formatRelativeTime(session.updated_at)}</span>
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  className="session-item__delete"
-                  title={pendingDelete === session.id ? '再点一次确认删除' : '删除会话'}
-                  aria-label="删除会话"
-                  onClick={(event) => {
-                    // 防止冒泡触发"选中会话"
-                    event.stopPropagation()
-                    if (pendingDelete === session.id) {
-                      setPendingDelete(null)
-                      onDelete(session.id)
-                    } else {
-                      setPendingDelete(session.id)
-                    }
-                  }}
-                  onBlur={() => setPendingDelete(null)}
-                  style={
-                    pendingDelete === session.id
-                      ? { opacity: 1, background: 'var(--danger-soft)', color: 'var(--danger)' }
-                      : undefined
-                  }
-                >
-                  <IconTrash size={12} />
-                </button>
-              </div>
-            )
-          })
-        )}
+        ) : sessions.map((session) => (
+          <div className="session-item" key={session.id} data-active={session.id === activeId}>
+            <button type="button" className="session-item__select"
+              onClick={() => onSelect(session.id)} aria-current={session.id === activeId}
+              title={session.title || '新对话'}>
+              <span className="session-item__title">{session.title || '新对话'}</span>
+              <span className="session-item__meta">{formatRelativeTime(session.updated_at)}</span>
+            </button>
+            <button type="button" className="session-item__delete" aria-label="删除会话"
+              data-confirm={pendingDelete === session.id}
+              title={pendingDelete === session.id ? '再点一次确认删除' : '删除对话'}
+              onClick={() => {
+                if (pendingDelete === session.id) {
+                  setPendingDelete(null)
+                  onDelete(session.id)
+                } else setPendingDelete(session.id)
+              }}
+              onBlur={() => setPendingDelete(null)}>
+              <IconTrash size={14} />
+            </button>
+          </div>
+        ))}
       </div>
-
       <div className="sidebar__foot">
-        <button type="button" className="btn btn--primary btn--block" onClick={onCreate}>
-          <IconPlus size={13} />
-          新建会话
-        </button>
-        <span className="muted mono" style={{ fontSize: 'var(--fs-xs)', textAlign: 'center' }}>
-          {backend ? `存储：${backend}` : '存储：未知'}
-        </span>
+        <div className="sidebar__workspace">
+          <span className="sidebar__caption">工作区</span>
+          {workspaceLoaded && workspaceError && <div className="ws__pending" role="status">
+            <span>配置更新未完成</span><button type="button" className="link-button"
+              title={workspaceError} onClick={onOpenSettings}>查看原因</button>
+          </div>}
+          {!workspaceLoaded ? (
+            <div className="ws__pending">
+              <span>{workspaceLoading ? '正在读取工作区…' : workspaceError ? '工作区信息暂不可用' : '尚未读取工作区'}</span>
+              {!workspaceLoading && <button type="button" className="link-button"
+                onClick={onOpenSettings}>{workspaceError ? '查看原因与设置' : '打开设置'}</button>}
+            </div>
+          ) : hasWorkspace ? (
+            <div className="ws">
+              <button type="button" className="ws__browse" onClick={onToggleFileSidebar}
+                aria-label="工作区文件" aria-expanded={fileSidebarOpen} title={workspaceRoot}>
+                <IconFolder size={17} />
+                <span className="ws__body">
+                  <span className="ws__name">{workspaceRoot.split(/[\\/]/).filter(Boolean).pop()}</span>
+                  <span className="ws__permission" data-writable={workspaceWritable}>{workspaceWritable ? '允许读写' : '只读访问'}</span>
+                </span>
+                <IconChevronRight size={13} />
+              </button>
+              <details className="ws__menu">
+                <summary>管理工作区</summary>
+                <span className="ws__full" title={workspaceRoot}>{workspaceRoot}</span>
+                <div className="ws__actions">
+                  <button type="button" className="btn btn--ghost" onClick={onOpenFolder}
+                    disabled={folderPicking}>{folderPicking ? '等待选择…' : '更换目录'}</button>
+                  <button type="button" className="btn btn--danger" onClick={onCloseFolder}>移除工作区</button>
+                </div>
+              </details>
+            </div>
+          ) : (
+            <button type="button" className="ws__open" onClick={onOpenFolder}
+              disabled={folderPicking} aria-label="选择工作区">
+              <IconFolder size={17} /><span>{folderPicking ? '等待选择…' : '选择工作区'}</span><IconPlus size={14} />
+            </button>
+          )}
+        </div>
+        <div className="sidebar__service">
+          <button type="button" className="sidebar__status" onClick={onOpenTools}
+            aria-label="查看服务状态">
+            <span className={status === 'ready' ? 'dot dot--ok' : status === 'loading' ? 'dot dot--live' : 'dot dot--warn'} />
+            {labels[status]}
+          </button>
+          <button type="button" className="btn btn--ghost btn--icon" onClick={onRefresh}
+            aria-label="刷新服务状态" title="刷新服务与对话" disabled={loading}>
+            <IconRefresh size={14} className={loading ? 'spin' : undefined} />
+          </button>
+        </div>
+        {backend === 'memory' ? <p className="sidebar__storage">重启后历史不会保留</p>
+          : backend ? <p className="sidebar__storage">历史存储：{backend === 'sql' || backend === 'sqlite' ? '本地数据库' : backend === 'postgresql' ? 'PostgreSQL' : backend}</p> : null}
       </div>
     </aside>
   )

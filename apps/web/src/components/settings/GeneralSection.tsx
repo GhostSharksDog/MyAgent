@@ -15,9 +15,9 @@ import type { ThemePreference } from '../../hooks/useTheme'
 import { IconCheck } from '../Icons'
 
 const THEMES: { value: ThemePreference; label: string; note: string }[] = [
-  { value: 'light', label: '浅色', note: '白天看得清' },
-  { value: 'dark', label: '深色', note: '夜里不刺眼' },
-  { value: 'system', label: '跟随系统', note: '系统切换时自动跟着变' },
+  { value: 'light', label: '浅色', note: '暖白与鼠尾草绿' },
+  { value: 'dark', label: '深色', note: '柔和的石墨背景' },
+  { value: 'system', label: '跟随系统', note: '随系统外观切换' },
 ]
 
 export interface GeneralSectionProps {
@@ -40,7 +40,7 @@ export function GeneralSection({
       <section className="settings__group">
         <h3 className="settings__legend">外观</h3>
         <p className="settings__hint settings__hint--block">
-          主题保存在这台设备上，不影响服务端配置。
+          立即生效，仅保存在这个浏览器中。
         </p>
         <div className="theme-cards">
           {THEMES.map((item) => {
@@ -105,8 +105,8 @@ export function GeneralSection({
             onChange={(e) => onPrefChange('autoScroll', e.target.checked)}
           />
           <span>
-            回答变长时自动滚到底
-            <span className="settings__hint">关掉后可以自己往上翻，不会被拽回去。</span>
+            自动跟随回答
+            <span className="settings__hint">回答更新时滚动到底部；关闭后可自由阅读。</span>
           </span>
         </label>
 
@@ -117,8 +117,8 @@ export function GeneralSection({
             onChange={(e) => onPrefChange('showMeta', e.target.checked)}
           />
           <span>
-            显示耗时与 token
-            <span className="settings__hint">每条回答下方的元信息；关掉界面更干净。</span>
+            显示运行统计
+            <span className="settings__hint">显示步数、工具次数与 token；预算终止、裁剪和用量不完整提示始终保留。</span>
           </span>
         </label>
       </section>
@@ -129,7 +129,7 @@ export function GeneralSection({
           <button type="button" className="btn btn--ghost" onClick={onResetPrefs}>
             恢复界面默认值
           </button>
-          <span className="settings__hint">只重置外观与上面的交互偏好，不动模型与知识库配置。</span>
+          <span className="settings__hint">重置发送键、自动滚动与运行统计；主题与服务配置保持不变。</span>
         </div>
       </section>
     </>

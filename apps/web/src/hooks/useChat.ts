@@ -92,15 +92,21 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
   }, [])
 
   const clear = useCallback(() => {
-    controllerRef.current?.abort()
+    const previous = controllerRef.current
+    controllerRef.current = null
+    streamingRef.current = false
+    setIsStreaming(false)
+    previous?.abort()
     setItems([])
     setNotice(null)
   }, [])
 
   const loadHistory = useCallback((turns: SessionTurn[]) => {
-    controllerRef.current?.abort()
+    const previous = controllerRef.current
+    controllerRef.current = null
     streamingRef.current = false
     setIsStreaming(false)
+    previous?.abort()
     setNotice(null)
 
     const restored: ChatItem[] = turns
@@ -151,16 +157,21 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
 
       try {
         const response = await openChatStream({ message, sessionId, mode }, controller.signal)
+        if (controllerRef.current !== controller || !aliveRef.current) {
+          await response.body?.cancel()
+          return
+        }
 
         for await (const event of streamAgentEvents(response, { signal: controller.signal })) {
+          // 切换历史或清空后，旧流的迟到事件不能修改当前轮次。
+          if (controllerRef.current !== controller || !aliveRef.current) break
           if (event.type === 'done') sawDone = true
-          if (!aliveRef.current) break
           setItems((prev) => patchAssistant(prev, assistantId, (state) => applyEvent(state, event)))
         }
 
         // 流正常收尾但没有 done：说明连接被中间层掐断或后端提前退出。
         // 这种情况必须显式告知 —— 否则用户会盯着一句"没写完的话"以为模型就这水平。
-        if (!sawDone) {
+        if (!sawDone && controllerRef.current === controller && aliveRef.current) {
           setItems((prev) =>
             patchAssistant(prev, assistantId, (state) =>
               state.phase === 'done' || state.phase === 'error'
@@ -174,6 +185,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
           )
         }
       } catch (error) {
+        if (controllerRef.current !== controller || !aliveRef.current) return
         if (controller.signal.aborted) {
           setItems((prev) =>
             patchAssistant(prev, assistantId, (state) => ({ ...state, phase: 'aborted' })),
@@ -195,10 +207,15 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
           )
         }
       } finally {
-        streamingRef.current = false
-        controllerRef.current = null
-        if (aliveRef.current) setIsStreaming(false)
-        settledRef.current?.()
+        // 旧请求可能在新请求开始以后才收到取消错误，不能清掉新控制器。
+        if (controllerRef.current === controller) {
+          streamingRef.current = false
+          controllerRef.current = null
+          if (aliveRef.current) {
+            setIsStreaming(false)
+            settledRef.current?.()
+          }
+        }
       }
     },
     [],

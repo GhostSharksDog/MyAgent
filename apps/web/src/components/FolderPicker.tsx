@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import { resolvePickerView } from '../lib/picker'
 import type { PickerView } from '../lib/picker'
 import {
@@ -75,6 +76,13 @@ export function FolderPicker({ open, onClose, onPick, current, note }: FolderPic
   const [waitingDialog, setWaitingDialog] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  // 系统选择器等待期间，Esc 留给系统窗口；面板内仍保持 Tab 焦点约束。
+  const closePanel = useCallback(() => {
+    if (!waitingDialog) onClose()
+  }, [waitingDialog, onClose])
+  useDialogFocus({ open, containerRef, onClose: closePanel, initialFocusRef: closeRef })
   const view = resolvePickerView(capability, capabilityError)
 
   const go = useCallback(async (path: string) => {
@@ -201,35 +209,27 @@ export function FolderPicker({ open, onClose, onPick, current, note }: FolderPic
     [onPick],
   )
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      // 系统对话框开着的时候，Esc 应该关的是那个对话框，而不是这个面板
-      if (event.key === 'Escape' && !waitingDialog) onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, waitingDialog])
-
   if (!open) return null
 
   const segments = (listing?.path ?? '').split(/[\\/]/).filter(Boolean)
   const showingRoots = listing != null && listing.path === ''
 
   return (
-    <div className="drawer-scrim" onClick={onClose} role="presentation">
+    <div className="drawer-scrim" onClick={closePanel} role="presentation">
       <div
+        ref={containerRef}
         className="picker"
         role="dialog"
         aria-modal="true"
         aria-label="选择工作区文件夹"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="picker__head">
           <h2 className="picker__title">
             <IconFolder /> 打开文件夹作为工作区
           </h2>
-          <button type="button" className="btn btn--ghost btn--icon" onClick={onClose} title="关闭（Esc）">
+          <button ref={closeRef} type="button" className="btn btn--ghost btn--icon" onClick={closePanel} title="关闭（Esc）" aria-label="关闭工作区选择器" disabled={waitingDialog}>
             <IconX />
           </button>
         </header>
@@ -290,7 +290,7 @@ export function FolderPicker({ open, onClose, onPick, current, note }: FolderPic
         <div className="picker__divider">或手动浏览</div>
 
         <p className="picker__note">
-          Agent 只能访问你选中的这个目录**以内**的文件（写权限在设置里单独开关）。这里只显示目录名，不显示文件内容。
+          Agent 只访问你选中的工作区。写权限需在设置中单独开启。这里仅显示目录名。
         </p>
 
         {/* 路径栏：显示当前位置，也允许直接粘贴一个绝对路径 */}
@@ -353,7 +353,7 @@ export function FolderPicker({ open, onClose, onPick, current, note }: FolderPic
             )}
           </span>
           <div className="picker__actions">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>
+            <button type="button" className="btn btn--ghost" onClick={closePanel} disabled={waitingDialog}>
               取消
             </button>
             <button

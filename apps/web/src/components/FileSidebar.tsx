@@ -25,8 +25,9 @@
  * **同一个系统里两套权限判定，等于没有权限判定。**
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import { listDirectory, readFileContent } from '../lib/settings-api'
 import type { DirListing, FileContent } from '../lib/types'
 import { Markdown } from './Markdown'
@@ -40,6 +41,8 @@ export interface FileSidebarProps {
   onOpenFolder: () => void
   /** 换一个工作区 */
   onSwitchFolder: () => void
+  /** 窄屏作为模态抽屉；桌面并列面板不限制焦点。 */
+  modal?: boolean
 }
 
 function formatSize(bytes: number): string {
@@ -48,47 +51,76 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: FileSidebarProps) {
+export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder, modal = false }: FileSidebarProps) {
   const configured = root.trim() !== ''
+  const containerRef = useRef<HTMLElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  const directoryRequest = useRef(0)
+  const previewRequest = useRef(0)
+  const currentRoot = useRef(root)
+  useDialogFocus({ open: true, containerRef, onClose, initialFocusRef: closeRef, modal })
 
   const [listing, setListing] = useState<DirListing | null>(null)
   const [preview, setPreview] = useState<FileContent | null>(null)
   const [loading, setLoading] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showHidden, setShowHidden] = useState(false)
 
   const browse = useCallback(
     async (path: string) => {
+      const request = ++directoryRequest.current
       setLoading(true)
+      setListing(null)
       setError(null)
       try {
-        setListing(await listDirectory(path, showHidden))
+        const next = await listDirectory(path, showHidden)
+        if (request === directoryRequest.current && currentRoot.current === root) setListing(next)
       } catch (err) {
-        setError(err instanceof Error ? err.message : '读取目录失败')
+        if (request === directoryRequest.current && currentRoot.current === root) {
+          setError(err instanceof Error ? err.message : '读取目录失败')
+        }
       } finally {
-        setLoading(false)
+        if (request === directoryRequest.current && currentRoot.current === root) setLoading(false)
       }
     },
-    [showHidden],
+    [root, showHidden],
   )
 
   // 工作区变了（或切换隐藏文件）就回到根目录重来 ——
   // 保留旧路径会指向一个在新工作区里不存在的相对路径，必然报错
-  useEffect(() => {
-    if (!configured) {
-      setListing(null)
-      setPreview(null)
-      return
+  useLayoutEffect(() => {
+    // 新根目录首次绘制前清掉旧预览；旧请求的返回值也必须匹配该根目录。
+    currentRoot.current = root
+    directoryRequest.current += 1
+    previewRequest.current += 1
+    setListing(null)
+    setPreview(null)
+    setError(null)
+    setLoading(false)
+    setPreviewLoading(false)
+    if (configured) void browse('.')
+    return () => {
+      // 请求仍可返回，但关闭面板或切换根目录后不能提交到组件状态。
+      directoryRequest.current += 1
+      previewRequest.current += 1
     }
-    void browse('.')
-  }, [configured, root, showHidden, browse])
+  }, [configured, root, browse])
 
   const openFile = async (path: string) => {
+    const request = ++previewRequest.current
     setError(null)
+    setPreview(null)
+    setPreviewLoading(true)
     try {
-      setPreview(await readFileContent(path))
+      const next = await readFileContent(path)
+      if (request === previewRequest.current && currentRoot.current === root) setPreview(next)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '读取文件失败')
+      if (request === previewRequest.current && currentRoot.current === root) {
+        setError(err instanceof Error ? err.message : '读取文件失败')
+      }
+    } finally {
+      if (request === previewRequest.current && currentRoot.current === root) setPreviewLoading(false)
     }
   }
 
@@ -100,7 +132,15 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
   }
 
   return (
-    <aside className="fileside" aria-label="文件">
+    <aside
+      ref={containerRef}
+      className={modal ? 'fileside fileside--modal' : 'fileside'}
+      aria-label="工作区文件"
+      role={modal ? 'dialog' : undefined}
+      aria-modal={modal ? true : undefined}
+      aria-busy={loading || previewLoading}
+      tabIndex={modal ? -1 : undefined}
+    >
       <div className="fileside__head">
         <span className="fileside__heading">
           <IconFolder size={13} /> 文件
@@ -112,6 +152,7 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
               className="btn btn--ghost btn--icon"
               onClick={onSwitchFolder}
               title="换一个工作区文件夹"
+              aria-label="切换工作区文件夹"
             >
               <IconFolder size={13} />
             </button>
@@ -120,16 +161,19 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
               className="btn btn--ghost btn--icon"
               onClick={() => void browse(listing?.path ?? '.')}
               title="刷新"
+              aria-label="刷新工作区文件"
             >
               <IconRefresh size={13} />
             </button>
           </>
         )}
         <button
+          ref={closeRef}
           type="button"
           className="btn btn--ghost btn--icon"
           onClick={onClose}
           title="收起文件栏"
+          aria-label="收起文件栏"
         >
           <IconX size={13} />
         </button>
@@ -141,8 +185,7 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
         <div className="fileside__empty">
           <p>还没有打开文件夹。</p>
           <p className="settings__hint settings__hint--block">
-            Agent 只能访问你**显式选中**的目录。打开一个文件夹作为工作区，
-            路径穿越与符号链接逃逸都会被拦下。
+            选择文件夹后，就能浏览和预览其中的文件。Agent 只访问你明确授权的工作区。
           </p>
           <button type="button" className="btn btn--primary btn--block" onClick={onOpenFolder}>
             打开文件夹
@@ -192,6 +235,7 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
 
           <div className="fileside__scroll">
             {loading && <p className="drawer__note">读取中…</p>}
+            {previewLoading && <p className="drawer__note" role="status">正在读取文件…</p>}
             {error && <p className="settings__alert settings__alert--bad">{error}</p>}
 
             <ul className="fileside__entries">
@@ -226,6 +270,7 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
             {listing && listing.entries.length === 0 && (
               <p className="drawer__note">这个目录是空的</p>
             )}
+            {listing?.truncated && <p className="drawer__note">目录结果已截断，请进入子目录查看。</p>}
 
             {/* 预览紧跟在列表下面，而不是并排 ——
                 边栏本来就窄，再分两栏两边都会挤到不可读 */}

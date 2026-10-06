@@ -37,7 +37,11 @@ import {
 } from '../../lib/models-view'
 import { IconCheck, IconPlus, IconTrash } from '../Icons'
 
-export function ModelsSection() {
+export interface ModelsSectionProps {
+  onChanged?: () => void
+}
+
+export function ModelsSection({ onChanged }: ModelsSectionProps) {
   const models = useModels()
   const [draft, setDraft] = useState<ModelDraft | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -73,13 +77,27 @@ export function ModelsSection() {
     if (!draft) return
     setTouched(true)
     if (!canSubmitDraft(draft)) return
-    if (await models.save(draftToPayload(draft))) setDraft(null)
+    if (await models.save(draftToPayload(draft))) {
+      setDraft(null)
+      onChanged?.()
+    }
+  }
+
+  const activate = async (id: string): Promise<void> => {
+    if (await models.activate(id)) onChanged?.()
   }
 
   return (
     <>
-      {models.error && <div className="settings__alert settings__alert--bad">{models.error}</div>}
-      {models.notice && <div className="settings__alert settings__alert--ok">{models.notice}</div>}
+      {models.error && (
+        <div className="settings__alert settings__alert--bad" role="alert">
+          <p>{models.error}</p>
+          <button type="button" className="btn" disabled={models.loading} onClick={() => void models.load()}>
+            重新读取模型
+          </button>
+        </div>
+      )}
+      {models.notice && <div className="settings__alert settings__alert--ok" role="status">{models.notice}</div>}
 
       {/* ---------- 当前生效的配置 ---------- */}
       {models.data && (
@@ -87,16 +105,16 @@ export function ModelsSection() {
           <h3 className="settings__legend">正在使用</h3>
           <div className="model-current">
             <div>
-              <div className="model-current__name">{models.data.current.model}</div>
+              <div className="model-current__name">{models.data.current.model || '尚未配置模型'}</div>
               <div className="model-current__url">{models.data.current.base_url}</div>
             </div>
             <span className={`badge${models.data.current.api_key_set ? ' badge--ok' : ' badge--warn'}`}>
-              {models.data.current.api_key_set ? '密钥已配置' : '没有密钥'}
+              {models.data.current.api_key_set ? '密钥已配置' : '密钥未配置'}
             </span>
           </div>
           {models.data.current_unsaved && (
             <div className="settings__alert settings__hint--warn">
-              这份配置还没存进清单。存起来之后就能一键切回它，也能存别的供应商。
+              当前配置尚未保存到模型清单。保存后可随时切回。
               <div className="settings__actions">
                 {!showImport ? (
                   <button type="button" className="btn" onClick={() => setShowImport(true)}>
@@ -106,11 +124,14 @@ export function ModelsSection() {
                   <>
                     <input
                       className="settings__input"
-                      placeholder="给它起个名字，例如 我一直在用的"
+                      aria-label="当前模型名称"
+                      placeholder="例如 日常使用"
                       value={importName}
                       onChange={(e) => setImportName(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') void models.importCurrent(importName)
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing && models.busyId === null) {
+                          void models.importCurrent(importName)
+                        }
                       }}
                     />
                     <button
@@ -140,9 +161,7 @@ export function ModelsSection() {
 
         {models.loading && !models.data && <p className="settings__hint">读取中…</p>}
         {models.data?.models.length === 0 && (
-          <p className="settings__hint settings__hint--block">
-            还没有保存任何模型。下面挑一个供应商加进来 —— 之后换模型就是一次点击的事。
-          </p>
+          <p className="settings__hint settings__hint--block">还没有保存模型，选择下方供应商添加。</p>
         )}
 
         <ul className="model-list">
@@ -169,8 +188,8 @@ export function ModelsSection() {
                     <button
                       type="button"
                       className="btn"
-                      disabled={models.busyId === m.id}
-                      onClick={() => void models.activate(m.id)}
+                      disabled={models.busyId !== null}
+                      onClick={() => void activate(m.id)}
                     >
                       {models.busyId === m.id ? '切换中…' : '切换'}
                     </button>
@@ -178,6 +197,7 @@ export function ModelsSection() {
                   <button
                     type="button"
                     className="btn btn--ghost"
+                    disabled={models.busyId !== null}
                     onClick={() => {
                       setTouched(false)
                       setDraft(draftFromModel(m))
@@ -190,10 +210,12 @@ export function ModelsSection() {
                       <button
                         type="button"
                         className="btn btn--danger"
-                        disabled={models.busyId === m.id}
+                        disabled={models.busyId !== null}
                         onClick={async () => {
-                          await models.remove(m.id)
-                          setConfirmDelete(null)
+                          if (await models.remove(m.id)) {
+                            setConfirmDelete(null)
+                            onChanged?.()
+                          }
                         }}
                       >
                         确认删除
@@ -206,6 +228,7 @@ export function ModelsSection() {
                     <button
                       type="button"
                       className="iconbtn"
+                      disabled={models.busyId !== null}
                       title="删除"
                       aria-label={`删除 ${m.label}`}
                       onClick={() => setConfirmDelete(m.id)}
@@ -247,7 +270,7 @@ export function ModelsSection() {
         {draft && (
           <div className="model-form">
             <label className="settings__field">
-              <span className="settings__label">名称（列表里靠它区分）</span>
+              <span className="settings__label">显示名称</span>
               <input
                 className="settings__input"
                 value={draft.label}
@@ -309,7 +332,7 @@ export function ModelsSection() {
                 onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })}
               />
               <span className="settings__hint">
-                按模型存：本地小模型常要 0.7，而工具调用场景建议 ≤ 0.3
+                较低值让输出更稳定，较高值增加表达变化。保存后切换模型才会生效。
               </span>
             </label>
 
@@ -317,16 +340,16 @@ export function ModelsSection() {
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={touched && !ready}
+                disabled={models.busyId !== null || (touched && !ready)}
                 onClick={() => void submit()}
               >
-                {draft.id ? '保存修改' : '添加'}
+                {models.busyId !== null ? '保存中…' : draft.id ? '保存修改' : '添加模型'}
               </button>
               <button type="button" className="btn btn--ghost" onClick={() => setDraft(null)}>
                 取消
               </button>
               <span className="settings__hint">
-                添加后还要点一次「切换」才会真正用它 —— 免得填到一半就把正在用的换掉了。
+                保存到清单后，点击「切换」启用；不会自动替换当前模型。
               </span>
             </div>
           </div>

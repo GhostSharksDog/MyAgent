@@ -23,7 +23,7 @@
  *    而那恰恰是用户最想确认的"我的改动生效了吗"。
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { fetchSettings, testLLMConnection, updateSettings } from '../lib/settings-api'
 import type { SettingsUpdatePayload, SettingsView, TestConnectionResult } from '../lib/types'
@@ -48,36 +48,62 @@ export function useSettings() {
   const [notice, setNotice] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
+  const operation = useRef(0)
+  const savePending = useRef(false)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      operation.current += 1
+    }
+  }, [])
 
   const load = useCallback(async () => {
+    // 保存自己会在更新后读取配置；此时另一次读取可能得到更新前的快照。
+    if (savePending.current || !mounted.current) return
+    const current = ++operation.current
+    const isCurrent = () => mounted.current && current === operation.current
     setLoading(true)
     setError(null)
     try {
-      setSaved(await fetchSettings())
+      const result = await fetchSettings()
+      if (isCurrent()) setSaved(result)
     } catch (err) {
       // 把后端的中文原因原样带出来 —— 设置接口为每种失败都写了
       // 具体提示（"工作区目录不存在"），前端自己编一句就丢掉了
-      setError(err instanceof Error ? err.message : '读取设置失败')
+      if (isCurrent()) setError(err instanceof Error ? err.message : '读取设置失败')
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [])
 
   const save = useCallback(async (payload: SettingsUpdatePayload) => {
+    // React 状态要等下一次绘制才更新；用同步锁挡住同一帧内的重复提交。
+    if (savePending.current || !mounted.current) return false
+    savePending.current = true
+    const current = ++operation.current
+    const isCurrent = () => mounted.current && current === operation.current
+    setLoading(false)
     setSaving(true)
     setError(null)
     setNotice(null)
     try {
       await updateSettings(payload)
+      if (!isCurrent()) return false
       // 重新拉而不是用响应 —— 见文件头的第 2 条
-      setSaved(await fetchSettings())
+      const result = await fetchSettings()
+      if (!isCurrent()) return false
+      setSaved(result)
       setNotice('已保存并立即生效，无需重启')
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      if (isCurrent()) setError(err instanceof Error ? err.message : '保存失败')
       return false
     } finally {
-      setSaving(false)
+      savePending.current = false
+      if (isCurrent()) setSaving(false)
     }
   }, [])
 

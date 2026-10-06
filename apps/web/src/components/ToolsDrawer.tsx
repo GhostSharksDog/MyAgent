@@ -23,10 +23,11 @@
  * 这些成本很低，但缺了就是"能用"和"做完"的区别。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
-import type { ApiMeta, ToolInfo } from '../lib/types'
-import { IconChevronRight, IconGrid, IconX } from './Icons'
+import { useDialogFocus } from '../hooks/useDialogFocus'
+import type { ApiMeta, HealthStatus, ToolInfo } from '../lib/types'
+import { IconChevronRight, IconGrid, IconRefresh, IconX } from './Icons'
 
 /** 从 JSON Schema 里读出一个简短的参数类型描述。
  *  Pydantic v2 对 Optional 字段会产出 `anyOf: [{type: 'string'}, {type: 'null'}]`，
@@ -126,23 +127,30 @@ export interface ToolsDrawerProps {
   open: boolean
   tools: ToolInfo[]
   meta: ApiMeta | null
+  health: HealthStatus | null
+  sessionId: string | null
+  onRefresh: () => void
   onClose: () => void
 }
 
-export function ToolsDrawer({ open, tools, meta, onClose }: ToolsDrawerProps) {
+export function ToolsDrawer({ open, tools, meta, health, sessionId, onRefresh, onClose }: ToolsDrawerProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return undefined
-    closeRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  useDialogFocus({ open, containerRef, onClose, initialFocusRef: closeRef })
 
   if (!open) return null
+  const backend = health?.session_backend ?? meta?.session_backend
+  const storage = backend === 'memory'
+    ? '内存 · 重启后历史不会保留'
+    : backend === 'sqlite'
+      ? 'SQLite · 历史保存在本机数据库'
+      : backend === 'sql'
+        ? 'SQL · 历史保存在配置的数据库'
+        : backend === 'postgresql'
+          ? 'PostgreSQL · 历史保存在配置的数据库'
+          : backend === 'redis'
+            ? 'Redis · 由 Redis 服务保存历史'
+            : backend ? `${backend} · 以服务端配置为准` : '状态尚未读取'
 
   return (
     <>
@@ -150,16 +158,16 @@ export function ToolsDrawer({ open, tools, meta, onClose }: ToolsDrawerProps) {
         type="button"
         className="drawer-scrim"
         aria-label="关闭工具面板"
+        tabIndex={-1}
         onClick={onClose}
       />
-      <div className="drawer" role="dialog" aria-modal="true" aria-label="已注册的工具">
+      <div ref={containerRef} className="drawer" role="dialog" aria-modal="true" aria-label="已注册的工具" tabIndex={-1}>
         <div className="drawer__head">
           <IconGrid size={15} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="drawer__title">已注册的工具</div>
+            <div className="drawer__title">工具与服务</div>
             <div className="drawer__subtitle">
-              GET /api/tools · 共 {tools.length} 个
-              {meta ? ` · max_steps=${meta.max_steps}` : ''}
+              当前已注册 {tools.length} 个工具
             </div>
           </div>
           <button
@@ -167,7 +175,7 @@ export function ToolsDrawer({ open, tools, meta, onClose }: ToolsDrawerProps) {
             type="button"
             className="btn btn--ghost btn--icon"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label="关闭工具面板"
           >
             <IconX size={15} />
           </button>
@@ -175,14 +183,30 @@ export function ToolsDrawer({ open, tools, meta, onClose }: ToolsDrawerProps) {
 
         <div className="drawer__body">
           <div className="drawer__note">
-            这些工具就是模型能调用的全部能力。描述与参数 Schema 会原样发给模型 ——
-            描述写得含糊，模型就会乱调或漏调，所以工具层决定了 Agent 可靠性的一半。
+            这里列出当前模型可调用的能力。展开工具可查看参数、说明与完整 Schema。
           </div>
           {tools.length === 0 ? (
-            <div className="sidebar__empty">没有工具（或 /api/tools 加载失败）。</div>
+            <div className="sidebar__empty">暂未取得工具清单。刷新服务状态可重新读取。</div>
           ) : (
             tools.map((tool) => <ToolItem key={tool.name} tool={tool} />)
           )}
+          <details className="drawer__details">
+            <summary>服务详情</summary>
+            <dl className="drawer__facts">
+              <div><dt>服务状态</dt><dd>{health?.status ?? '尚未读取'}</dd></div>
+              <div><dt>模型</dt><dd>{health?.model ?? meta?.model ?? '尚未读取'}</dd></div>
+              <div><dt>模型配置</dt><dd>{health ? health.llm_configured ? '已配置' : '尚未配置' : '状态未知'}</dd></div>
+              <div><dt>访问控制</dt><dd>{health ? health.auth_required ? '需要访问密钥' : '本地无需密钥' : '状态未知'}</dd></div>
+              <div><dt>会话存储</dt><dd>{storage}</dd></div>
+              <div><dt>当前会话</dt><dd>{sessionId ?? '未选择 · 不保存此次对话'}</dd></div>
+              <div><dt>最大执行步数</dt><dd>{meta ? `${meta.max_steps} 步` : '尚未读取'}</dd></div>
+              <div><dt>版本与环境</dt><dd>{meta ? `${meta.service} ${meta.version} · ${meta.env}` : health?.env ?? '尚未读取'}</dd></div>
+              <div><dt>工具接口</dt><dd><code>GET /api/tools</code></dd></div>
+            </dl>
+            <button type="button" className="btn btn--ghost drawer__refresh" onClick={onRefresh}>
+              <IconRefresh size={14} /> 刷新服务状态
+            </button>
+          </details>
         </div>
       </div>
     </>

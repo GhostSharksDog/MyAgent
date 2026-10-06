@@ -11,7 +11,7 @@
  * 也不影响用户聊天）。部分可用 > 全部不可用。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, fetchHealth, fetchMeta, fetchTools } from '../lib/api'
 import type { ApiMeta, HealthStatus, ToolInfo } from '../lib/types'
@@ -47,14 +47,20 @@ export function useServerInfo(): UseServerInfoResult {
   const [error, setError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
   const [loading, setLoading] = useState(true)
+  const requestSequence = useRef(0)
+  const mounted = useRef(true)
 
   const reload = useCallback(async () => {
+    if (!mounted.current) return
+    const current = ++requestSequence.current
     setLoading(true)
     const [healthResult, metaResult, toolsResult] = await Promise.allSettled([
       fetchHealth(),
       fetchMeta(),
       fetchTools(),
     ])
+    // 配置保存会触发刷新，先前的请求不能把旧模型与工具清单写回来。
+    if (!mounted.current || current !== requestSequence.current) return
 
     if (healthResult.status === 'fulfilled') setHealth(healthResult.value)
     if (metaResult.status === 'fulfilled') setMeta(metaResult.value)
@@ -80,7 +86,12 @@ export function useServerInfo(): UseServerInfoResult {
   }, [])
 
   useEffect(() => {
+    mounted.current = true
     void reload()
+    return () => {
+      mounted.current = false
+      requestSequence.current += 1
+    }
   }, [reload])
 
   return { health, meta, tools, offline, error, loading, reload }

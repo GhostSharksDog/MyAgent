@@ -35,16 +35,19 @@ import type { SessionDetail, SessionSummary } from '../lib/types'
 
 export interface UseSessionsResult {
   sessions: SessionSummary[]
-  /** `memory` / `redis` / `fake`。用于提示"多进程不共享"。 */
+  /** 服务端的实际存储后端，例如 memory / redis / sqlite。 */
   backend: string
   activeId: string | null
   detail: SessionDetail | null
   loading: boolean
+  /** 新建、切换或删除当前会话期间保持旧上下文，并暂时阻止发送。 */
+  transitioning: boolean
   /** 列表或详情加载失败时的中文提示（后端不可用时就是这里）。 */
   error: string | null
   refresh: () => Promise<void>
   select: (id: string) => Promise<void>
-  create: () => Promise<void>
+  /** 只有新会话已成为当前上下文时返回 true，调用方才可清理草稿。 */
+  create: () => Promise<boolean>
   remove: (id: string) => Promise<void>
   /** 取消选中，回到无状态模式（不传 session_id）。 */
   deselect: () => void
@@ -62,6 +65,7 @@ export function useSessions(): UseSessionsResult {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [detail, setDetail] = useState<SessionDetail | null>(null)
   const [loading, setLoading] = useState(false)
+  const [transitioning, setTransitioning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 请求序号：只接受最新一次请求的结果（见文件头竞态说明）。
@@ -69,6 +73,8 @@ export function useSessions(): UseSessionsResult {
   // 会把仍在飞行中的"详情"请求判成过期，导致点开会话后对话区空白。
   const listSeq = useRef(0)
   const detailSeq = useRef(0)
+  const activeRef = useRef<string | null>(null)
+  const pendingTargetRef = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     const seq = ++listSeq.current
@@ -89,29 +95,38 @@ export function useSessions(): UseSessionsResult {
 
   const select = useCallback(async (id: string) => {
     const seq = ++detailSeq.current
-    setActiveId(id)
-    setLoading(true)
+    pendingTargetRef.current = id
+    setTransitioning(true)
     try {
       const data = await getSession(id)
       if (seq !== detailSeq.current) return
+      // 会话标识与详情一起提交，不能让旧对话发往尚未加载的新会话。
+      activeRef.current = id
+      setActiveId(id)
       setDetail(data)
       setError(null)
     } catch (err) {
       if (seq !== detailSeq.current) return
-      // 会话不存在（例如内存后端重启过）→ 清掉选中，并让列表回到真实状态
-      setDetail(null)
-      setError(describe(err))
-      void refresh()
+      // 失败时保留旧上下文；刷新列表以反映被删除或重启后失效的会话。
+      await refresh()
+      if (seq === detailSeq.current) setError(describe(err))
     } finally {
-      if (seq === detailSeq.current) setLoading(false)
+      if (seq === detailSeq.current) {
+        pendingTargetRef.current = null
+        setTransitioning(false)
+      }
     }
   }, [refresh])
 
   const create = useCallback(async () => {
+    // 发起新建时就抢占旧详情请求；等新建返回后再抢已经太晚。
+    const seq = ++detailSeq.current
+    pendingTargetRef.current = null
+    setTransitioning(true)
     try {
       const created = await createSession()
-      // 抢占详情序号：即便此刻还有别的详情请求在飞，也不许它覆盖新会话
-      detailSeq.current += 1
+      if (seq !== detailSeq.current) return false
+      activeRef.current = created.id
       setActiveId(created.id)
       // 新建的会话必然没有历史，直接构造空详情，省掉一次往返
       setDetail({
@@ -124,36 +139,65 @@ export function useSessions(): UseSessionsResult {
       })
       setError(null)
       await refresh()
+      return seq === detailSeq.current
     } catch (err) {
-      setError(describe(err))
+      if (seq === detailSeq.current) setError(describe(err))
+      return false
+    } finally {
+      if (seq === detailSeq.current) setTransitioning(false)
     }
   }, [refresh])
 
   const remove = useCallback(
     async (id: string) => {
+      // 尚在加载的目标也可能被删除，不能让迟到 GET 把它重新选中。
+      const seq = activeRef.current === id || pendingTargetRef.current === id
+        ? ++detailSeq.current : null
+      if (seq !== null) {
+        pendingTargetRef.current = null
+        setTransitioning(true)
+      }
       try {
         await deleteSession(id)
-        if (activeId === id) {
+        // 删除等待期间可以再次点击同一个目标；删除成功使这次加载也失效。
+        if (pendingTargetRef.current === id) {
           detailSeq.current += 1
+          pendingTargetRef.current = null
+          setTransitioning(false)
+        }
+        if (activeRef.current === id) {
+          activeRef.current = null
           setActiveId(null)
           setDetail(null)
         }
         await refresh()
       } catch (err) {
-        setError(describe(err))
+        if (seq === null || seq === detailSeq.current) setError(describe(err))
+      } finally {
+        if (seq !== null && seq === detailSeq.current) setTransitioning(false)
       }
     },
-    [activeId, refresh],
+    [refresh],
   )
 
   const deselect = useCallback(() => {
+    detailSeq.current += 1
+    pendingTargetRef.current = null
+    activeRef.current = null
     setActiveId(null)
     setDetail(null)
+    setTransitioning(false)
+    setError(null)
   }, [])
 
   // 首次挂载拉一次列表
   useEffect(() => {
     void refresh()
+    return () => {
+      listSeq.current += 1
+      detailSeq.current += 1
+      pendingTargetRef.current = null
+    }
   }, [refresh])
 
   return {
@@ -162,6 +206,7 @@ export function useSessions(): UseSessionsResult {
     activeId,
     detail,
     loading,
+    transitioning,
     error,
     refresh,
     select,
