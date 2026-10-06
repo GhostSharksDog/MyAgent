@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -57,7 +58,8 @@ def find_browser() -> str | None:
 
 
 def http_json(url: str) -> object:
-    with urllib.request.urlopen(url, timeout=5) as response:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url, timeout=5) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -70,7 +72,7 @@ def _server_flag(name: str) -> object:
     if key:
         headers["X-API-Key"] = key
     try:
-        with httpx.Client(base_url="http://127.0.0.1:8000", timeout=10.0) as api:
+        with httpx.Client(base_url=TARGET, timeout=10.0, trust_env=False) as api:
             return api.get("/api/settings", headers=headers).json()["agent"].get(name)
     except (httpx.HTTPError, KeyError, ValueError):
         # 读不到就不硬失败 —— 这一项只是"顺带核对"，界面渲染的检查在别处
@@ -89,9 +91,7 @@ class Cdp:
         # （直接持有对象会拿到 DeprecationWarning，而警告刷在 stderr 上会
         #   让人以为是这个脚本出了问题）
         self._stack = ExitStack()
-        self._conn = self._stack.enter_context(
-            connect(ws_url, max_size=8 * 1024 * 1024)
-        )
+        self._conn = self._stack.enter_context(connect(ws_url, max_size=8 * 1024 * 1024))
         self._id = 0
 
     def call(self, method: str, params: dict | None = None) -> dict:
@@ -117,7 +117,87 @@ class Cdp:
         self._stack.close()
 
 
+def reliability_checks(cdp: Cdp) -> None:
+    """真实组件消费合成 SSE；内核与断连清理由后端回归独立验证。"""
+    print("\n=== 编排可靠性界面检查（合成 SSE，不调用模型）===")
+    cdp.eval(r"""
+      window.__originalFetch = window.fetch;
+      window.__smokeCase = 'token_budget';
+      window.__smokeCancelled = false;
+      window.fetch = async (url, options) => {
+        if (!String(url).endsWith('/api/chat/stream')) return window.__originalFetch(url, options);
+        const emit = e => new TextEncoder().encode('event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n');
+        const body = new ReadableStream({
+          start(c) {
+            c.enqueue(emit({type:'start'}));
+            c.enqueue(emit({type:'step',step:1}));
+            c.enqueue(emit({type:'token',step:1,content:'公开样本的部分结论'}));
+            if (window.__smokeCase !== 'cancel') {
+              c.enqueue(emit({type:'final',step:1,content:'已有结论，任务未完成'}));
+              c.enqueue(emit({type:'error',content:'已停止后续模型调用'}));
+              c.enqueue(emit({type:'done',stopped_reason:window.__smokeCase,usage_complete:false,
+                usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13}}));
+              c.close();
+            }
+          },
+          cancel() { window.__smokeCancelled = true; }
+        });
+        return new Response(body,{headers:{'Content-Type':'text/event-stream'}});
+      };
+      window.__smokeSend = () => {
+        const box = document.querySelector('.composer__input');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(box,'公开样本核验');
+        box.dispatchEvent(new Event('input',{bubbles:true}));
+      };
+    """)
+    for label in ("先规划", "多专家"):
+        cdp.eval(
+            f"[...document.querySelectorAll('.modes__item')].find(b=>b.textContent.trim()==={json.dumps(label)})?.click()"
+        )
+        time.sleep(0.2)
+        check(
+            cdp.eval(
+                "document.querySelector('.composer').textContent.includes('本轮不使用会话历史')"
+            ),
+            f"{label} 显示独立任务提示",
+        )
+    for reason, label in (("token_budget", "累计 token 预算"), ("timeout", "整轮时长预算")):
+        cdp.eval(f"window.__smokeCase={json.dumps(reason)}; window.__smokeSend()")
+        time.sleep(0.2)
+        cdp.eval("document.querySelector('.composer__send')?.click()")
+        time.sleep(0.5)
+        check(
+            cdp.eval(f"document.body.textContent.includes({json.dumps(label)})"),
+            f"{reason} 状态已渲染",
+        )
+        check(
+            cdp.eval("document.body.textContent.includes('统计不完整')"),
+            "未知用量未显示为完整的零消耗",
+        )
+        check(cdp.eval("document.body.textContent.includes('部分结果')"), "预算中止展示部分结果")
+    cdp.eval("window.__smokeCase='cancel'; window.__smokeSend()")
+    time.sleep(0.2)
+    cdp.eval("document.querySelector('.composer__send')?.click()")
+    time.sleep(0.3)
+    check(cdp.eval("!!document.querySelector('.composer__stop')"), "生成期间停止按钮可见")
+    cdp.eval("document.querySelector('.composer__stop')?.click()")
+    time.sleep(0.3)
+    check(cdp.eval("window.__smokeCancelled === true"), "停止确实取消 ReadableStream")
+    check(cdp.eval("!document.querySelector('.composer__stop')"), "停止后输入区恢复")
+    cdp.eval("window.fetch=window.__originalFetch")
+
+
 def main() -> int:
+    global TARGET, PORT
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", default=TARGET)
+    parser.add_argument("--cdp-port", type=int, default=PORT)
+    parser.add_argument(
+        "--reliability", action="store_true", help="使用浏览器内合成 SSE 验证预算与停止；不调用模型"
+    )
+    args = parser.parse_args()
+    TARGET = args.target
+    PORT = args.cdp_port
     browser = find_browser()
     if browser is None:
         print("没找到 Edge / Chrome，跳过")
@@ -157,7 +237,7 @@ def main() -> int:
                 (
                     p
                     for p in pages
-                    if p.get("type") == "page" and "127.0.0.1:8000" in p.get("url", "")
+                    if p.get("type") == "page" and TARGET.rstrip("/") in p.get("url", "")
                 ),
                 None,
             )
@@ -207,9 +287,7 @@ def main() -> int:
             cdp.eval("!!document.querySelector('.dialog')"),
             "对话框已出现且带 .dialog 类（圆角窗口外壳）",
         )
-        radius = cdp.eval(
-            "getComputedStyle(document.querySelector('.dialog')).borderRadius"
-        )
+        radius = cdp.eval("getComputedStyle(document.querySelector('.dialog')).borderRadius")
         check(
             isinstance(radius, str) and radius not in ("0px", ""),
             "窗口确实有圆角",
@@ -220,9 +298,7 @@ def main() -> int:
         labels = cdp.eval(
             "[...document.querySelectorAll('.dialog__nav .navitem__label')].map(e => e.textContent)"
         )
-        check(
-            isinstance(labels, list) and len(labels) >= 2, "左栏有分类项", str(labels)
-        )
+        check(isinstance(labels, list) and len(labels) >= 2, "左栏有分类项", str(labels))
         for expected in ("通用", "模型"):
             check(
                 isinstance(labels, list) and expected in labels,
@@ -342,6 +418,8 @@ def main() -> int:
         cdp.eval("document.querySelector('.dialog__head button')?.click()")
         time.sleep(0.5)
         check(cdp.eval("!document.querySelector('.dialog')"), "对话框已关闭")
+        if args.reliability:
+            reliability_checks(cdp)
 
         errors = cdp.eval("window.__errors__ ? window.__errors__.length : 0")
         check(not errors, "没有未捕获的脚本错误")

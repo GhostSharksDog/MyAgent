@@ -20,7 +20,7 @@
  *  刻意分开 `finished` 与其余三种：前三者是"可预期的预算终止"，
  *  只有 `error` 才是故障。UI 上也据此用不同颜色，而不是把所有
  *  非正常结束都画成红色 —— 那会让"步数耗尽"这种正常保护看起来像崩溃。 */
-export type StoppedReason = 'finished' | 'max_steps' | 'loop_detected' | 'error'
+export type StoppedReason = 'finished' | 'max_steps' | 'loop_detected' | 'error' | 'timeout' | 'token_budget'
 
 /**
  * Agent 形态。三种形态针对不同的**任务结构**，不是"哪个更高级"：
@@ -132,6 +132,7 @@ export interface AgentEvent {
   /** 本轮调用过哪些工具的一行摘要（供后续轮次参考，也便于界面展示）。 */
   tool_summary?: string
   usage?: Usage
+  usage_complete?: boolean
   steps_used?: number
   stopped_reason?: StoppedReason | (string & {})
   /**
@@ -279,6 +280,7 @@ export interface AssistantTurnState {
   /** 产出最终答案的步号。渲染时用它把该步从时间线里排除，避免重复展示。 */
   finalStep: number | null
   usage: Usage | null
+  usageComplete: boolean
   stepsUsed: number
   stoppedReason: StoppedReason | string | null
   /** ERROR 事件的内容。注意它不等于"故障"：步数耗尽也会走这里。 */
@@ -347,6 +349,8 @@ export interface LLMSettingsView {
 }
 
 export interface AgentSettingsView {
+  plan_max_total_tokens: number
+  multi_max_total_tokens: number
   /** general（通用，默认）| jobhunt（求职技能包） */
   profile: string
   workspace_root: string
@@ -371,6 +375,8 @@ export interface SettingsView {
 
 /** PUT 的请求体。**全部可选**：只传要改的字段。 */
 export interface SettingsUpdatePayload {
+  plan_max_total_tokens?: number
+  multi_max_total_tokens?: number
   /** 留空（或原样回传掩码）= 不修改已保存的密钥 */
   api_key?: string
   base_url?: string

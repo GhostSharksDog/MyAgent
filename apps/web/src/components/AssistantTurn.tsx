@@ -16,6 +16,7 @@
  * 这里只负责把派生出的视图画出来。
  */
 
+import { describeStop } from '../lib/runtime'
 import { computeTurnView } from '../lib/stream'
 import { formatCompact, formatNumber } from '../lib/format'
 import type { AssistantTurnState, ChatItem } from '../lib/types'
@@ -27,25 +28,6 @@ import { PlanPanel } from './PlanPanel'
 import { ThinkingTimeline } from './ThinkingTimeline'
 
 type AssistantItem = Extract<ChatItem, { kind: 'assistant' }>
-
-/** 终止原因 → 人类可读的说明。
- *  `finished` 之外都不是"崩溃"，而是**可预期的预算终止**（后端的分类刻意区分了这两者）。 */
-function describeStop(reason: string | null): { text: string; tone: 'ok' | 'warn' | 'danger' } {
-  switch (reason) {
-    case 'finished':
-      return { text: '正常结束', tone: 'ok' }
-    case 'max_steps':
-      return { text: '达到步数上限', tone: 'warn' }
-    case 'loop_detected':
-      return { text: '检测到重复调用，已中止', tone: 'warn' }
-    case 'error':
-      return { text: '执行出错', tone: 'danger' }
-    case null:
-      return { text: '未收到结束事件', tone: 'warn' }
-    default:
-      return { text: String(reason), tone: 'warn' }
-  }
-}
 
 function isStreaming(state: AssistantTurnState): boolean {
   return state.phase === 'connecting' || state.phase === 'thinking' || state.phase === 'streaming'
@@ -105,6 +87,7 @@ function RunSummary({
           </span>
         </span>
       ) : null}
+      {!state.usageComplete && !streaming && <span className="runmeta__item">已知用量 · 统计不完整</span>}
       <span className="runmeta__item">
         <span
           className={
@@ -129,7 +112,7 @@ function RunSummary({
           title={
             '本轮上下文超过预算，最早的对话轮次已被丢弃' +
             (state.contextTokens ? `（裁剪后约 ${state.contextTokens} token）` : '') +
-            '。可在设置里调大 AGENT_CONTEXT_TOKEN_BUDGET。'
+            '。可在 .env 中调大 AGENT_CONTEXT_TOKEN_BUDGET 后重启服务。'
           }
         >
           <IconScissors size={11} />
@@ -194,13 +177,7 @@ export function AssistantTurn({ item, showMeta = true }: AssistantTurnProps) {
           </span>
           <span className="notice__body">
             <span className="notice__title">
-              {state.stoppedReason === 'max_steps'
-                ? '已达到单步最大步数限制'
-                : state.stoppedReason === 'loop_detected'
-                  ? '检测到重复的工具调用，已主动中止'
-                  : state.phase === 'error'
-                    ? '本轮执行出错'
-                    : '本轮未正常结束'}
+              {describeStop(state.stoppedReason).text}
             </span>
             <span className="notice__text">{state.error}</span>
           </span>
@@ -211,7 +188,7 @@ export function AssistantTurn({ item, showMeta = true }: AssistantTurnProps) {
         {view.answer ? (
           <>
             <div className="divider-label">
-              {view.answerIsFinal ? '最终答案' : '生成中'}
+               {view.answerIsFinal ? (state.stoppedReason && state.stoppedReason !== 'finished' ? '部分结果' : '最终答案') : '生成中'}
             </div>
             <div className="answer__body">
               <Markdown source={view.answer} />

@@ -62,6 +62,7 @@ export function emptyTurn(phase: TurnPhase = 'connecting'): AssistantTurnState {
     answer: '',
     finalStep: null,
     usage: null,
+    usageComplete: false,
     stepsUsed: 0,
     stoppedReason: null,
     error: null,
@@ -205,6 +206,7 @@ export function applyEvent(turn: AssistantTurnState, event: AgentEvent): Assista
       return {
         ...turn,
         usage: event.usage ?? turn.usage,
+        usageComplete: event.usage_complete ?? event.usage !== undefined,
         stepsUsed: typeof event.steps_used === 'number' ? event.steps_used : turn.stepsUsed,
         stoppedReason: reason,
         // 上下文被裁剪过就记下来，由 RunSummary 显示成一行提示。

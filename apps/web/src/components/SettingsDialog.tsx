@@ -30,6 +30,7 @@ import type { ReactNode } from 'react'
 import type { Preferences } from '../hooks/usePreferences'
 import type { ThemePreference } from '../hooks/useTheme'
 import { getAccessKey, setAccessKey } from '../lib/access'
+import { parseTokenBudget } from '../lib/runtime'
 import type { SettingsUpdatePayload } from '../lib/types'
 import type { useSettings } from '../hooks/useSettings'
 import { GeneralSection } from './settings/GeneralSection'
@@ -84,6 +85,8 @@ export function SettingsDialog({
   // 写权限（T23）与敏感文件权限。默认 false，打开要用户显式勾。
   const [fileWriteEnabled, setFileWriteEnabled] = useState(false)
   const [allowSecrets, setAllowSecrets] = useState(false)
+  const [planBudget, setPlanBudget] = useState('60000')
+  const [multiBudget, setMultiBudget] = useState('80000')
 
   // 访问密钥是**客户端**状态（localStorage），不来自服务端配置
   const [accessKeyInput, setAccessKeyInput] = useState('')
@@ -112,6 +115,8 @@ export function SettingsDialog({
     setCorpusIncludeSeed(saved.agent.corpus_include_seed)
     setFileWriteEnabled(saved.agent.file_write_enabled)
     setAllowSecrets(saved.agent.file_allow_secrets)
+    setPlanBudget(String(saved.agent.plan_max_total_tokens ?? 60000))
+    setMultiBudget(String(saved.agent.multi_max_total_tokens ?? 80000))
   }, [saved])
 
   // Esc 关闭 + 打开时聚焦关闭按钮（与其它浮层同一套交互约定）
@@ -128,9 +133,14 @@ export function SettingsDialog({
   if (!open) return null
 
   const handleSave = async (): Promise<void> => {
+    const plan = parseTokenBudget(planBudget)
+    const multi = parseTokenBudget(multiBudget)
+    if (plan === null || multi === null) return
     // 键名是**后端的字段名**（snake_case）。写错会被后端 extra="forbid" 拒成 422，
     // 而那正是想要的：宁可当场报错，也不要静默地什么都没改。
     const payload: SettingsUpdatePayload = {
+      plan_max_total_tokens: plan,
+      multi_max_total_tokens: multi,
       profile,
       workspace_root: workspaceRoot,
       corpus_paths: corpusPaths
@@ -219,6 +229,26 @@ export function SettingsDialog({
                       general 只加载核心工具（计算 / 时间 / 知识库检索）；jobhunt 额外加载简历与岗位工具
                     </span>
                   </label>
+                </section>
+
+                <section className="settings__group">
+                  <h3 className="settings__legend">每轮模型用量预算</h3>
+                  <p className="settings__hint settings__hint--block">
+                    达到阈值后停止后续模型调用，保留已有结论。0 表示不限制。
+                    在途调用可能超额；用量缺失时会显示「统计不完整」。
+                  </p>
+                  <label className="settings__field">
+                    <span className="settings__label">Plan 累计 token 上限</span>
+                    <input className="settings__input" type="number" min="0" step="1"
+                      value={planBudget} onChange={(e) => setPlanBudget(e.target.value)} />
+                  </label>
+                  <label className="settings__field">
+                    <span className="settings__label">Supervisor 累计 token 上限</span>
+                    <input className="settings__input" type="number" min="0" step="1"
+                      value={multiBudget} onChange={(e) => setMultiBudget(e.target.value)} />
+                  </label>
+                  {(parseTokenBudget(planBudget) === null || parseTokenBudget(multiBudget) === null) &&
+                    <p role="alert" className="settings__alert">token 上限须为非负整数。</p>}
                 </section>
 
                 <section className="settings__group">
@@ -418,7 +448,7 @@ export function SettingsDialog({
                 type="button"
                 className="btn btn--primary"
                 onClick={() => void handleSave()}
-                disabled={saving || loading}
+                disabled={saving || loading || !saved || parseTokenBudget(planBudget) === null || parseTokenBudget(multiBudget) === null}
               >
                 {saving ? '保存中…' : '保存并生效'}
               </button>

@@ -230,9 +230,17 @@ export async function* streamAgentEvents(
   }
 
   let drained = false
+  // signal 也作用于当前挂起的 read；不能只等 fetch 的网络层替我们唤醒它。
+  const cancelRead = (): void => { void reader.cancel().catch(() => undefined) }
+  options.signal?.addEventListener('abort', cancelRead, { once: true })
   try {
+    if (options.signal?.aborted) {
+      cancelRead()
+      throw new DOMException('已停止生成', 'AbortError')
+    }
     for (;;) {
       const { done, value } = await reader.read()
+      if (options.signal?.aborted) throw new DOMException('已停止生成', 'AbortError')
       if (done) break
       // stream: true —— 保证跨 chunk 的多字节 UTF-8 字符被正确拼接
       const text = decoder.decode(value, { stream: true })
@@ -244,6 +252,7 @@ export async function* streamAgentEvents(
     for (const event of emit(parser.flush())) yield event
     drained = true
   } finally {
+    options.signal?.removeEventListener('abort', cancelRead)
     // 只有"没读完就退出"才需要主动取消：调用方 break、抛异常、或被 AbortController 中断。
     // 不取消的话，HTTP 连接会一直挂在服务端（后端会白跑完整个 Agent 循环）。
     if (!drained) {

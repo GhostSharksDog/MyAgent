@@ -87,6 +87,9 @@ export function Composer({
 
   return (
     <div className="composer" data-disabled={disabled}>
+      {current !== 'react' && (
+        <p className="composer__hint" role="note">独立任务：本轮不使用会话历史，请在消息中提供所需背景。</p>
+      )}
       <textarea
         ref={textareaRef}
         className="composer__input"
