@@ -26,14 +26,15 @@
   gap: 2px;
   padding: 2px;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
+  min-width: 0;
 }
 
 .modes__item {
-  padding: 3px 9px;
+  padding: var(--space-2) 10px;
   border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -64,9 +65,8 @@
  * ============================================================ */
 .plan {
   border: 1px solid var(--border);
-  border-left: 2px solid var(--accent-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--surface-faint);
   margin-bottom: var(--space-3);
   overflow: hidden;
 }
@@ -76,7 +76,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -100,10 +100,9 @@
 }
 
 .plan__title {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--accent-text);
-  letter-spacing: 0.02em;
   flex-shrink: 0;
 }
 
@@ -136,7 +135,7 @@
 }
 
 .plan__body {
-  padding: 0 var(--space-3) var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
   border-top: 1px solid var(--border);
 }
 
@@ -145,7 +144,7 @@
   padding: var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--surface-faint);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-3);
   line-height: 1.55;
 }
@@ -163,16 +162,16 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .plan__step {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-4);
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid transparent;
 }
 
@@ -189,7 +188,7 @@
 /* 已跳过的用中性呈现，**不要**用警告色：
    预算保护生效是设计如此，画成黄色会让用户以为系统出了问题。 */
 .plan__step[data-status='skipped'] {
-  opacity: 0.6;
+  color: var(--text-3);
 }
 
 .plan__dot {
@@ -245,14 +244,14 @@
 }
 
 .plan__step-desc {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   color: var(--text);
   line-height: 1.5;
 }
 
 .plan__step-expected {
   margin-top: 2px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-3);
 }
 
@@ -261,7 +260,7 @@
   margin-top: var(--space-2);
   padding-left: var(--space-2);
   border-left: 2px solid var(--success-border);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-2);
   line-height: 1.55;
   white-space: pre-wrap;
@@ -273,7 +272,7 @@
   padding: var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-2);
   line-height: 1.55;
   word-break: break-word;
@@ -306,15 +305,14 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 
 .experts__title {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--accent-text);
-  letter-spacing: 0.02em;
 }
 
 .experts__count {
@@ -345,7 +343,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -388,7 +386,7 @@
 }
 
 .expert__body {
-  padding: 0 var(--space-3) var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 .expert__pre {
@@ -398,7 +396,7 @@
   background: var(--code-bg);
   border: 1px solid var(--code-border);
   font-family: var(--font-mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-2);
   line-height: 1.55;
   white-space: pre-wrap;
@@ -420,9 +418,84 @@
 /* 说明"上面的结论 ≠ 最终答案"。这条不写清楚，用户会以为
    专家结论就是结论，从而误解下方答案的来历。 */
 .experts__footnote {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4);
   font-size: var(--fs-xs);
   color: var(--text-3);
   background: var(--surface-faint);
   border-top: 1px solid var(--border);
+}
+
+/* 执行过程只有一个外框，计划与专家是其中的章节。 */
+.execution-process .plan,
+.execution-process .experts {
+  margin: 0 0 var(--space-5);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.execution-process .plan__head,
+.execution-process .experts__head {
+  padding: var(--space-3) 0;
+  border: 0;
+}
+
+.execution-process .plan__body {
+  border: 0;
+  padding: 0;
+}
+
+.execution-process .plan__reasoning {
+  background: var(--surface-faint);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.execution-process .plan__step {
+  background: var(--surface-faint);
+  border-radius: var(--radius-md);
+}
+
+.execution-process .plan__step[data-status='running'] {
+  background: var(--accent-soft);
+}
+
+.execution-process .experts__list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.execution-process .experts__footnote {
+  border: 0;
+  padding: var(--space-3) 0;
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  .plan__head {
+    gap: var(--space-2);
+  }
+
+  .plan__progress {
+    font-size: var(--fs-xs);
+    gap: var(--space-1);
+  }
+
+  .plan__live {
+    display: none;
+  }
+
+  .expert__head {
+    flex-wrap: wrap;
+  }
+
+  .expert__brief {
+    flex-basis: 80px;
+  }
+
+  .modes__item {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
 }

@@ -21,11 +21,11 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(540px, 94vw);
+  width: min(440px, 100vw);
   z-index: 61;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--bg-panel);
+  background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   animation: slide-in 160ms var(--ease);
@@ -48,38 +48,85 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
+  min-height: 72px;
+  padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);
 }
 
 .drawer__title {
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
 .drawer__subtitle {
   font-size: var(--fs-xs);
   color: var(--text-3);
-  font-family: var(--font-mono);
+  margin-top: var(--space-1);
+  line-height: var(--lh-base);
 }
 
 .drawer__body {
   overflow-y: auto;
-  padding: var(--space-4) var(--space-5) var(--space-7);
+  padding: var(--space-5) var(--space-6) var(--space-7);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
+  min-width: 0;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
 }
 
 .drawer__note {
   font-size: var(--fs-sm);
   color: var(--text-3);
   line-height: var(--lh-base);
-  background: var(--code-bg);
-  border: 1px solid var(--code-border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  background: var(--surface-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: 0;
+}
+
+.drawer__details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--surface-faint);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.drawer__details summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.drawer__facts {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+}
+
+.drawer__facts > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.drawer__facts dt {
+  color: var(--text-3);
+}
+
+.drawer__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.drawer__refresh {
+  margin-top: var(--space-4);
+  width: fit-content;
 }
 
 /* ---------- 单个工具 ---------- */
@@ -94,9 +141,12 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
-  padding: 11px 12px;
+  padding: var(--space-5);
   width: 100%;
   text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 
 .toolitem__head:hover {
@@ -106,14 +156,14 @@
 .toolitem__title {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--space-3);
   min-width: 0;
   flex: 1;
 }
 
 .toolitem__name {
   font-family: var(--font-mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
   display: flex;
@@ -127,6 +177,7 @@
   font-size: var(--fs-sm);
   line-height: var(--lh-base);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .toolitem__chevron {
@@ -142,7 +193,7 @@
 
 .toolitem__body {
   border-top: 1px solid var(--border);
-  padding: 11px 12px;
+  padding: var(--space-5);
   background: var(--code-bg);
   display: flex;
   flex-direction: column;
@@ -158,7 +209,7 @@
 
 .schema-row {
   display: grid;
-  grid-template-columns: minmax(90px, 0.5fr) minmax(60px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(80px, 0.6fr) minmax(48px, auto) minmax(0, 1fr);
   gap: var(--space-3);
   align-items: baseline;
   font-size: var(--fs-sm);
@@ -196,8 +247,24 @@
   color: var(--text-3);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
+  max-height: 280px;
   overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .drawer__head,
+  .drawer__body {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
+  }
+
+  .schema-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .schema-row__desc {
+    grid-column: 1 / -1;
+  }
 }
 
 /* 从对话区的工具卡片跳到抽屉里对应工具时的定位高亮 */

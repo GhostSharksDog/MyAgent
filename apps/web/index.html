@@ -1,30 +1,30 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
-      content="Legacy —— 求职/招聘 AI Agent 控制台：流式对话 + 工具调用过程可见"
+      content="Legacy 通用 AI 助手：一起整理资料、核验计算与制定计划。"
     />
-    <title>Legacy · Agent 控制台</title>
-    <script>
-      /* 主题必须在**首次绘制之前**定下来，否则暗色页面会先闪一下白底。
-         这就是所谓 FOUC。放在 <head> 里的同步脚本是唯一可靠的做法 ——
-         React 挂载后再切主题永远晚了一帧。 */
+    <title>Legacy · AI 助手</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script id="theme-init">
+      /* 首次绘制前应用已有偏好；无偏好、非法值或存储不可用均为浅色。
+         与 src/lib/theme.ts 保持一致，测试直接执行此脚本核对两条路径。 */
       ;(function () {
         try {
-          var pref = localStorage.getItem('legacy.theme') || 'system'
-          var light =
-            pref === 'light' ||
+          var stored = localStorage.getItem('legacy.theme')
+          var pref = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
+          var dark =
+            pref === 'dark' ||
             (pref === 'system' &&
               window.matchMedia &&
-              window.matchMedia('(prefers-color-scheme: light)').matches)
-          document.documentElement.dataset.theme = light ? 'light' : 'dark'
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
         } catch (e) {
-          /* localStorage 被禁用（隐私模式）时降级为暗色，不影响使用 */
-          document.documentElement.dataset.theme = 'dark'
+          document.documentElement.dataset.theme = 'light'
         }
       })()
     </script>

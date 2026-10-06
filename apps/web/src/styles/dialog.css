@@ -21,21 +21,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4vh var(--space-4);
+  padding: var(--space-6);
   background: var(--scrim);
   /* 用模糊而不是纯半透明：设置窗口内容多、停留时间长，
      背景完全糊掉会让人失去"我是从哪里打开它的"空间感。 */
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(2px);
 }
 
 .dialog {
   display: flex;
   flex-direction: column;
-  width: min(920px, 100%);
-  height: min(680px, 92vh);
+  width: min(960px, 100%);
+  height: min(700px, calc(100dvh - 48px));
+  min-width: 0;
   overflow: hidden;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
 }
@@ -45,7 +46,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  min-height: var(--topbar-height);
+  padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--border);
 }
 
@@ -68,20 +70,23 @@
 .dialog__nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  flex: 0 0 208px;
-  width: 208px;
-  padding: var(--space-3) var(--space-2);
+  gap: var(--space-2);
+  flex: 0 0 240px;
+  width: 240px;
+  padding: var(--space-5) var(--space-4);
   overflow-y: auto;
   border-right: 1px solid var(--border);
-  background: var(--surface-faint);
+  background: var(--bg);
 }
 
 .navitem {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-2);
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-height: 54px;
+  width: 100%;
+  min-width: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -98,8 +103,8 @@
 
 .navitem--active {
   background: var(--accent-soft);
-  border-color: var(--accent-border);
-  color: var(--text);
+  border-color: transparent;
+  color: var(--accent-text);
 }
 
 .navitem__icon {
@@ -115,7 +120,7 @@
 }
 
 .navitem__label {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   font-weight: 500;
 }
 
@@ -132,7 +137,10 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--space-4) var(--space-5) var(--space-6);
+  padding: var(--space-6) var(--space-7);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  overflow-wrap: anywhere;
 }
 
 .dialog__foot {
@@ -140,7 +148,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
+  min-height: 68px;
+  padding: var(--space-4) var(--space-6);
   border-top: 1px solid var(--border);
 }
 
@@ -160,7 +169,7 @@
 
 .dialog__foot-actions {
   display: flex;
-  flex: 0 0 auto;
+  min-width: 0;
   gap: var(--space-2);
 }
 
@@ -171,9 +180,14 @@
 }
 
 /* 窄屏：左栏变成横向标签条，窗口占满高度 */
-@media (max-width: 720px) {
+@media (max-width: 760px) {
+  .dialog-scrim {
+    padding: var(--space-4);
+  }
+
   .dialog {
-    height: 94vh;
+    height: calc(100dvh - 24px);
+    border-radius: var(--radius-md);
   }
 
   .dialog__main {
@@ -181,16 +195,55 @@
   }
 
   .dialog__nav {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     flex: 0 0 auto;
     width: auto;
-    overflow-x: auto;
+    padding: var(--space-2);
+    gap: 2px;
+    overflow: visible;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
 
   .navitem__note {
     display: none;
+  }
+
+  .navitem {
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--space-1);
+    min-height: 58px;
+    padding: var(--space-2) 2px;
+    text-align: center;
+  }
+
+  .navitem__label {
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+
+  .dialog__head,
+  .dialog__foot {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .dialog__content {
+    padding: var(--space-5);
+  }
+
+  .dialog__foot {
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .dialog__foot-actions {
+    margin-left: auto;
+  }
+
+  .dialog__env {
+    flex: 1;
   }
 }
 
@@ -199,16 +252,17 @@
  * ============================================================ */
 .theme-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
   margin-top: var(--space-2);
 }
 
 .theme-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -223,14 +277,15 @@
 
 .theme-card--active {
   border-color: var(--accent);
-  box-shadow: var(--ring);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-xs);
 }
 
 /* 预览：用色块示意"这个主题长什么样"。
    比一个纯文字按钮直观 —— 用户不必先点一遍才知道效果。 */
 .theme-card__preview {
   display: block;
-  height: 44px;
+  height: 56px;
   padding: 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -288,14 +343,16 @@
 .segmented {
   display: inline-flex;
   gap: 2px;
-  padding: 2px;
+  padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--surface-faint);
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .segmented__item {
-  padding: 6px var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -314,16 +371,17 @@
  * ============================================================ */
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 
 .provider-card {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px dashed var(--border-strong);
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
@@ -356,14 +414,21 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
+  background: var(--surface-faint);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.model-current > div {
+  min-width: 0;
+  flex: 1;
 }
 
 .model-current__name {
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text);
 }
@@ -377,7 +442,7 @@
 .model-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -388,7 +453,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -400,6 +465,7 @@
 
 .model-card__main {
   min-width: 0;
+  flex: 1;
 }
 
 .model-card__title {
@@ -442,7 +508,7 @@
   flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-1);
-  padding: var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -468,4 +534,32 @@
   background: var(--warn-soft);
   color: var(--warn);
   border: 1px solid var(--warn-border);
+}
+
+@media (max-width: 760px) {
+  .theme-cards {
+    gap: var(--space-2);
+  }
+
+  .theme-card {
+    padding: var(--space-3);
+  }
+
+  .theme-card__note {
+    min-height: 38px;
+    line-height: var(--lh-base);
+  }
+
+  .provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .model-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .model-card__actions {
+    flex-wrap: wrap;
+  }
 }

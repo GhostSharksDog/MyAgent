@@ -31,27 +31,30 @@
    设置表单
    ============================================================ */
 .settings__group {
-  padding: 16px 18px;
+  padding: 0 0 var(--space-6);
+  margin: 0 0 var(--space-6);
+  min-width: 0;
   border-bottom: 1px solid var(--border);
 }
 
 .settings__group:last-of-type {
   border-bottom: none;
+  margin-bottom: 0;
 }
 
 .settings__legend {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text);
-  letter-spacing: 0.02em;
 }
 
 .settings__field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 14px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  min-width: 0;
 }
 
 .settings__field--inline {
@@ -63,17 +66,37 @@
 
 .settings__field--check {
   flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  font-size: var(--fs-md);
   color: var(--text-2);
+  background: var(--surface-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.settings__field--check input {
+  margin-top: 4px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.settings__field--check > span {
+  min-width: 0;
+  line-height: var(--lh-base);
+}
+
+.settings__field--check .settings__hint {
+  display: block;
+  margin-top: var(--space-1);
 }
 
 .settings__label {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-2);
   flex-wrap: wrap;
@@ -81,30 +104,32 @@
 
 .settings__input {
   width: 100%;
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 10px var(--space-4);
+  min-width: 0;
+  font-size: var(--fs-md);
   font-family: inherit;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  outline: none;
+  border-radius: var(--radius-sm);
   transition: border-color 0.14s ease;
 }
 
 .settings__input:focus {
-  border-color: var(--accent-border);
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
 }
 
 .settings__textarea {
   resize: vertical;
   min-height: 64px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   line-height: 1.6;
 }
 
 .settings__hint {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 400;
   color: var(--text-3);
 }
@@ -123,7 +148,7 @@
   color: var(--warn);
   background: var(--warn-soft);
   border: 1px solid var(--warn-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 /* 服务商预设：一排小按钮，点一下就填好地址和模型名 */
@@ -176,12 +201,25 @@
 .settings__alert {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 12px 18px;
-  padding: 10px 12px;
-  font-size: 13px;
-  border-radius: 8px;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--fs-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   line-height: 1.6;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings__alert p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.fileside .settings__alert,
+.picker .settings__alert {
+  margin: var(--space-4);
 }
 
 .settings__alert--ok {
@@ -377,107 +415,6 @@
 
 
 /* ============================================================
-   工作区块（会话栏里）
-   ============================================================
-   【为什么放在会话栏而不是顶栏或设置里】
-   "打开文件夹"和"新建会话"是同一类动作：都是**建立上下文** ——
-   决定接下来这场对话在什么范围内发生。放在一起，用户一眼看懂
-   "左边这块管的是上下文"。
-   而文件浏览是**使用**这个上下文，所以在右侧边栏，一处建立一处使用。
-   ============================================================ */
-.sidebar__section {
-  padding: 10px 10px 8px;
-  flex: none;
-}
-
-.sidebar__section-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.sidebar__divider {
-  height: 1px;
-  margin: 0 10px 6px;
-  background: var(--border);
-  flex: none;
-}
-
-.ws__open {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 10px;
-  font-size: 12.5px;
-  font-family: inherit;
-  color: var(--text-2);
-  background: none;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.14s ease;
-}
-
-.ws__open:hover {
-  color: var(--accent-text);
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-}
-
-.ws {
-  padding: 8px 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.ws__path {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.ws__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ws__full {
-  margin-top: 3px;
-  font-size: 11px;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;      /* 从右往左截断：路径的关键部分在尾部 */
-  text-align: left;
-}
-
-.ws__actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.ws__btn {
-  flex: 1;
-  font-size: 11.5px;
-  padding: 3px 8px;
-}
-
-.ws__btn--danger:hover {
-  color: var(--danger);
-  border-color: var(--danger-border);
-}
-
-/* ============================================================
    右侧文件边栏（常驻，不是抽屉）
    ============================================================ */
 .fileside {
@@ -485,15 +422,17 @@
   flex-direction: column;
   min-height: 0;
   border-left: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: var(--surface);
+  min-width: 0;
   overflow: hidden;
 }
 
 .fileside__head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 9px 10px;
+  gap: var(--space-2);
+  min-height: var(--topbar-height);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
   flex: none;
 }
@@ -501,16 +440,17 @@
 .fileside__heading {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-3);
   flex: 1;
-  font-size: 12.5px;
+  min-width: 0;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text);
 }
 
 .fileside__root {
-  padding: 5px 10px;
-  font-size: 10.5px;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   border-bottom: 1px solid var(--border);
   overflow: hidden;
@@ -526,9 +466,9 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 1px;
-  padding: 5px 8px;
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   flex: none;
 }
 
@@ -539,16 +479,16 @@
 }
 
 .fileside__crumb {
-  font-size: 11.5px;
-  padding: 1px 5px;
+  font-size: var(--fs-xs);
+  padding: 2px var(--space-2);
 }
 
 .fileside__toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  font-size: 11.5px;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -556,32 +496,38 @@
   flex: none;
 }
 
+.fileside__toggle input {
+  accent-color: var(--accent);
+}
+
 .fileside__scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 12px;
+  padding-bottom: var(--space-5);
+  overscroll-behavior: contain;
+  overflow-x: hidden;
 }
 
 .fileside__entries {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: var(--space-3);
 }
 
 .fileside__entry {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 4px 7px;
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--fs-sm);
   font-family: inherit;
   color: var(--text-2);
   text-align: left;
   background: none;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -604,15 +550,15 @@
 
 .fileside__size {
   flex: none;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
 /* 预览跟在列表下面而不是并排 —— 边栏本来就窄，再分两栏两边都读不了 */
 .fileside__preview {
-  margin: 8px 8px 0;
-  padding-top: 10px;
+  margin: var(--space-5) var(--space-5) 0;
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
@@ -622,23 +568,23 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
   word-break: break-all;
 }
 
 .fileside__code {
   margin: 0;
-  font-size: 11.5px;
-  line-height: 1.65;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+  font-family: var(--font-mono);
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .fileside__markdown {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   line-height: 1.75;
   color: var(--text);
 }
@@ -647,12 +593,12 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 18px 14px;
+  padding: var(--space-6) var(--space-5);
 }
 
 .fileside__empty p {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   line-height: 1.75;
   color: var(--text-2);
 }
@@ -673,13 +619,13 @@
   z-index: 61;
   animation: picker-in 140ms var(--ease);
   width: min(620px, 92vw);
-  max-height: min(640px, 86vh);
+  max-height: min(640px, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -697,7 +643,7 @@
   align-items: center;
   gap: 7px;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text);
 }
@@ -705,7 +651,7 @@
 .picker__note {
   margin: 0;
   padding: 9px 16px;
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   line-height: 1.7;
   color: var(--text-3);
   background: var(--surface);
@@ -717,14 +663,14 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 1px;
-  padding: 7px 12px;
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 
 .picker__crumb {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   padding: 1px 6px;
 }
 
@@ -755,8 +701,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px;
-  border-radius: 6px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  min-width: 0;
 }
 
 .picker__entry:hover {
@@ -774,8 +721,9 @@
   align-items: center;
   gap: 8px;
   flex: 1;
+  min-width: 0;
   padding: 6px 8px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-family: inherit;
   color: var(--text-2);
   text-align: left;
@@ -798,21 +746,20 @@
 
 .picker__count {
   flex: none;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
 .picker__pick {
   flex: none;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   padding: 3px 10px;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.12s ease;
 }
 
-/* "选它"平时隐藏、悬停才出现 ——
-   常驻会让列表变成两列按钮，反而看不清目录名 */
+/* 选择入口始终可见，触屏与键盘用户无需依赖悬停。 */
 .picker__entry:hover .picker__pick,
 .picker__entry:focus-within .picker__pick {
   opacity: 1;
@@ -829,7 +776,9 @@
 }
 
 .picker__current {
-  font-size: 11.5px;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -842,12 +791,7 @@
   flex: none;
 }
 
-/* 窄屏下三列塞不下：文件栏浮在对话之上，用绝对定位而不是挤掉对话 */
-@media (max-width: 1180px) {
-  .workspace[data-files='open'] {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0;
-  }
-}
+/* 文件面板的并列/模态定位统一由 layout.css 的 .fileside--modal 管理。 */
 
 /* ---------- 目录选择器：系统对话框那一段 ---------- */
 .picker__native {

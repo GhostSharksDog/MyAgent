@@ -1,204 +1,150 @@
-/* ============================================================
- * 设计 token
- * ============================================================
- *
- * 全部以 CSS 自定义属性集中定义。这样做不只是"看起来整洁"，而是为了
- * 让**主题切换与视觉调整都只改一处**：组件样式里出现的永远是
- * `var(--surface)` 而不是 `#141518`。
- *
- * 命名分四层：
- *   1. 原始色（--c-*）—— 只在本文件内引用，组件不该直接用它；
- *   2. 语义色（--bg / --text / --border / --accent…）—— 组件用这一层；
- *   3. 尺度（--space-* / --radius-* / --fs-*）；
- *   4. 效果（--shadow-* / --ring）。
- *
- * 深浅两套只差第 2 层的赋值，第 1 层共用。这是"语义色"存在的全部理由：
- * 如果组件里写死了原始色，加一套浅色主题就得改几十个文件。
- */
-
+/* Legacy: warm paper, graphite and a quiet sage accent.
+   Component styles use semantic variables; both themes share the same scale. */
 :root {
-  /* ---------- 原始色 ---------- */
-  --c-gray-950: #09090b;
-  --c-gray-900: #0e0f12;
-  --c-gray-850: #131418;
-  --c-gray-800: #191a1f;
-  --c-gray-750: #202127;
-  --c-gray-700: #2a2b33;
-  --c-gray-600: #3a3b45;
-  --c-gray-400: #6e6e7d;
-  --c-gray-300: #9b9baa;
-  --c-gray-100: #e9e9ee;
   --c-white: #ffffff;
+  --c-gray-950: #1b1e1c;
+  --c-gray-900: #202421;
+  --c-gray-850: #252a26;
+  --c-gray-800: #2b312c;
+  --c-gray-750: #363e38;
+  --c-gray-700: #444d47;
+  --c-gray-600: #5d6960;
+  --c-gray-400: #899381;
+  --c-gray-300: #b3bbad;
+  --c-gray-100: #efefe9;
+  --c-indigo-400: #a8bea0;
+  --c-indigo-500: #839c79;
+  --c-indigo-600: #557153;
+  --c-green-500: #83ad84;
+  --c-amber-500: #d9b47a;
+  --c-red-500: #e09b94;
+  --c-cyan-500: #8eb6b2;
 
-  --c-indigo-400: #8b96ea;
-  --c-indigo-500: #6d7ce0;
-  --c-indigo-600: #5563cc;
-
-  --c-green-500: #45b877;
-  --c-amber-500: #d9a03c;
-  --c-red-500: #e5646b;
-  --c-cyan-500: #4babbe;
-
-  /* ---------- 语义色：暗色（默认） ---------- */
-  --bg: var(--c-gray-950);
-  --bg-panel: var(--c-gray-900);
-  --surface: var(--c-gray-850);
-  --surface-2: var(--c-gray-800);
-  --surface-3: var(--c-gray-750);
-  --surface-hover: #1e1f25;
-
-  --border: var(--c-gray-750);
-  --border-strong: var(--c-gray-600);
-
-  --text: var(--c-gray-100);
-  --text-2: var(--c-gray-300);
-  --text-3: var(--c-gray-400);
-
-  --accent: var(--c-indigo-500);
-  --accent-hover: var(--c-indigo-400);
-  --accent-text: #a9b2f2;
-  --accent-soft: rgba(109, 124, 224, 0.14);
-  --accent-border: rgba(109, 124, 224, 0.4);
-
-  --success: var(--c-green-500);
-  --success-soft: rgba(69, 184, 119, 0.13);
-  --success-border: rgba(69, 184, 119, 0.32);
-  --warn: var(--c-amber-500);
-  --warn-soft: rgba(217, 160, 60, 0.13);
-  --warn-border: rgba(217, 160, 60, 0.34);
-  --danger: var(--c-red-500);
-  --danger-soft: rgba(229, 100, 107, 0.13);
-  --danger-border: rgba(229, 100, 107, 0.34);
-  /* P6 补上：原来有 warn 与 danger，唯独缺了"成功"这一档。
-     缺了它，写"操作成功"的提示就只能写死颜色或用绿色原始值 ——
-     而写死颜色会让浅色主题失效（有一条测试专门守这条规则）。 */
-  --ok: var(--c-green-500);
-  --ok-soft: rgba(69, 184, 119, 0.13);
-  --ok-border: rgba(69, 184, 119, 0.34);
-
-  /* 强调色之上的文字颜色。抽成 token 是为了"深色底上的白字"
-     这个概念只定义一次 —— 换成品牌色时不用满仓库找 #fff。 */
-  --text-on-accent: #ffffff;
-  /* 遮罩层：抽屉/移动端侧边栏背后的压暗色 */
-  --scrim: rgba(0, 0, 0, 0.45);
-  /* 比 surface 更弱一层的浮层，用于"过程区"这类需要退到背景里的容器 */
-  --surface-faint: color-mix(in srgb, var(--surface) 55%, transparent);
-
-  --code-bg: rgba(255, 255, 255, 0.045);
-  --code-border: rgba(255, 255, 255, 0.07);
-  --inline-code: #e3c9a8;
-
-  /* ---------- 排版 ----------
-   * 中文字体栈的顺序有讲究：
-   *   -apple-system / BlinkMacSystemFont 先命中 macOS 的苹方，
-   *   再落到 Windows 的 Microsoft YaHei，最后是通用 sans-serif。
-   *   把 "PingFang SC" 写在中文字体栈最前，是为了在**非 Mac 系统**上
-   *   避免某些字体回退链把中文切到衬线字体上（观感会突然变得很"文档"）。 */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji',
-    'Segoe UI Emoji';
-  --font-mono:
-    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
-    'Cascadia Mono', 'Courier New', monospace;
-
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-md: 13px;
-  --fs-base: 14px;
-  --fs-lg: 16px;
-  --fs-xl: 19px;
-  --fs-2xl: 24px;
-
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+    'Cascadia Mono', 'Liberation Mono', monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 36px;
   --lh-tight: 1.3;
   --lh-base: 1.6;
-  --lh-loose: 1.75;
+  --lh-loose: 1.8;
+  --tracking-tight: -0.012em;
 
-  --tracking-tight: -0.011em;
-
-  /* ---------- 尺度 ---------- */
   --space-1: 4px;
   --space-2: 6px;
   --space-3: 8px;
   --space-4: 12px;
   --space-5: 16px;
-  --space-6: 20px;
-  --space-7: 28px;
-  --space-8: 40px;
-
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 9px;
-  --radius-lg: 13px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
   --radius-full: 999px;
-
-  /* ---------- 效果 ---------- */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.42);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5);
-
-  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-border);
-
-  --dur-fast: 120ms;
-  --ease: cubic-bezier(0.32, 0.72, 0, 1);
-
-  --sidebar-width: 264px;
-  /* 右侧文件栏宽度。比会话栏宽一点：要显示文件名 + 大小 */
+  --dur-fast: 160ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --sidebar-width: 240px;
   --files-width: 320px;
-  --topbar-height: 52px;
-  --content-max: 820px;
+  --topbar-height: 56px;
+  --content-max: 760px;
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* ============================================================
- * 浅色主题
- * ============================================================
- * 浅色不是"把颜色反过来"：纯黑文字配纯白背景对比过强，
- * 长时间阅读会累；这里文字用 #17171c 而不是 #000，
- * 边框也比暗色下更浅——暗色靠"亮色描边"分离层级，浅色靠"阴影 + 极浅底"。
- */
+:root,
 [data-theme='light'] {
-  --bg: #fbfbfc;
-  --bg-panel: #f4f4f7;
+  color-scheme: light;
+  --bg: #f7f6f2;
+  --bg-panel: #eeeee7;
   --surface: var(--c-white);
-  --surface-2: #f5f5f8;
-  --surface-3: #eeeef3;
-  --surface-hover: #f0f0f4;
+  --surface-2: #f1f2ec;
+  --surface-3: #e9ece3;
+  --surface-hover: #e8ece2;
+  --surface-faint: #f4f5ef;
+  --border: #e1e4db;
+  --border-strong: #b7c1af;
+  --text: #252923;
+  --text-2: #50594b;
+  --text-3: #697263;
+  --accent: #557153;
+  --accent-hover: #425c40;
+  --accent-text: #456142;
+  --accent-soft: #e8eee2;
+  --accent-border: #bccdb2;
+  --primary: #252923;
+  --primary-hover: #3b4435;
+  --text-on-primary: var(--c-white);
+  --text-on-accent: var(--c-white);
+  --success: #3f7046;
+  --success-soft: #e9f1e6;
+  --success-border: #bdd1b6;
+  --ok: var(--success);
+  --ok-soft: var(--success-soft);
+  --ok-border: var(--success-border);
+  --warn: #886224;
+  --warn-soft: #faf2df;
+  --warn-border: #e5d3a9;
+  --danger: #aa4841;
+  --danger-soft: #faece7;
+  --danger-border: #e6c2b7;
+  --scrim: rgba(27, 33, 24, 0.25);
+  --code-bg: #f0f2e9;
+  --code-border: #e0e5d8;
+  --inline-code: #805c41;
+  --shadow-xs: 0 1px 2px rgba(30, 40, 25, 0.04);
+  --shadow-sm: 0 2px 8px rgba(30, 40, 25, 0.04);
+  --shadow-md: 0 8px 30px rgba(30, 40, 25, 0.07);
+  --shadow-lg: 0 24px 80px rgba(30, 40, 25, 0.14);
+}
 
-  --border: #e3e3e9;
-  --border-strong: #cfcfd8;
-
-  --text: #17171c;
-  --text-2: #4c4c58;
-  --text-3: #7c7c8a;
-
-  --accent: var(--c-indigo-600);
-  --accent-hover: #47539f;
-  --accent-text: #3d47a0;
-  --accent-soft: rgba(85, 99, 204, 0.09);
-  --accent-border: rgba(85, 99, 204, 0.32);
-
-  --success: #1f9254;
-  --success-soft: rgba(31, 146, 84, 0.1);
-  --success-border: rgba(31, 146, 84, 0.3);
-  --warn: #9a6b12;
-  --warn-soft: rgba(154, 107, 18, 0.12);
-  --warn-border: rgba(154, 107, 18, 0.3);
-  --danger: #c5343d;
-  --danger-soft: rgba(197, 52, 61, 0.09);
-  --danger-border: rgba(197, 52, 61, 0.28);
-  --ok: #1f7a4d;
-  --ok-soft: rgba(31, 122, 77, 0.09);
-  --ok-border: rgba(31, 122, 77, 0.26);
-
-  --scrim: rgba(24, 24, 48, 0.32);
-
-  --code-bg: rgba(18, 18, 30, 0.045);
-  --code-border: rgba(18, 18, 30, 0.08);
-  --inline-code: #a3483f;
-
-  --shadow-xs: 0 1px 2px rgba(20, 20, 43, 0.06);
-  --shadow-sm: 0 1px 3px rgba(20, 20, 43, 0.08), 0 1px 2px rgba(20, 20, 43, 0.04);
-  --shadow-md: 0 8px 24px rgba(20, 20, 43, 0.1);
-  --shadow-lg: 0 20px 52px rgba(20, 20, 43, 0.16);
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: var(--c-gray-950);
+  --bg-panel: var(--c-gray-900);
+  --surface: var(--c-gray-850);
+  --surface-2: var(--c-gray-800);
+  --surface-3: var(--c-gray-750);
+  --surface-hover: #333b35;
+  --surface-faint: #212622;
+  --border: #373f39;
+  --border-strong: #657568;
+  --text: var(--c-gray-100);
+  --text-2: #c0c9b8;
+  --text-3: #a0ad95;
+  --accent: #a4bc96;
+  --accent-hover: #b8cba9;
+  --accent-text: #b7cfa6;
+  --accent-soft: #2c3826;
+  --accent-border: #536948;
+  --primary: #e3e8db;
+  --primary-hover: #c9d4bf;
+  --text-on-primary: #252923;
+  --text-on-accent: #1c2917;
+  --success: #9cc796;
+  --success-soft: #263620;
+  --success-border: #536e45;
+  --ok: var(--success);
+  --ok-soft: var(--success-soft);
+  --ok-border: var(--success-border);
+  --warn: #e3bf83;
+  --warn-soft: #332c1c;
+  --warn-border: #645336;
+  --danger: #ecaca3;
+  --danger-soft: #382822;
+  --danger-border: #704d40;
+  --scrim: rgba(8, 12, 6, 0.6);
+  --code-bg: #202622;
+  --code-border: #38433a;
+  --inline-code: #dbb995;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.35);
 }
