@@ -165,6 +165,7 @@ class ChatResponse(BaseModel):
     message: ChatMessage
     finish_reason: str = "stop"
     usage: Usage = Field(default_factory=Usage)
+    usage_complete: bool = True
     model: str = ""
 
     @property
@@ -196,3 +197,4 @@ class StreamDelta(BaseModel):
     tool_call_deltas: list[dict[str, Any]] = Field(default_factory=list)
     finish_reason: str | None = None
     usage: Usage | None = None
+    usage_complete: bool = True

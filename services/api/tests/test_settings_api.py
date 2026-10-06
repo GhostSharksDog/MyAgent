@@ -175,6 +175,31 @@ class TestEnvWriter:
 # 第二层：HTTP 接口
 # ============================================================
 class TestReadNeverLeaksKey:
+    def test_budget_update_applies_to_next_run_without_changing_inflight_settings(
+        self, client: TestClient, env_file, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.config import AgentSettings
+
+        before = client.app.state.settings
+        old_limit = before.agent.plan_max_total_tokens
+        monkeypatch.setattr(client.app.state, "settings", before)
+        monkeypatch.setattr(settings_api, "_apply", lambda: None)
+        monkeypatch.setattr(
+            settings_api,
+            "get_settings",
+            lambda: before.model_copy(update={"agent": AgentSettings(_env_file=env_file)}),
+        )
+        response = client.put(
+            "/api/settings", json={"plan_max_total_tokens": 1234, "multi_max_total_tokens": 0}
+        )
+        assert response.status_code == 200
+        assert response.json()["agent"]["plan_max_total_tokens"] == 1234
+        assert client.app.state.settings.agent.plan_max_total_tokens == 1234
+        assert client.app.state.settings.agent.multi_max_total_tokens == 0
+        assert before.agent.plan_max_total_tokens == old_limit
+        assert "AGENT_PLAN_MAX_TOTAL_TOKENS=1234" in env_file.read_text(encoding="utf-8")
+        assert client.put("/api/settings", json={"plan_max_total_tokens": -1}).status_code == 422
+
     def test_get_returns_masked_key_only(self, client: TestClient, http_settings) -> None:  # type: ignore[no-untyped-def]
         """**最重要的是"不返回什么"。**
 

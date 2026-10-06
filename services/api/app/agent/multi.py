@@ -49,6 +49,14 @@ from pydantic import BaseModel
 
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.loop import Agent
+from app.agent.prompts import build_system_prompt
+from app.agent.runtime import (
+    RunBudgetExceeded,
+    RunContext,
+    current_run_context,
+    guard_llm,
+    guarded_stream,
+)
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient
 from app.llm.types import ChatMessage, Usage
@@ -81,7 +89,7 @@ DEFAULT_SPECIALISTS: list[Specialist] = [
         ),
         system_prompt=(
             "你是资深简历诊断师。你的唯一职责是评价与改进简历本身。\n"
-            "必须先调用 read_resume 或 search_knowledge 获取简历真实内容，绝不凭空评价。\n"
+            "根据实际可用的资料工具获取简历内容；工具或资料缺失时说明，绝不凭空评价。\n"
             "指出问题时必须给出可直接替换的改写示例，而不是「建议优化」这类空话。\n"
             "面试官视角：你会先看什么、什么让你皱眉、什么让你想约面。"
         ),
@@ -94,7 +102,7 @@ DEFAULT_SPECIALISTS: list[Specialist] = [
         ),
         system_prompt=(
             "你是招聘市场分析师。你的职责是把岗位的真实要求讲清楚。\n"
-            "必须调用 search_jobs 或 search_knowledge 获取岗位原文，不要凭印象描述。\n"
+            "根据实际可用的资料工具获取岗位原文；缺少来源时说明，不要凭印象描述。\n"
             "输出要区分「硬性门槛」（学历、年限、必备技能）与「加分项」——\n"
             "用户最需要知道的是自己会不会因为硬门槛被筛掉。"
         ),
@@ -107,7 +115,7 @@ DEFAULT_SPECIALISTS: list[Specialist] = [
         ),
         system_prompt=(
             "你是求职匹配顾问。你的职责是把候选人与岗位逐条比对。\n"
-            "必须同时获取简历内容与岗位要求（用 read_resume / search_jobs / search_knowledge），\n"
+            "根据实际可用的资料工具，同时获取简历内容与岗位要求，\n"
             "缺任何一侧都必须明确说明——基于单侧的判断是猜测。\n"
             "输出必须是逐条对照表：岗位要求 | 候选人证据 | 判定。\n"
             "不允许为了鼓励用户而夸大匹配度。"
@@ -125,6 +133,24 @@ DEFAULT_SPECIALISTS: list[Specialist] = [
             "追问要具体到技术细节，不要停留在「你做过什么」这种层面。\n"
             "每次只问 2~3 个问题，等用户回答后再追问，不要一次性抛出一堆。"
         ),
+    ),
+]
+
+GENERAL_SPECIALISTS: list[Specialist] = [
+    Specialist(
+        name="资料分析员",
+        description="需要查阅文档、检索事实、提取证据时选择。",
+        system_prompt="你是资料分析员。根据已提供的工具获取资料，只报告可核对的事实与出处；缺资料时明确说明。",
+    ),
+    Specialist(
+        name="方案分析员",
+        description="需要拆解问题、比较方案、提出具体执行步骤时选择。",
+        system_prompt="你是方案分析员。基于可验证事实比较方案并给出具体步骤，标明假设和缺失信息。",
+    ),
+    Specialist(
+        name="结果核验员",
+        description="需要核对条件、计算、前提或结论的可靠性时选择。",
+        system_prompt="你是结果核验员。独立核对用户任务中的条件与计算，使用可用工具验证，指出不成立的前提。",
     ),
 ]
 
@@ -172,22 +198,53 @@ class SupervisorAgent:
         specialists: list[Specialist] | None = None,
         max_delegates: int = 3,
         max_concurrency: int = 3,
-        max_total_tokens: int = 80_000,
+        max_total_tokens: int | None = None,
     ) -> None:
-        self._llm = llm
+        self._llm = guard_llm(llm)
         self._tools = tools
         self._s = settings
-        self._specialists = specialists if specialists is not None else DEFAULT_SPECIALISTS
+        self._specialists = (
+            specialists
+            if specialists is not None
+            else (DEFAULT_SPECIALISTS if settings.profile == "jobhunt" else GENERAL_SPECIALISTS)
+        )
         self._by_name = {s.name: s for s in self._specialists}
         self._max_delegates = max_delegates
         # 并发上限：5 个专家同时发起 = 5 路并发调用，很容易触发限流
         self._max_concurrency = max_concurrency
-        self._max_total_tokens = max_total_tokens
+        self._max_total_tokens = (
+            settings.multi_max_total_tokens if max_total_tokens is None else max_total_tokens
+        )
+        self._base_prompt = build_system_prompt(settings.profile, set(tools.names()))
 
     # ---------- 主入口 ----------
 
     async def run_stream(
-        self, user_input: str, history: Sequence[ChatMessage] | None = None
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        context = (
+            run_context
+            or current_run_context()
+            or RunContext.create(
+                self._s,
+                token_limit=self._max_total_tokens,
+            )
+        )
+        source = guarded_stream(self._run_stream(user_input, history), context)
+        try:
+            async for event in source:
+                yield event
+        finally:
+            await source.aclose()
+
+    async def _run_stream(
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行一轮。
 
@@ -205,12 +262,16 @@ class SupervisorAgent:
         yield AgentEvent(type=EventType.STEP, step=1, content="正在判断需要哪些专家…")
         try:
             selected, route_usage = await self._route(user_input)
+        except RunBudgetExceeded:
+            raise
         except Exception as exc:
             logger.exception("路由失败")
             yield AgentEvent(type=EventType.ERROR, content=f"路由失败：{exc}")
             yield AgentEvent(type=EventType.DONE, stopped_reason="error", usage=total_usage)
             return
         total_usage = total_usage + route_usage
+        if context := current_run_context():
+            context.check()
 
         if not selected:
             # 路由没选出人时不要空转：退回单专家（简历诊断师），
@@ -247,33 +308,41 @@ class SupervisorAgent:
                 try:
                     answer, usage = await self._delegate(specialist, user_input)
                     return specialist.name, answer, usage, None
+                except RunBudgetExceeded:
+                    raise
                 except Exception as exc:
                     logger.exception("专家 %s 执行失败", specialist.name)
                     return specialist.name, None, Usage(), f"{type(exc).__name__}: {exc}"
 
         # as_completed：先完成的先出结果 —— 用户不必等最慢的那位才开始看到内容
         tasks = [asyncio.create_task(run_one(s)) for s in selected]
-        for future in asyncio.as_completed(tasks):
-            name, answer, usage, err = await future
+        try:
+            for future in asyncio.as_completed(tasks):
+                name, answer, usage, err = await future
 
-            if err is not None:
-                failures[name] = err
+                if err is not None:
+                    failures[name] = err
+                    yield AgentEvent(
+                        type=EventType.DELEGATE_RESULT,
+                        specialist=name,
+                        tool_ok=False,
+                        content=err,
+                    )
+                    continue
+
+                results[name] = answer or ""
+                usages[name] = usage
                 yield AgentEvent(
                     type=EventType.DELEGATE_RESULT,
                     specialist=name,
-                    tool_ok=False,
-                    content=err,
+                    tool_ok=True,
+                    content=(answer or "")[:400],
                 )
-                continue
-
-            results[name] = answer or ""
-            usages[name] = usage
-            yield AgentEvent(
-                type=EventType.DELEGATE_RESULT,
-                specialist=name,
-                tool_ok=True,
-                content=(answer or "")[:400],
-            )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         total_usage = total_usage + Usage(
             prompt_tokens=sum(u.prompt_tokens for u in usages.values()),
@@ -286,6 +355,8 @@ class SupervisorAgent:
         try:
             answer, usage = await self._synthesize(user_input, results, failures)
             total_usage = total_usage + usage
+        except RunBudgetExceeded:
+            raise
         except Exception as exc:
             logger.exception("汇总失败")
             answer = self._fallback_answer(results, failures)
@@ -300,19 +371,25 @@ class SupervisorAgent:
         )
 
     async def run(
-        self, user_input: str, history: Sequence[ChatMessage] | None = None
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
     ) -> AgentRunResult:
         answer = ""
         steps_used = 0
         usage = Usage()
         error: str | None = None
         stopped = "finished"
+        done = AgentEvent(type=EventType.DONE)
         delegated: list[dict[str, object]] = []
 
-        async for event in self.run_stream(user_input, history):
+        async for event in self.run_stream(user_input, history, run_context=run_context):
             if event.type is EventType.FINAL:
                 answer = event.content
             elif event.type is EventType.DONE:
+                done = event
                 steps_used = event.steps_used
                 usage = event.usage or Usage()
                 stopped = event.stopped_reason
@@ -327,6 +404,10 @@ class SupervisorAgent:
             answer=answer,
             steps_used=steps_used,
             usage=usage,
+            usage_complete=done.usage_complete,
+            tool_summary=done.tool_summary,
+            context_trimmed=done.context_trimmed,
+            context_tokens=done.context_tokens,
             tool_calls=delegated,
             stopped_reason=stopped,
             error=error,
@@ -392,7 +473,7 @@ class SupervisorAgent:
             self._llm,
             self._tools,
             self._s,
-            system_prompt=specialist.system_prompt,
+            system_prompt=f"{self._base_prompt}\n\n{specialist.system_prompt}",
         )
         result = await agent.run(request)
 
@@ -422,9 +503,9 @@ class SupervisorAgent:
 
         response = await self._llm.chat(
             [
-                ChatMessage.user(
-                    self.SYNTHESIS_PROMPT.format(request=request) + "\n\n" + "\n\n".join(parts)
-                )
+                ChatMessage.system(self._base_prompt),
+                *(ChatMessage.assistant(part) for part in parts),
+                ChatMessage.user(self.SYNTHESIS_PROMPT.format(request=request)),
             ],
             temperature=0.3,
         )

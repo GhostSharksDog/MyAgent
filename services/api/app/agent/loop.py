@@ -33,12 +33,20 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import aclosing
 
 from app.agent.context import ContextBudget, TrimReport, summarize_tools
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.memory import ConversationMemory, LongTermMemory
 from app.agent.prompts import build_system_prompt
+from app.agent.runtime import (
+    RunBudgetExceeded,
+    RunContext,
+    current_run_context,
+    guard_llm,
+    guarded_stream,
+)
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
 from app.llm.tokens import record_prompt_estimate, tokenizer_name
@@ -102,7 +110,7 @@ class Agent:
         memory: ConversationMemory | None = None,
         long_term: LongTermMemory | None = None,
     ) -> None:
-        self._llm = llm
+        self._llm = guard_llm(llm)
         self._tools = tools
         self._s = settings
         # 【为什么默认值是 None 而不是 SYSTEM_PROMPT】
@@ -157,6 +165,21 @@ class Agent:
         self,
         user_input: str,
         history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        context = run_context or current_run_context() or RunContext.create(self._s)
+        source = guarded_stream(self._run_stream(user_input, history), context)
+        try:
+            async for event in source:
+                yield event
+        finally:
+            await source.aclose()
+
+    async def _run_stream(
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行一轮对话，边执行边产出事件。
 
@@ -191,33 +214,10 @@ class Agent:
         tool_trace: list[dict[str, object]] = []
         recent_signatures: list[str] = []
 
-        # ---------- 单轮总时长预算（技术债 T15） ----------
-        # 用 loop.time() 而不是 time.time()：前者是**单调时钟**，
-        # 不受系统时间调整（NTP 校时、夏令时、用户改表）影响。
-        # 用挂钟时间算 deadline 的话，一次系统校时就可能让预算瞬间"到期"，
-        # 或者干脆永远不到期 —— 这类 bug 只在特定时刻出现，几乎无法复现。
-        loop = asyncio.get_running_loop()
-        budget = self._s.run_timeout
-        deadline = (loop.time() + budget) if budget > 0 else None
-
+        # 整轮预算由 run_stream 的共享 RunContext 驱动，子任务不重新计时。
         yield AgentEvent(type=EventType.START, content=user_input)
 
         for step in range(1, self._s.max_steps + 1):
-            # 每步开始先看一眼预算。**这是一个防御性护栏，不是主机制**：
-            # 每一跳都被"剩余预算"包着（见下面两处 asyncio.timeout），
-            # 所以正常路径下这里不会触发 —— 它防的是"将来有人加了一条
-            # 没被包住的 await"。有它，那种改动最坏是"多花一步"，
-            # 而不是"彻底失去时间上限"。
-            if deadline is not None and loop.time() >= deadline:
-                # 这是**本步开始之前**的护栏：此刻还没算过本步的上下文裁剪，
-                # 所以 trim 传 None。传上一轮遗留的值会报出一个与本次终止
-                # 无关的裁剪结论 —— 那比不报更糟。
-                for event in self._budget_exhausted(
-                    step, total_usage, budget, tool_trace=tool_trace, trim=None
-                ):
-                    yield event
-                return
-
             yield AgentEvent(type=EventType.STEP, step=step)
 
             # ---------- 0. 上下文预算（技术债 T09） ----------
@@ -238,31 +238,16 @@ class Agent:
             # ---------- 1. 调用模型（流式） ----------
             accumulator = StreamAccumulator()
             try:
-                # `asyncio.timeout(None)` 是合法的空操作，所以这里不需要分支：
-                # 有预算就用剩余时间包住这一步，没有就原样跑。
-                # 【为什么用 asyncio.timeout 而不是 wait_for】
-                # 这一步消费的是一个异步迭代器，wait_for 只能包住单个 await，
-                # 要包住 "async for" 得手写一层协程；timeout 是上下文管理器，
-                # 直接套住整段循环，而且它的取消会正确传播进 stream_chat。
-                async with asyncio.timeout(self._remaining(deadline, loop.time())):
-                    async for delta in self._llm.stream_chat(
-                        messages, tools=self._tools.schemas() or None
-                    ):
+                async with aclosing(
+                    self._llm.stream_chat(messages, tools=self._tools.schemas() or None)
+                ) as model_stream:
+                    async for delta in model_stream:
                         accumulator.feed(delta)
                         # 文本增量实时吐给前端 —— 这就是打字机效果的来源
                         if delta.content:
                             yield AgentEvent(type=EventType.TOKEN, step=step, content=delta.content)
-            except TimeoutError:
-                # 【必须在 `except Exception` 之前】
-                # TimeoutError 也是 Exception 的子类，放在后面就会被当成
-                # "模型调用失败"，于是终止原因变成 error —— 而"预算用完"
-                # 是可预期的运行结果，不是故障。把它算进错误率会让监控失真。
-                logger.warning("第 %d 步超出单轮总时长预算（%.1fs）", step, budget)
-                for event in self._budget_exhausted(
-                    step, total_usage, budget, tool_trace=tool_trace, trim=trim
-                ):
-                    yield event
-                return
+            except RunBudgetExceeded:
+                raise
             except Exception as exc:
                 logger.exception("第 %d 步模型调用失败", step)
                 for event in self._finish(
@@ -406,14 +391,7 @@ class Agent:
 
             # 工具执行同样受总预算约束：某一步的工具卡住时，
             # 光有单工具超时是不够的（3 个各 30s 的工具就是 90s）
-            results = await self._run_with_budget(pending, deadline, loop, step)
-            if results is None:
-                for event in self._budget_exhausted(
-                    step, total_usage, budget, tool_trace=tool_trace, trim=trim
-                ):
-                    yield event
-                return
-
+            results = await pending
             # 按**原始顺序**回灌（不是完成顺序）—— 见上面第 1 条
             for call, result in zip(tool_calls, results, strict=True):
                 tool_trace.append(
@@ -507,7 +485,11 @@ class Agent:
         连接时必须能立刻取消整批工具，而不是把它们一个个跑完。
         """
         try:
+            if context := current_run_context():
+                context.check()
             return await self._tools.execute(call)
+        except RunBudgetExceeded:
+            raise
         except Exception as exc:
             logger.exception("工具 %s 执行时抛出未处理异常", call.name)
             return ToolResult.failure(f"工具 {call.name} 执行时发生未预期错误：{exc}")
@@ -521,75 +503,19 @@ class Agent:
             async with gate:
                 return await self._execute_one(call)
 
-        return list(await asyncio.gather(*(guarded(call) for call in calls)))
+        tasks = [asyncio.create_task(guarded(call)) for call in calls]
+        try:
+            return list(await asyncio.gather(*tasks))
+        finally:
+            # 预算异常也要清理：gather 默认遇到异常不会取消其余工具任务。
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _execute_serially(self, calls: Sequence[ToolCall]) -> list[ToolResult]:
         """串行执行（本回合里有 `serial` 工具时走这条路）。"""
         return [await self._execute_one(call) for call in calls]
-
-    # ============================================================
-    # 单轮总时长预算（T15）
-    # ============================================================
-    @staticmethod
-    def _remaining(deadline: float | None, now: float) -> float | None:
-        """还剩多少预算。`None` 表示不限制（`asyncio.timeout(None)` 是合法的）。"""
-        if deadline is None:
-            return None
-        # 不允许负数：asyncio.timeout 收到负数会立刻超时，语义上正确，
-        # 但显式夹到 0 更清楚地表达"已经用完了"
-        return max(0.0, deadline - now)
-
-    async def _run_with_budget(
-        self,
-        coro: Awaitable[list[ToolResult]],
-        deadline: float | None,
-        loop: asyncio.AbstractEventLoop,
-        step: int,
-    ) -> list[ToolResult] | None:
-        """在剩余预算内等一批工具执行完；超预算返回 None（由调用方收尾）。
-
-        【为什么返回值是 None 而不是抛异常】
-        超时在这里是一个**正常的终止原因**，不是一个需要向上冒泡的错误。
-        用返回值表达它，调用方就没法"忘记处理" —— 类型上就必须想一下
-        `None` 是什么意思（漏掉的话，下一步会拿 None 当结果列表用，
-        那会是一句毫无线索的 TypeError）。
-        """
-        try:
-            async with asyncio.timeout(self._remaining(deadline, loop.time())):
-                return await coro
-        except TimeoutError:
-            logger.warning("第 %d 步的工具执行超出单轮总时长预算", step)
-            return None
-
-    def _budget_exhausted(
-        self,
-        step: int,
-        usage: Usage,
-        budget: float,
-        *,
-        tool_trace: Sequence[Mapping[str, object]] | None = None,
-        trim: TrimReport | None = None,
-    ) -> list[AgentEvent]:
-        """预算用尽时的终结事件：说明"用完了多少、做到第几步、怎么放宽"。
-
-        也带上工具摘要与裁剪报告：超时的轮次里，"它当时在查什么"恰恰是最有用
-        的信息（否则用户只看到"超时了"，不知道卡在哪一步）。
-        """
-        msg = (
-            f"已达单轮总时长预算（{budget:.0f} 秒），在第 {step} 步中止。"
-            f"这通常意味着某一步的外部调用（模型或工具）耗时远超预期，"
-            f"或这个任务本身就需要更长时间。"
-            f"如确有必要，请在配置里调大 AGENT_RUN_TIMEOUT（0 表示不限制）。"
-        )
-        return self._finish(
-            stopped_reason="timeout",
-            steps_used=step,
-            usage=usage,
-            step=step,
-            error=msg,
-            tool_trace=tool_trace,
-            trim=trim,
-        )
 
     # ============================================================
     # 终结事件
@@ -646,6 +572,8 @@ class Agent:
         self,
         user_input: str,
         history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
     ) -> AgentRunResult:
         """把流式事件收集成一个完整结果。
 
@@ -658,8 +586,12 @@ class Agent:
         tool_calls: list[dict[str, object]] = []
         error: str | None = None
         stopped = "finished"
+        usage_complete = True
+        tool_summary = ""
+        context_trimmed = False
+        context_tokens = 0
 
-        async for event in self.run_stream(user_input, history):
+        async for event in self.run_stream(user_input, history, run_context=run_context):
             match event.type:
                 case EventType.TOKEN:
                     answer_parts.append(event.content)
@@ -677,11 +609,19 @@ class Agent:
                     steps_used = event.steps_used
                     usage = event.usage or Usage()
                     stopped = event.stopped_reason
+                    usage_complete = event.usage_complete
+                    tool_summary = event.tool_summary
+                    context_trimmed = event.context_trimmed
+                    context_tokens = event.context_tokens
 
         return AgentRunResult(
             answer="".join(answer_parts),
             steps_used=steps_used,
             usage=usage,
+            usage_complete=usage_complete,
+            tool_summary=tool_summary,
+            context_trimmed=context_trimmed,
+            context_tokens=context_tokens,
             tool_calls=tool_calls,
             stopped_reason=stopped,
             error=error,

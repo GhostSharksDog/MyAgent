@@ -39,14 +39,14 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(
         default=None,
         description=(
-            "会话 id。提供时服务端会从会话中恢复历史与记忆，"
+            "会话 id。提供时仅 react 恢复历史与记忆；plan/multi 按独立任务处理，"
             "并把本轮结果写回会话；此时 `history` 被忽略。"
             "不提供则退回无状态模式（历史完全由客户端提供）。"
         ),
     )
     history: list[HistoryMessage] = Field(
         default_factory=list,
-        description="之前轮次的消息（不含本轮），最近的在最后。仅在无 session_id 时生效。",
+        description="之前轮次的消息（不含本轮），最近的在最后。仅 ReAct 且无 session_id 时生效；Plan/Supervisor 本轮不使用会话历史。",
     )
 
 
@@ -54,9 +54,13 @@ class ChatResponse(BaseModel):
     answer: str
     steps_used: int
     usage: Usage
+    usage_complete: bool = True
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     stopped_reason: str = "finished"
     error: str | None = None
+    tool_summary: str = ""
+    context_trimmed: bool = False
+    context_tokens: int = 0
 
 
 class ToolInfo(BaseModel):

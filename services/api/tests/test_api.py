@@ -279,7 +279,10 @@ class TestStreamEndpoint:
 
         assert r.status_code == 200  # 流已开始，无法再改状态码
         events = _collect_from_stream(r.text)  # 解析失败会直接抛异常
-        assert len(events) == 1
+        assert len(events) == 2
+        assert events[-1]["type"] == "done"
+        assert events[-1]["stopped_reason"] == "error"
+        assert events[-1]["usage_complete"] is False
         assert events[0]["type"] == "error"
         assert "内部故障" in events[0]["content"]
         assert '"' in events[0]["content"]  # 引号被正确转义后仍可解析

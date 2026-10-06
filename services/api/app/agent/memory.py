@@ -30,6 +30,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from app.agent.runtime import guard_llm
 from app.llm.types import ChatMessage
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class ConversationMemory:
         max_summary_chars: int = 1200,
         enable_summary: bool = True,
     ) -> None:
-        self._llm = llm
+        self._llm = guard_llm(llm) if llm is not None else None
         self.max_turns = max_turns
         # 压缩时保留最近 N 轮原文 —— 摘要是有损的，最近的上下文最需要保真
         self.keep_recent = min(keep_recent, max_turns)

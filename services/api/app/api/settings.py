@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import PROJECT_ROOT, get_settings
@@ -45,6 +45,8 @@ ENV_PATH = PROJECT_ROOT / ".env"
 # 允许通过界面修改的键。**白名单而不是黑名单** —— 黑名单意味着
 # 以后新增的任何配置项都默认可以被界面改，包括那些不该被改的。
 EDITABLE_KEYS = {
+    "AGENT_PLAN_MAX_TOTAL_TOKENS",
+    "AGENT_MULTI_MAX_TOTAL_TOKENS",
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
@@ -179,6 +181,8 @@ class LLMView(BaseModel):
 
 
 class AgentView(BaseModel):
+    plan_max_total_tokens: int = 60000
+    multi_max_total_tokens: int = 80000
     profile: str
     workspace_root: str
     corpus_paths: list[str]
@@ -224,6 +228,8 @@ class SettingsUpdate(BaseModel):
     # 写权限（T23）。`None` = 不改动 —— 与其它字段同一语义。
     file_write_enabled: bool | None = None
     file_allow_secrets: bool | None = None
+    plan_max_total_tokens: int | None = Field(default=None, ge=0)
+    multi_max_total_tokens: int | None = Field(default=None, ge=0)
 
 
 class TestConnectionResult(BaseModel):
@@ -250,6 +256,8 @@ def _current_view() -> SettingsView:
             api_key_set=bool(key),
         ),
         agent=AgentView(
+            plan_max_total_tokens=s.agent.plan_max_total_tokens,
+            multi_max_total_tokens=s.agent.multi_max_total_tokens,
             profile=s.agent.profile,
             workspace_root=s.agent.workspace_root,
             corpus_paths=s.agent.corpus_path_list,
@@ -327,7 +335,7 @@ def _validate_paths_sync(
 
 
 @router.put("", response_model=SettingsView, summary="更新设置")
-async def update_settings(payload: SettingsUpdate) -> SettingsView:
+async def update_settings(payload: SettingsUpdate, request: Request) -> SettingsView:
     """更新设置并写入 `.env`。
 
     写完之后**立即生效**（清缓存 + 重建索引），不需要重启服务。
@@ -337,6 +345,10 @@ async def update_settings(payload: SettingsUpdate) -> SettingsView:
 
     s = get_settings()
     updates: dict[str, str] = {}
+    for name in ("plan_max_total_tokens", "multi_max_total_tokens"):
+        value = getattr(payload, name)
+        if value is not None:
+            updates[f"AGENT_{name.upper()}"] = str(value)
 
     # 【密钥的特殊处理：三种"不改动"的写法都要认】
     #
@@ -390,6 +402,17 @@ async def update_settings(payload: SettingsUpdate) -> SettingsView:
         written = _write_env(updates)
         logger.info("设置已更新：%s", "、".join(written))
         _apply()
+        # 在途请求保留原配置；后续请求使用新对象，避免修改共享 Settings 导致预算漂移。
+        if hasattr(request.app.state, "settings"):
+            fresh = get_settings().agent
+            current = request.app.state.settings
+            budget_settings = current.agent.model_copy(
+                update={
+                    name: getattr(fresh, name)
+                    for name in ("plan_max_total_tokens", "multi_max_total_tokens")
+                }
+            )
+            request.app.state.settings = current.model_copy(update={"agent": budget_settings})
 
     return await get_settings_view()
 

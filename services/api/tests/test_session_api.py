@@ -316,3 +316,28 @@ class TestBackendVisibility:
 
     def test_meta_exposes_session_backend(self, client: TestClient) -> None:
         assert client.get("/api/meta").json()["session_backend"] in {"memory", "redis", "fake"}
+
+
+@pytest.mark.parametrize("mode", ["plan", "multi"])
+@pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
+def test_budget_partial_answer_is_never_saved_to_session(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mode: str, endpoint: str
+) -> None:
+    from tests.test_agent_runtime import RuntimeLLM
+
+    monkeypatch.setattr(app.state, "llm", RuntimeLLM())
+    current = app.state.settings
+    monkeypatch.setattr(
+        app.state,
+        "settings",
+        current.model_copy(
+            update={"agent": current.agent.model_copy(update={f"{mode}_max_total_tokens": 1})}
+        ),
+    )
+    sid = client.post("/api/sessions").json()["id"]
+    response = client.post(
+        endpoint, json={"message": "核验公开资料", "session_id": sid, "mode": mode}
+    )
+    assert response.status_code == 200
+    assert "token_budget" in response.text
+    assert not client.get(f"/api/sessions/{sid}").json()["turns"]

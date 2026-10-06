@@ -41,7 +41,14 @@ from pydantic import BaseModel, Field
 
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.loop import Agent
-from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.prompts import build_system_prompt
+from app.agent.runtime import (
+    RunBudgetExceeded,
+    RunContext,
+    current_run_context,
+    guard_llm,
+    guarded_stream,
+)
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient
 from app.llm.types import ChatMessage, Usage
@@ -146,7 +153,7 @@ class Planner:
         max_steps: int = 5,
         temperature: float = 0.2,
     ) -> None:
-        self._llm = llm
+        self._llm = guard_llm(llm)
         self.max_steps = max_steps
         self.temperature = temperature
         # 累计用量。**必须记录完整 Usage 而不只是一个 total_tokens 计数**：
@@ -292,8 +299,7 @@ class PlanAndExecuteAgent:
 
 严格执行原则：
 1. **只做当前这一步**，不要越界去完成其他步骤 —— 后续步骤会由别的执行负责。
-2. 需要事实依据时必须调用工具（简历内容用 read_resume / search_knowledge，
-   岗位信息用 search_jobs，计算用 calculator），不要凭空推断。
+2. 需要事实依据时必须使用当前已提供的工具获取真实信息，不要凭空推断。
 3. 完成后输出**这一步的结论**（简洁、可直接给下一步使用），而不是过程描述。
 4. 如果这一步无法完成（缺数据、前提不成立），**明确说出来**并说明原因 ——
    这比编一个看起来完成的结果有价值得多。
@@ -318,31 +324,57 @@ class PlanAndExecuteAgent:
         *,
         planner: Planner | None = None,
         max_steps_per_step: int = 4,
-        max_total_tokens: int = 60_000,
+        max_total_tokens: int | None = None,
         max_replans: int = 1,
         enable_replan: bool = True,
-        base_system_prompt: str = SYSTEM_PROMPT,
+        base_system_prompt: str | None = None,
     ) -> None:
-        self._llm = llm
+        self._llm = guard_llm(llm)
         self._tools = tools
         self._s = settings
         self._planner = planner or Planner(llm)
         # 单步内的 ReAct 预算必须比全局预算小得多：
         # 5 步 × 12 次调用 = 60 次，那是烧钱机器
-        self._step_settings = AgentSettings(
-            max_steps=max_steps_per_step, loop_guard=settings.loop_guard
+        self._step_settings = settings.model_copy(update={"max_steps": max_steps_per_step})
+        self._max_total_tokens = (
+            settings.plan_max_total_tokens if max_total_tokens is None else max_total_tokens
         )
-        self._max_total_tokens = max_total_tokens
         # 重规划次数上限。默认 1 次：重规划应当处理"前提被推翻"这种重大变化，
         # 而不是当作失败重试机制 —— 后者应该重试那一步，而不是重写整个计划。
         self._max_replans = max_replans
         self._enable_replan = enable_replan
-        self._base_prompt = base_system_prompt
+        self._base_prompt = base_system_prompt or build_system_prompt(
+            settings.profile, set(tools.names())
+        )
 
     # ---------- 主入口 ----------
 
     async def run_stream(
-        self, user_input: str, history: Sequence[ChatMessage] | None = None
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        context = (
+            run_context
+            or current_run_context()
+            or RunContext.create(
+                self._s,
+                token_limit=self._max_total_tokens,
+            )
+        )
+        source = guarded_stream(self._run_stream(user_input, history), context)
+        try:
+            async for event in source:
+                yield event
+        finally:
+            await source.aclose()
+
+    async def _run_stream(
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行一轮。
 
@@ -368,6 +400,8 @@ class PlanAndExecuteAgent:
         planner_before = self._planner.usage
         try:
             plan = await self._planner.amake_plan(user_input)
+        except RunBudgetExceeded:
+            raise
         except Exception as exc:
             logger.exception("规划失败")
             yield AgentEvent(type=EventType.ERROR, content=f"规划失败：{exc}")
@@ -409,20 +443,8 @@ class PlanAndExecuteAgent:
                 )
                 break
 
-            if total_usage.total_tokens >= self._max_total_tokens:
-                step.status = StepStatus.SKIPPED
-                step.error = "已达到总 token 预算，剩余步骤被跳过"
-                yield AgentEvent(
-                    type=EventType.PLAN_STEP,
-                    content=f"步骤 {step.id} 因预算耗尽被跳过",
-                    plan=plan.model_dump(),
-                )
-                # 把剩余待办一并标记，避免计划面板里留着一堆永远 PENDING 的步骤
-                for rest in plan.steps:
-                    if rest.status is StepStatus.PENDING:
-                        rest.status = StepStatus.SKIPPED
-                        rest.error = "预算耗尽"
-                break
+            if context := current_run_context():
+                context.check()
 
             step.status = StepStatus.RUNNING
             yield AgentEvent(
@@ -459,6 +481,8 @@ class PlanAndExecuteAgent:
                     content=f"完成：{result[:200]}",
                     plan=plan.model_dump(),
                 )
+            except RunBudgetExceeded:
+                raise
             except Exception as exc:
                 logger.exception("步骤 %d 执行失败", step.id)
                 step.status = StepStatus.FAILED
@@ -493,6 +517,8 @@ class PlanAndExecuteAgent:
                                 ),
                                 plan=plan.model_dump(),
                             )
+                    except RunBudgetExceeded:
+                        raise
                     except Exception:
                         logger.warning("重规划失败，继续按原计划执行")
                 elif self._enable_replan:
@@ -504,6 +530,8 @@ class PlanAndExecuteAgent:
         try:
             answer, usage = await self._synthesize(plan)
             total_usage = total_usage + usage
+        except RunBudgetExceeded:
+            raise
         except Exception as exc:
             logger.exception("综合失败")
             answer = self._fallback_answer(plan)
@@ -518,19 +546,25 @@ class PlanAndExecuteAgent:
         )
 
     async def run(
-        self, user_input: str, history: Sequence[ChatMessage] | None = None
+        self,
+        user_input: str,
+        history: Sequence[ChatMessage] | None = None,
+        *,
+        run_context: RunContext | None = None,
     ) -> AgentRunResult:
         answer = ""
         steps_used = 0
         usage = Usage()
         error: str | None = None
         stopped = "finished"
+        done = AgentEvent(type=EventType.DONE)
         plan_payload: dict | None = None
 
-        async for event in self.run_stream(user_input, history):
+        async for event in self.run_stream(user_input, history, run_context=run_context):
             if event.type is EventType.FINAL:
                 answer = event.content
             elif event.type is EventType.DONE:
+                done = event
                 steps_used = event.steps_used
                 usage = event.usage or Usage()
                 stopped = event.stopped_reason
@@ -543,6 +577,10 @@ class PlanAndExecuteAgent:
             answer=answer,
             steps_used=steps_used,
             usage=usage,
+            usage_complete=done.usage_complete,
+            tool_summary=done.tool_summary,
+            context_trimmed=done.context_trimmed,
+            context_tokens=done.context_tokens,
             tool_calls=[],
             stopped_reason=stopped,
             error=error,
@@ -564,10 +602,12 @@ class PlanAndExecuteAgent:
             调用方只能靠它们判断成败，而 `error` 里才是真正的失败原因
             （失败时 `answer` 往往是空的）。
         """
-        context = plan.conclusion_digest()
-        prompt = f"{self.STEP_PROMPT}\n\n整体目标：{plan.goal}"
-        if context:
-            prompt += f"\n\n已完成步骤的结论：\n{context}"
+        prompt = f"{self._base_prompt}\n\n{self.STEP_PROMPT}"
+        history = [
+            ChatMessage.assistant(f"已完成步骤 {s.id} 的结论：{s.result[:600]}")
+            for s in plan.steps
+            if s.status is StepStatus.DONE and s.result
+        ]
 
         agent = Agent(
             self._llm,
@@ -576,8 +616,9 @@ class PlanAndExecuteAgent:
             system_prompt=prompt,
         )
         result = await agent.run(
-            f"当前步骤（{step.id}/{len(plan.steps)}）：{step.description}\n"
-            f"完成标准：{step.expected or '给出这一步的结论'}"
+            f"整体目标：{plan.goal}\n当前步骤（{step.id}/{len(plan.steps)}）：{step.description}\n"
+            f"完成标准：{step.expected or '给出这一步的结论'}",
+            history,
         )
         return result.answer, result.usage, result.stopped_reason, result.error
 
@@ -595,23 +636,18 @@ class PlanAndExecuteAgent:
         )
 
     async def _synthesize(self, plan: Plan) -> tuple[str, Usage]:
+        conclusions = [
+            ChatMessage.assistant(
+                f"步骤 {s.id}（{s.description}，{s.status}）：{s.result[:600] or s.error or '无结果'}"
+            )
+            for s in plan.steps
+            if s.is_terminal
+        ]
         response = await self._llm.chat(
             [
                 ChatMessage.system(self._base_prompt),
-                ChatMessage.user(
-                    f"{self.SYNTHESIS_PROMPT}\n\n"
-                    f"用户目标：{plan.goal}\n\n"
-                    f"计划与执行结论：\n{plan.conclusion_digest(max_chars=600)}\n\n"
-                    f"失败的步骤：\n"
-                    + (
-                        "\n".join(
-                            f"- 步骤{s.id}（{s.description}）：{s.error}"
-                            for s in plan.steps
-                            if s.status is StepStatus.FAILED
-                        )
-                        or "（无）"
-                    )
-                ),
+                *conclusions,
+                ChatMessage.user(f"{self.SYNTHESIS_PROMPT}\n\n用户目标：{plan.goal}"),
             ],
             temperature=0.3,
         )

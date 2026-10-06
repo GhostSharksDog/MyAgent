@@ -122,7 +122,7 @@ def _supervisor(llm: Any, **kw: Any) -> SupervisorAgent:
     return SupervisorAgent(
         llm,
         kw.pop("tools", ToolRegistry()),
-        AgentSettings(max_steps=3),
+        AgentSettings(max_steps=3, profile="jobhunt"),
         **kw,
     )
 

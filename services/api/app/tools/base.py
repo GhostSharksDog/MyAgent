@@ -136,7 +136,27 @@ class Tool(ABC):
         """
         if inspect.iscoroutinefunction(self.run):
             return await self.run(params)
-        return await asyncio.to_thread(self.run, params)
+        return await self._invoke_sync(self.run, params)
+
+    async def _invoke_sync(self, fn: Callable[..., Any], *args: Any) -> Any:
+        if not self.serial:
+            return await asyncio.to_thread(fn, *args)
+        # 线程中的副作用无法被 asyncio 取消。必须等线程结束后才释放注册表锁，
+        # 否则超时/断流会让下一个写入与仍在运行的线程重叠。
+        operation = asyncio.create_task(asyncio.to_thread(fn, *args))
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not operation.cancelled():
+                operation.exception()  # 取走异常，避免后台任务无人消费
+            raise
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """带校验、超时、异常兜底的执行入口。Agent 循环只调用这个方法。
@@ -243,7 +263,7 @@ class FunctionTool(Tool):
         if self._is_async:
             return await self._fn(params)  # type: ignore[misc,return-value]
 
-        result = await asyncio.to_thread(self._fn, params)
+        result = await self._invoke_sync(self._fn, params)
         if inspect.isawaitable(result):
             # 极少数情况：同步函数返回协程（如包装了 functools.partial）
             return await result
@@ -255,6 +275,8 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # 跨请求与专家共享，write_file / edit_file 可能操作同一目标。
+        self._serial_lock = asyncio.Lock()
 
     def register(self, tool: Tool) -> Tool:
         if tool.name in self._tools:
@@ -299,6 +321,14 @@ class ToolRegistry:
         if tool is None:
             available = "、".join(self.names()) or "（无）"
             return ToolResult.failure(f"不存在名为 {call.name!r} 的工具。当前可用工具：{available}")
+        if tool.serial:
+            async with self._serial_lock:
+                # 排队期间其他专家可能耗尽共享预算；拿到锁后不能继续启动副作用。
+                from app.agent.runtime import current_run_context
+
+                if context := current_run_context():
+                    context.check()
+                return await tool.execute(call)
         return await tool.execute(call)
 
 

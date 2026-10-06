@@ -179,6 +179,7 @@ class LLMClient:
                     raise LLMTransientError(f"可重试状态码 {resp.status_code}：{resp.text[:200]}")
 
                 resp.raise_for_status()
+                resp.extensions["llm_attempts"] = attempt + 1
                 return resp
 
             except (LLMAuthError, LLMBadRequestError):
@@ -222,18 +223,23 @@ class LLMClient:
             response_format=response_format,
         )
 
+        had_fallback = False
         try:
             resp = await self._post_with_retry(payload)
         except LLMBadRequestError:
             # 服务端不支持 response_format 时自动降级重试一次
             if response_format is not None:
+                had_fallback = True
                 logger.warning("服务端不支持 response_format，降级为普通模式重试")
                 payload.pop("response_format", None)
                 resp = await self._post_with_retry(payload)
             else:
                 raise
 
-        return self._parse_response(resp.json())
+        response = self._parse_response(resp.json())
+        # 重发前的消耗没有 Usage：即使最后一次成功，也不能声称完整用量。
+        response.usage_complete &= not had_fallback and resp.extensions.get("llm_attempts", 1) == 1
+        return response
 
     @staticmethod
     def _parse_response(data: dict[str, Any]) -> ChatResponse:
@@ -260,6 +266,11 @@ class LLMClient:
             ),
             finish_reason=choice.get("finish_reason") or "stop",
             usage=usage,
+            usage_complete=bool(raw_usage)
+            and all(
+                raw_usage.get(key) is not None
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+            ),
             model=data.get("model") or "",
         )
 
@@ -333,6 +344,10 @@ class LLMClient:
             tool_call_deltas=tc_deltas,
             finish_reason=choice.get("finish_reason"),
             usage=usage,
+            usage_complete=all(
+                (chunk.get("usage") or {}).get(key) is not None
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+            ),
         )
 
 

@@ -168,6 +168,11 @@ class AgentSettings(BaseSettings):
     # 而不是抛一个看不出原因的异常。
     run_timeout: float = Field(default=0.0, ge=0.0, le=3600.0)
 
+    # 沿用规划 / 多专家原有阈值；现在按整轮已返回 Usage 执行，0 = 不限制。
+    # 在途模型调用可能超额，不能当作供应商账单的硬上限。
+    plan_max_total_tokens: int = Field(default=60_000, ge=0)
+    multi_max_total_tokens: int = Field(default=80_000, ge=0)
+
     # 单轮请求的**上下文 token 预算**。0 = 不限制。
     #
     # 【为什么需要它（技术债 T09）】

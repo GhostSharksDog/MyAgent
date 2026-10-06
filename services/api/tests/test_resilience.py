@@ -170,7 +170,8 @@ class TestCircuitBreakerStates:
                 await cb.call(self._fail)
         assert cb.state is CircuitState.OPEN
 
-        await asyncio.sleep(0.06)
+        while time.monotonic() - cb._opened_at < 0.06:  # noqa: ASYNC110 - wait for the actual monotonic deadline on Windows
+            await asyncio.sleep(0.01)
         assert await cb.call(ok) == "recovered"
         assert cb.state is CircuitState.CLOSED
 
@@ -185,7 +186,8 @@ class TestCircuitBreakerStates:
             with pytest.raises(KnowledgeBackendError):
                 await cb.call(self._fail)
 
-        await asyncio.sleep(0.06)
+        while time.monotonic() - cb._opened_at < 0.06:  # noqa: ASYNC110 - wait for the actual monotonic deadline on Windows
+            await asyncio.sleep(0.01)
         with pytest.raises(KnowledgeBackendError):
             await cb.call(self._fail)
         assert cb.state is CircuitState.OPEN
@@ -215,7 +217,8 @@ class TestCircuitBreakerStates:
         for _ in range(2):
             with pytest.raises(KnowledgeBackendError):
                 await cb.call(self._fail)
-        await asyncio.sleep(0.06)
+        while time.monotonic() - cb._opened_at < 0.06:  # noqa: ASYNC110 - wait for the actual monotonic deadline on Windows
+            await asyncio.sleep(0.01)
 
         release = asyncio.Event()
         entered = asyncio.Event()
@@ -273,7 +276,8 @@ class TestCircuitBreakerStates:
         for _ in range(2):
             with pytest.raises(KnowledgeBackendError):
                 await cb.call(self._fail)
-        await asyncio.sleep(0.06)
+        while time.monotonic() - cb._opened_at < 0.06:  # noqa: ASYNC110 - wait for the actual monotonic deadline on Windows
+            await asyncio.sleep(0.01)
 
         async def empty() -> str:
             raise EmptyKnowledgeBase("空")

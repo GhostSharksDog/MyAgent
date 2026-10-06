@@ -30,7 +30,7 @@ class ModeLLM:
 
     def __init__(self, *, plan_steps: int = 2, specialists: list[str] | None = None) -> None:
         self._plan_steps = plan_steps
-        self._specialists = specialists if specialists is not None else ["简历诊断师"]
+        self._specialists = specialists if specialists is not None else ["资料分析员"]
         self.chat_calls = 0
         self.stream_calls = 0
 
@@ -184,8 +184,8 @@ class TestPlanMode:
 
 class TestMultiMode:
     def test_emits_delegate_events(self, client: TestClient) -> None:
-        _install_llm(ModeLLM(specialists=["简历诊断师", "岗位分析师"]))
-        events = _stream(client, "简历和岗位匹配吗", mode="multi")
+        _install_llm(ModeLLM(specialists=["资料分析员", "方案分析员"]))
+        events = _stream(client, "分析资料并提出方案", mode="multi")
         types = [e["type"] for e in events]
 
         assert types.count("delegate") == 2
@@ -195,7 +195,7 @@ class TestMultiMode:
     def test_delegate_carries_specialist_name(self, client: TestClient) -> None:
         events = _stream(client, "问题", mode="multi")
         names = [e["specialist"] for e in events if e["type"] == "delegate"]
-        assert names == ["简历诊断师"]
+        assert names == ["资料分析员"]
 
     def test_no_plan_events_in_multi_mode(self, client: TestClient) -> None:
         events = _stream(client, "问题", mode="multi")

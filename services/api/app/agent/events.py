@@ -69,6 +69,7 @@ class AgentEvent(BaseModel):
 
     # 结束时的累计统计
     usage: Usage | None = None
+    usage_complete: bool = True
     steps_used: int = 0
 
     # 本轮的工具调用摘要（技术债 T07），仅 DONE 携带。
@@ -82,7 +83,7 @@ class AgentEvent(BaseModel):
     # 发出去之前那次预算检查算出的上下文规模（token，估算值）。
     context_tokens: int = 0
 
-    # 终止原因：finished | max_steps | loop_detected | error
+    # 终止原因：finished | max_steps | loop_detected | timeout | token_budget | error
     # 仅 DONE 事件携带。单独一个字段而不是靠"有没有 ERROR 事件"推断：
     # "步数耗尽"和"死循环"是**可预期的预算终止**，而"模型调用失败"是故障。
     # 三者混在一起会让指标统计失真——例如"错误率"会把正常的预算耗尽也算进去。
@@ -106,8 +107,14 @@ class AgentRunResult(BaseModel):
     answer: str
     steps_used: int = 0
     usage: Usage = Field(default_factory=Usage)
+    usage_complete: bool = True
+    tool_summary: str = ""
+    context_trimmed: bool = False
+    context_tokens: int = 0
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    stopped_reason: str = "finished"  # finished | max_steps | loop_detected | error
+    stopped_reason: str = (
+        "finished"  # finished | max_steps | loop_detected | timeout | token_budget | error
+    )
     error: str | None = None
     # 规划型 Agent 的最终计划（含各步骤状态与结论）。
     # 放在返回值里而不是让调用方从事件流里自己攒：

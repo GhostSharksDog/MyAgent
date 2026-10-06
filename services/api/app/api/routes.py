@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -120,6 +121,8 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session
     # 只有 react 形态需要把会话历史装进记忆；plan/multi 不使用历史，
     # 它们的 run_stream 会打日志说明这一点（见各自 docstring）。
     # 这里不传历史也不会静默失效 —— 后端会记录日志。
+    if payload.mode != "react" and session.turns:
+        logger.info("%s 本轮按独立任务处理，不使用会话 %s 的历史", payload.mode, session.id)
     if payload.mode == "react":
         memory = ConversationMemory.from_turns(
             session.turns,
@@ -363,22 +366,27 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     history = [] if session is not None else _to_history(payload.history)
     result = await agent.run(payload.message, history)
 
-    if result.answer:
+    if result.answer and result.stopped_reason == "finished":
         await _persist(
             _get_store(request),
             session,
             payload.message,
             result.answer,
             result.usage.total_tokens,
+            result.tool_summary,
         )
 
     return ChatResponse(
         answer=result.answer,
         steps_used=result.steps_used,
         usage=result.usage,
+        usage_complete=result.usage_complete,
         tool_calls=result.tool_calls,
         stopped_reason=result.stopped_reason,
         error=result.error,
+        tool_summary=result.tool_summary,
+        context_trimmed=result.context_trimmed,
+        context_tokens=result.context_tokens,
     )
 
 
@@ -406,6 +414,8 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         final_answer = ""
         total_tokens = 0
         tool_summary = ""
+        stopped_reason = "error"
+        saw_done = False
 
         # 【离线回放：只换数据源，不换任何下游逻辑】
         # 下面的 `async for` 循环体完全不变 —— 同一套事件序列化、同一套指标采集、
@@ -419,26 +429,29 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         )
 
         try:
-            async for event in source:
-                # 边转发边收集需要持久化的信息。
-                # 不能等流结束再重跑一遍 —— 那会重复调用模型与工具。
-                if event.type is EventType.FINAL:
-                    final_answer = event.content
-                elif event.type is EventType.DONE:
-                    if event.usage:
-                        total_tokens = event.usage.total_tokens
-                    # 工具摘要随 DONE 一起下发（技术债 T07）：
-                    # 持久化它之后，下一轮的历史里才会有"我查过什么"那一行。
-                    # 从事件里取而不是重新算一遍 —— Agent 内部才知道完整的调用轨迹。
-                    tool_summary = event.tool_summary
+            async with aclosing(source):
+                async for event in source:
+                    # 边转发边收集需要持久化的信息。
+                    # 不能等流结束再重跑一遍 —— 那会重复调用模型与工具。
+                    if event.type is EventType.FINAL:
+                        final_answer = event.content
+                    elif event.type is EventType.DONE:
+                        saw_done = True
+                        stopped_reason = event.stopped_reason
+                        if event.usage:
+                            total_tokens = event.usage.total_tokens
+                        # 工具摘要随 DONE 一起下发（技术债 T07）：
+                        # 持久化它之后，下一轮的历史里才会有"我查过什么"那一行。
+                        # 从事件里取而不是重新算一遍 —— Agent 内部才知道完整的调用轨迹。
+                        tool_summary = event.tool_summary
 
-                # 指标采集放在**消费端**而不是 Agent 内核里：
-                # 内核有 CLI / HTTP / 测试等多种调用方式，让它直接打点会把
-                # "跑一次测试"也变成"污染全局指标"。在事件流经的地方统一采集，
-                # 既覆盖所有 Agent 形态（react/plan/multi），内核又保持纯粹。
-                record_agent_event(event, mode=payload.mode)
+                    # 指标采集放在**消费端**而不是 Agent 内核里：
+                    # 内核有 CLI / HTTP / 测试等多种调用方式，让它直接打点会把
+                    # "跑一次测试"也变成"污染全局指标"。在事件流经的地方统一采集，
+                    # 既覆盖所有 Agent 形态（react/plan/multi），内核又保持纯粹。
+                    record_agent_event(event, mode=payload.mode)
 
-                yield event.to_sse()
+                    yield event.to_sse()
         except Exception as exc:
             # 流已经开始后无法改 HTTP 状态码，只能以事件形式告知前端。
             #
@@ -450,10 +463,14 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
             # 正确做法是复用 AgentEvent 自己的序列化 —— 单一事实来源。
             logger.exception("流式对话异常")
             yield AgentEvent(type=EventType.ERROR, content=f"服务内部错误：{exc}").to_sse()
+            if not saw_done:
+                yield AgentEvent(
+                    type=EventType.DONE, stopped_reason="error", usage_complete=False
+                ).to_sse()
 
         # 持久化放在 `async for` 之外：即使流中途出错，只要已经产出了完整答案
         # 就应当保存（异常分支没有 return，控制流会走到这里）。
-        if final_answer:
+        if final_answer and stopped_reason == "finished":
             await _persist(
                 store, session, payload.message, final_answer, total_tokens, tool_summary
             )
