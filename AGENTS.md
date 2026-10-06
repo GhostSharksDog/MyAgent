@@ -19,10 +19,11 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1182 后端通过 + 1 live 跳过、166 前端通过**；最新检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-06 **1232 后端通过 + 1 live 跳过、203 前端通过**；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
+- 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - Plan/Supervisor 本轮不使用会话历史；HTTP/SSE 只持久化 `finished`。缺 Usage 时 `usage_complete=false`
 - Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近
 - `scripts/eval_agent.py` 默认离线：30 个通用公开任务 × 三模式，合成 LLM 驱动真实内核和只读工具。90 轮通过是框架验收，不是模型成功率；可离线重新评分已有 RunBundle
@@ -147,6 +148,7 @@ services/api/app/
   runs/              history.py（运行摘要白名单投影、有界内存、显式单机 SQLite）
   tasks/             queue / redis_queue / handlers / factory
   tools/             base.py(Tool/ToolRegistry/ToolResult) files.py builtin.py ...
+                     file_changes.py（只读快照、完整diff、批准后复核与应用）
   core/              config.py(唯一配置入口) logging.py telemetry.py resilience.py
 
 apps/web/src/
@@ -178,6 +180,8 @@ apps/web/src/
    直接 400，而报错完全看不出是裁剪干的。
 7. **有副作用的工具必须 `serial = True`**（写文件、记忆写入等）：
    并发写同一目标的结果不可复现。
+   文件人审在该锁之外，应用仍在锁内；拒绝/确认超时禁止本轮后续写入，关闭确认不能绕过。
+   保存能力设置保留原注册表锁和模型客户端，不能让在途写线程与新注册表重叠。
 8. **前端样式不许写死颜色**：只能在 `styles/tokens.css` 定义变量；
    `apps/web/test/styles.test.mjs` 会拦住硬编码色值。
 9. **每条文档里的环境变量都必须真的被读到**（`test_config_coverage.py`），

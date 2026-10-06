@@ -2,7 +2,7 @@
 
 先启动服务，再运行 .venv\\Scripts\\python.exe -X utf8 scripts\\smoke_ui.py。
 --visual --screenshots-dir docs/screenshots 会检查多种布局并保存截图。
---reliability 仅拦截聊天 SSE，其他接口仍读取当前服务，不修改配置。
+--reliability 仅合成聊天 SSE 与文件确认请求，其他接口仍读取当前服务，不修改配置。
 不依赖 jsdom / Playwright；报错监听在页面挂载之前安装，避免白屏漏检。
 """
 
@@ -325,7 +325,240 @@ def settings_checks(cdp: Cdp, *, visual: bool) -> None:
     )
 
 
-def reliability_checks(cdp: Cdp, *, visual: bool) -> None:
+def file_approval_checks(cdp: Cdp, directory: Path | None = None) -> None:
+    """Exercise the mounted approval cards without a model or a filesystem write."""
+    print("\n=== 文件修改确认（合成 SSE／POST，无真实文件写入）===")
+    source = (
+        Path(__file__)
+        .with_name("file_approval_fixtures.js")
+        .read_text(encoding="utf-8")
+    )
+    cdp.eval(source)
+    card = r"""document.querySelector('.file-approval[data-approval-id="'+window.__fixture.approvalRun.id+'"]')"""
+    cdp.click("设置")
+    cdp.wait('!!document.querySelector("[role=dialog][aria-label=设置]")')
+    cdp.click("通用")
+    setting = r"""[...document.querySelectorAll('label')].find(l=>l.textContent.includes('显示运行统计'))?.querySelector('input')"""
+    original_meta = cdp.eval(f"({setting})?.checked")
+    cdp.eval(f"(()=>{{const e={setting};if(e?.checked)e.click();}})()")
+    close_settings(cdp)
+
+    def begin(case: str) -> bool:
+        cdp.eval(f"window.__fixture.case={json.dumps('approval-' + case)}")
+        send(cdp, "请预览 notes/public-action-plan.md 的修改，等我确认后再写入。")
+        ready = cdp.wait(f"({card})?.dataset.status==='pending'")
+        check(ready, f"{case} 收到文件修改预览")
+        if ready:
+            cdp.eval(
+                f"({card}).scrollIntoView({{block:'center'}});"
+                "document.querySelectorAll('button[aria-label=\"收起执行过程\"]').forEach(b=>b.click())"
+            )
+        return ready
+
+    if begin("approve"):
+        check(
+            cdp.eval(
+                f"!!({card}).closest('article.turn')&&"
+                f"!({card}).closest('.execution-process')&&"
+                f"!({card}).closest('article.turn').querySelector('.runmeta')&&"
+                f"({card}).getClientRects().length>0"
+            ),
+            "确认卡片在答案附近，隐藏统计／收起过程后仍可见",
+        )
+        check(
+            cdp.eval(
+                f"({card}).querySelector('pre').textContent.trimEnd()===window.__fixture.approvalRun.proposal.diff.trimEnd()"
+            ),
+            "展示完整 unified diff，尾行不截断",
+        )
+        line_height = cdp.eval(
+            f"(()=>{{const e=({card}).querySelector('.diff-line');return {{height:e.getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(e).lineHeight)}};}})()"
+        )
+        check(
+            isinstance(line_height, dict)
+            and line_height["lineHeight"] > 0
+            and line_height["height"] <= line_height["lineHeight"] + 1,
+            "差异标题行没有多余的双倍行高",
+            str(line_height),
+        )
+        check(
+            cdp.eval(
+                f"({card}).textContent.includes('0 →')&&({card}).textContent.includes('目标不存在')&&({card}).textContent.includes('UTF-8，无 BOM，LF 换行')"
+            ),
+            "新建预览显示字节数与真实格式说明",
+        )
+        if directory is not None:
+            for theme, start in (("light", 15), ("dark", 18)):
+                cdp.eval(f"document.documentElement.dataset.theme={json.dumps(theme)}")
+                for offset, (width, height) in enumerate(
+                    ((1440, 900), (1024, 768), (390, 844))
+                ):
+                    cdp.viewport(width, height)
+                    cdp.eval(f"({card}).scrollIntoView({{block:'center'}})")
+                    layout_check(cdp, f"{theme} {width}×{height} 文件确认")
+                    check(
+                        cdp.eval(
+                            f"(()=>{{const r=({card}).getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;}})()"
+                        ),
+                        f"{theme} {width} 文件确认卡片不越界",
+                    )
+                    cdp.screenshot(
+                        directory, f"{start + offset:02d}-approval-{theme}-{width}"
+                    )
+            cdp.eval("document.documentElement.dataset.theme='light'")
+            cdp.viewport(1440, 900)
+        # Tab moves from the scrollable diff to the approval button, then to reject.
+        cdp.eval(f"({card}).querySelector('[role=region]').focus()")
+        press_key(cdp, "Tab")
+        check(
+            cdp.eval("document.activeElement?.textContent.trim()==='批准此修改'"),
+            "键盘可从完整差异进入批准按钮",
+        )
+        press_key(cdp, "Tab")
+        check(
+            cdp.eval("document.activeElement?.textContent.trim()==='拒绝修改'"),
+            "键盘可继续进入拒绝按钮",
+        )
+        press_key(cdp, "Tab", modifiers=8)
+        press_key(cdp)
+        check(
+            cdp.wait(f"({card})?.dataset.status==='approved'"),
+            "键盘批准后显示正在核验",
+        )
+        check(
+            cdp.eval(
+                "(()=>{const f=window.__fixture,r=f.approvalDecisions.at(-1);return r?.method==='POST'&&r.decision==='approve'&&r.path==='/api/runs/'+f.approvalRun.runId+'/approvals/'+f.approvalRun.id;})()"
+            ),
+            "批准使用 X-Run-Id 与当前确认 ID 发出正确 POST",
+        )
+        check(
+            cdp.eval(
+                f"!({card}).classList.contains('file-approval--ok')&&"
+                f"!({card}).textContent.includes('文件已写入')&&"
+                f"!({card}).querySelector('.file-approval__actions button:not(:disabled)')"
+            ),
+            "HTTP 批准不是写入成功，也不能重复批准",
+        )
+        cdp.eval("window.__fixture.releaseApproval()")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='applied'&&!document.querySelector('.composer__stop')"
+            ),
+            "收到 applied 事件才显示写入成功并结束",
+        )
+        if directory is not None:
+            cdp.eval(f"({card}).scrollIntoView({{block:'center'}})")
+            cdp.screenshot(directory, "21-approval-applied-light-1440")
+
+    for case, decision, expected in (
+        ("reject", "reject", "rejected"),
+        ("conflict", "approve", "conflict"),
+    ):
+        if not begin(case):
+            continue
+        label = "拒绝修改" if decision == "reject" else "批准此修改"
+        check(cdp.click(label, scope=f"({card})"), f"{case} 决定按钮可操作")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==={json.dumps('rejected' if decision == 'reject' else 'approved')}"
+            ),
+            f"{case} 决定反馈已显示",
+        )
+        cdp.eval("window.__fixture.releaseApproval()")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==={json.dumps(expected)}&&!document.querySelector('.composer__stop')"
+            ),
+            f"{case} 终态显示且流已结束",
+        )
+        check(
+            cdp.eval(
+                f"!({card}).classList.contains('file-approval--ok')&&"
+                f"!({card}).querySelector('.file-approval__actions button:not(:disabled)')"
+            ),
+            f"{case} 不显示成功，也不能继续批准",
+        )
+        if case == "reject":
+            check(
+                cdp.eval(
+                    "window.__fixture.approvalDecisions.at(-1)?.decision==='reject'"
+                ),
+                "拒绝发送 reject 决定",
+            )
+        if directory is not None and case == "conflict":
+            cdp.eval("document.documentElement.dataset.theme='dark'")
+            cdp.eval(f"({card}).scrollIntoView({{block:'center'}})")
+            cdp.screenshot(directory, "22-approval-conflict-dark-1440")
+            cdp.eval("document.documentElement.dataset.theme='light'")
+
+    if begin("retry"):
+        cdp.click("批准此修改", scope=f"({card})")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='pending'&&({card})?.querySelector('[role=alert]')?.textContent.includes('请重试')"
+            ),
+            "确认请求失败有可操作反馈，并保持待批准",
+        )
+        check(cdp.click("批准此修改", scope=f"({card})"), "失败后允许重试")
+        check(cdp.wait(f"({card})?.dataset.status==='approved'"), "重试成功后进入核验")
+        cdp.eval("window.__fixture.releaseApproval()")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='applied'&&!document.querySelector('.composer__stop')"
+            ),
+            "重试后等待实际 applied 结果",
+        )
+
+    for status in ("expired", "failed"):
+        if not begin(status):
+            continue
+        cdp.eval(f"window.__fixture.finishApproval({json.dumps(status)})")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==={json.dumps(status)}&&!document.querySelector('.composer__stop')"
+            ),
+            f"{status} 明确显示未应用结果",
+        )
+        check(
+            cdp.eval(f"!({card}).classList.contains('file-approval--ok')"),
+            f"{status} 没有误标成功",
+        )
+
+    if begin("cancel"):
+        before = cdp.eval("window.__fixture.approvalDecisions.length")
+        check(cdp.click("停止生成"), "待确认时可以停止本轮")
+        check(cdp.wait("window.__fixture.approvalCancelled"), "停止实际取消确认 SSE")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='cancelled'&&!document.querySelector('.composer__stop')"
+            ),
+            "停止后确认卡片立即关闭",
+        )
+        check(
+            not cdp.click("批准此修改", scope=f"({card})")
+            and cdp.eval("window.__fixture.approvalDecisions.length") == before,
+            "停止后不能再批准，也没有发出决定请求",
+        )
+        cdp.eval("window.__fixture.releaseApproval()")
+        check(
+            cdp.eval(f"({card})?.dataset.status==='cancelled'"),
+            "停止后的继续操作不会恢复确认",
+        )
+
+    # Restore only presentation preferences and the fixture transport.
+    if original_meta is True:
+        cdp.click("设置")
+        cdp.wait('!!document.querySelector("[role=dialog][aria-label=设置]")')
+        cdp.click("通用")
+        cdp.eval(f"(()=>{{const e={setting};if(e&&!e.checked)e.click();}})()")
+        close_settings(cdp)
+    cdp.eval("window.__fixture.case='finished'")
+    cdp.eval("window.__fixture.restoreApproval()")
+
+
+def reliability_checks(
+    cdp: Cdp, *, visual: bool, directory: Path | None = None
+) -> None:
     print("\n=== 预算终态与流式取消（合成 SSE，零模型调用）===")
     if not visual:
         cdp.eval(r"""
@@ -376,6 +609,7 @@ def reliability_checks(cdp: Cdp, *, visual: bool) -> None:
         cdp.eval("document.body.textContent.includes('上下文已裁剪')"),
         "上下文裁剪仍可见",
     )
+    file_approval_checks(cdp, directory)
     cdp.eval("window.__fixture.case='cancel'")
     send(cdp, "公开样本中断验证")
     check(cdp.wait(f"!!{button_expression('停止生成')}"), "生成时停止按钮出现")
@@ -1306,7 +1540,7 @@ def visual_checks(cdp: Cdp, directory: Path) -> None:
     )
     cdp.click("收起会话列表", scope="document.querySelector('.sidebar')")
     cdp.viewport(1440, 900)
-    reliability_checks(cdp, visual=True)
+    reliability_checks(cdp, visual=True, directory=directory)
     run_history_checks(cdp, directory)
     # Terminal warnings must survive the presentation-only preference.
     cdp.click("设置")
@@ -1342,7 +1576,9 @@ def main() -> int:
     parser.add_argument("--target", default=TARGET)
     parser.add_argument("--cdp-port", type=int, default=PORT)
     parser.add_argument(
-        "--reliability", action="store_true", help="仅合成聊天 SSE 验证预算与停止"
+        "--reliability",
+        action="store_true",
+        help="合成聊天 SSE／确认请求，验证预算、停止与文件审批",
     )
     parser.add_argument(
         "--visual",

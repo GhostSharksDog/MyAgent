@@ -8,6 +8,7 @@
   const currentModel = () => models.find(m=>m.active);
   const settings = {llm:{...model},agent:{profile:'general',workspace_root:root,corpus_paths:[],corpus_include_seed:false,file_max_chars:20000,file_write_enabled:false,file_allow_secrets:false,corpus_loaded:false,corpus_doc_count:0,plan_max_total_tokens:60000,multi_max_total_tokens:80000},env_path:'临时演示配置（不写入磁盘）'};
   settings.run_history={backend:'memory',active_backend:'memory',restart_required:false,max_records:200,max_events:256};
+  Object.assign(settings.agent,{file_approval_required:true,file_approval_timeout:300});
   const makeRun = (id,reason='finished') => ({run_id:id,session_id:'public-session',mode:'react',source:'agent',started_at:'2026-10-06T04:00:00Z',finished_at:'2026-10-06T04:00:01Z',duration_ms:1000,stopped_reason:reason,usage:{prompt_tokens:128,completion_tokens:48,total_tokens:176},usage_complete:reason==='finished',steps_used:2,tool_calls:1,tool_results:1,tool_failures:reason==='error'?1:0,context_trimmed:reason==='token_budget',context_tokens:128,events_dropped:reason==='token_budget'?2:0,events:[{kind:'tool_result',elapsed_ms:48,step:1,scope:'child',tool_name:'calculator',ok:reason!=='error',duration_ms:8,truncated:true,counts:null}]});
   const runs=[makeRun('public-archive-error','error'),makeRun('public-archive-budget','token_budget'),makeRun('public-archive-finished')];
   const sessions = [
