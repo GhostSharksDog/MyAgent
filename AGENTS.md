@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1103 后端通过 + 1 live 跳过、159 前端通过**；通用检索见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-06 **1132 后端通过 + 1 live 跳过、166 前端通过**；运行记录见 `docs/09-run-history.md`，通用检索见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
@@ -143,6 +143,7 @@ services/api/app/
   rag/               loaders / chunker / embedder(BM25+TF-IDF) / retriever / store
                      backend.py（本地或远程两种后端）/ service
   session/           store.py(ABC+内存+Redis) sqlite_store.py factory.py models.py
+  runs/              history.py（运行摘要白名单投影、有界内存、显式单机 SQLite）
   tasks/             queue / redis_queue / handlers / factory
   tools/             base.py(Tool/ToolRegistry/ToolResult) files.py builtin.py ...
   core/              config.py(唯一配置入口) logging.py telemetry.py resilience.py
@@ -259,6 +260,10 @@ apps/web/src/
 ---
 
 ## 10. 已知未做（不是"忘了"，是"要等数据或环境"）
+
+HTTP/SSE 运行摘要已接通，入口见 `docs/09-run-history.md`。默认 `RUN_HISTORY_BACKEND=memory`，最新 200 轮/每轮 256 条结构化事件，不录输入、答案、参数、结果、任务描述和异常原文。
+用户显式开启 `sql` 后创建 `RUN_HISTORY_PATH`，存储切换需保存并重启；关闭不删除旧库、不追溯持久化旧内存记录。只支持单机单 API 进程，硬退出残留轮次标为 `interrupted`、Usage 不完整。
+事件增补 `run_id`、结束 `record_saved`；取消状态属于记录，不新增 SSE 事件类型。子工具必须从共享 RunContext 观察，不能只数外层事件或把子 Usage 再加一次。
 
 本轮证据入口：`docs/05-reliability-evidence.md`。普通 pytest 默认跳过 live；
 只有 `pytest -m live` 或 `--run-live` 才联网。不要为“全绿”消耗真实模型额度。

@@ -22,6 +22,7 @@ Python 3.12 / FastAPI + React 19 / TypeScript 全栈项目，面向 AI 应用与
 | 可复现性 | Windows CI、Python 运行时 lock、pnpm lock、默认离线测试、公开样本评测、Edge 冒烟 |
 | 任务评测 | 30 个通用公开任务、三模式统一评分；合成模型驱动真实内核与工具，保存原始事件、目标检查、覆盖率及已知用量；真实模型成绩尚未采集 |
 | 通用检索基准 | 16份虚构公开文档、60查询，分别检查召回、多处证据和无答案非空返回；旧14查询基准保留 |
+| 运行记录 | HTTP/SSE 每轮 run_id；失败、预算终止与取消均可查询，记录结构化执行摘要；默认内存，可显式启用单机 SQLite |
 
 SQLite 已落地；PostgreSQL/pgvector、生产阈值标定、TLS 与 Redis 鉴权属于后续工作。
 本轮没有扩展部署；历史路线图中的构想不算作当前实现。
@@ -74,6 +75,8 @@ Docker：`docker compose up -d --build` 后运行 `scripts/verify_compose.py`；
 首屏展示通用示例，点击只填写草稿；发送后同一个输入区移到聊天底部。
 「执行过程」统一查看计划、专家与工具，预算、错误、停止和裁剪提示始终显示在答案旁。
 点击顶栏模型名进入模型设置；工作区必须显式选择，写权限与敏感文件权限分别保存。
+会话栏「运行记录」可筛选并重新查看任务摘要；回答下方入口直接定位本轮。
+默认不保存问题、答案及工具参数/结果原文，内存重启清空；「设置 → Agent」显式开启持久化，保存并重启后生效。
 新用户默认浅色，已有 light／dark／system 偏好保留；手机会话与文件抽屉互斥。
 
 ![Legacy 浅色首屏](docs/screenshots/ui-redesign/01-home-light-1440.png)
@@ -95,6 +98,8 @@ ReAct 可传 session_id/history；Plan/Supervisor 即使传入也按独立任务
 - 响应与 done 增加 usage_complete。缺 Usage、模型中断或重试前消耗未知时为 false；
   usage 此时只表示已知下界，不能据 0 声称免费。规划与失败专家已返回的 Usage 同样入账。
 - 响应/done 汇总工具摘要、上下文裁剪信息和估算规模。
+- HTTP 响应与 SSE 新增 run_id，SSE 响应头为 X-Run-Id；结束时 record_saved 明确摘要保存情况。
+  GET /api/runs 与 GET /api/runs/{run_id} 只查询摘要，不调用模型。取消/重启中断记录分别显示 cancelled/interrupted。
 
 ## 验证与实测
 
@@ -144,7 +149,10 @@ TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 混合+重排在48条有答案查询上的Recall@5为0.917、完整证据率0.875，多处证据只找齐8/12；
 12条无答案查询都返回了片段。提高门槛明显损伤正例召回，因此没有修改服务默认配置。
 这些是本地检索指标，不是模型答案正确率或拒答率；与旧基准不能直接比较。
-最新门禁：**1103 后端通过 + 1 live 跳过、159 前端通过**；参数、失败与原始JSON已留档。
+该轮门禁：**1103 后端通过 + 1 live 跳过、159 前端通过**；参数、失败与原始JSON已留档。
+
+随后增加[任务运行记录](docs/09-run-history.md)：默认有界内存摘要、显式单机 SQLite、失败与取消查询、子任务工具统计及隐私白名单。
+最新门禁：**1132 后端通过 + 1 live 跳过、166 前端通过**，格式、lint、lock、类型及构建通过；Edge 合成界面 245 项验收通过，新增真实模型请求 0 次。
 
 GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线检查与前端构建。
 远端 CI 首跑需用户推送后确认；当前只报告本地检查。
@@ -155,6 +163,7 @@ GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线�
 - [界面设计、验收与演示截图](docs/06-ui-design.md)
 - [通用任务评测、运行记录与指标校正](docs/07-agent-evaluation.md)
 - [通用 RAG 基准与失败分析](docs/08-general-rag-benchmark.md)
+- [运行记录、失败排查与隐私边界](docs/09-run-history.md)
 - [架构、设计决策与历史修复](docs/01-architecture.md)（第 8/10 节为当前补充）
 - [交接说明](AGENTS.md)
 - [项目一页纸](docs/04-career/01-onepager.md)
