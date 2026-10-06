@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **998 后端通过 + 1 live 跳过、159 前端通过**；界面验收见 `docs/06-ui-design.md`，上一轮内核证据保留在 `docs/05-reliability-evidence.md`
+- 测试：2026-10-06 **1005 后端通过 + 1 live 跳过、159 前端通过**；NDCG 校正见 `docs/05-reliability-evidence.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算

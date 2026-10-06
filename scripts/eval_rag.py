@@ -36,12 +36,12 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-from app.core.config import get_settings  # noqa: E402
-from app.rag.chunker import ChunkStrategy  # noqa: E402
-from app.rag.corpus import build_corpus  # noqa: E402
-from app.rag.evaluate import EvalReport, EvalSet, _is_relevant, evaluate  # noqa: E402
-from app.rag.rerank import LexicalReranker, LLMReranker, Reranker  # noqa: E402
-from app.rag.retriever import RetrievalMode, Retriever  # noqa: E402
+from app.core.config import get_settings
+from app.rag.chunker import ChunkStrategy
+from app.rag.corpus import build_corpus
+from app.rag.evaluate import EvalReport, EvalSet, _is_relevant, evaluate
+from app.rag.rerank import LexicalReranker, LLMReranker, Reranker
+from app.rag.retriever import RetrievalMode, Retriever
 
 EVAL_SET_PUBLIC = ROOT / "services" / "api" / "seed" / "eval_set.json"
 EVAL_SET_LOCAL = ROOT / "data" / "eval_set.local.json"
@@ -86,7 +86,9 @@ def cmd_inspect(retriever: Retriever) -> int:
         preview = chunk.text.replace("\n", " ⏎ ")
         if len(preview) > 110:
             preview = preview[:110] + "…"
-        print(f"  #{chunk.index:<2} [{chunk.section or '—':<8}] {len(chunk.text):>4}字  {preview}")
+        print(
+            f"  #{chunk.index:<2} [{chunk.section or '—':<8}] {len(chunk.text):>4}字  {preview}"
+        )
         if chunk.metadata:
             print(f"       元数据: {chunk.metadata}")
     return 0
@@ -104,7 +106,8 @@ def cmd_validate(retriever: Retriever, eval_set: EvalSet) -> int:
     for i, item in enumerate(eval_set.queries, 1):
         matched = sum(1 for c in corpus if _is_relevant(c, item.gold))
         conds = " AND ".join(
-            json.dumps(c.model_dump(exclude_none=True), ensure_ascii=False) for c in item.gold
+            json.dumps(c.model_dump(exclude_none=True), ensure_ascii=False)
+            for c in item.gold
         )
         status = "OK " if matched else "空!"
         if not matched:
@@ -115,7 +118,9 @@ def cmd_validate(retriever: Retriever, eval_set: EvalSet) -> int:
     print()
     if problems:
         print(f"[x] 有 {problems} 条查询的标注匹配不到任何块。")
-        print("    这类查询的 recall 分母为 0，无法评估。请先修正标注（见 --inspect 输出）。")
+        print(
+            "    这类查询的 recall 分母为 0，无法评估。请先修正标注（见 --inspect 输出）。"
+        )
         return 1
 
     print("[OK] 所有标注都能匹配到至少一个块，评测集可用。")
@@ -149,7 +154,9 @@ async def cmd_run(
     if "reranker_tokens" in retriever.stats():
         tokens = retriever.stats()["reranker_tokens"]
         n = max(len(eval_set.queries), 1)
-        print(f"  重排成本：{tokens} tokens / {n} 条查询 = {tokens / n:.0f} tokens/查询")
+        print(
+            f"  重排成本：{tokens} tokens / {n} 条查询 = {tokens / n:.0f} tokens/查询"
+        )
     print()
 
     print("--- 分难度 ---")
@@ -181,7 +188,10 @@ async def cmd_run(
 
     if json_out:
         await asyncio.to_thread(
-            json_out.write_text, report.model_dump_json(indent=2), encoding="utf-8", newline="\n"
+            json_out.write_text,
+            report.model_dump_json(indent=2),
+            encoding="utf-8",
+            newline="\n",
         )
         print(f"\n[OK] 报告已写入 {json_out}")
 
@@ -230,7 +240,9 @@ _REWRITE_LADDER: list[LadderStep] = [
     LadderStep("R2 混合 + Multi-Query", RetrievalMode.HYBRID, "none", "multi_query"),
     LadderStep("R3 混合 + HyDE", RetrievalMode.HYBRID, "none", "hyde"),
     LadderStep("R4 混合+重排（= ⑤ 对照组）", RetrievalMode.HYBRID, "lexical", "none"),
-    LadderStep("R5 混合+重排 + Multi-Query", RetrievalMode.HYBRID, "lexical", "multi_query"),
+    LadderStep(
+        "R5 混合+重排 + Multi-Query", RetrievalMode.HYBRID, "lexical", "multi_query"
+    ),
     LadderStep("R6 混合+重排 + HyDE", RetrievalMode.HYBRID, "lexical", "hyde"),
 ]
 
@@ -305,7 +317,15 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
 
     if args.json_out:
         payload = [
-            {"label": label, "pipeline": r.pipeline(), "metrics": r.metrics} for label, r in rows
+            {
+                "label": label,
+                "pipeline": r.pipeline(),
+                "metric_version": r.metric_version,
+                "k": r.k,
+                "chunk_count": r.chunk_count,
+                "metrics": r.metrics,
+            }
+            for label, r in rows
         ]
         args.json_out.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -363,7 +383,9 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
     agent = get_settings().agent
     # --sample 是完整的数据源声明，不只是替换简历文件名。
     # 公开基准必须排除私人笔记及 .env 中声明的私人路径。
-    include_seed = args.sample or agent.profile == "jobhunt" or agent.corpus_include_seed
+    include_seed = (
+        args.sample or agent.profile == "jobhunt" or agent.corpus_include_seed
+    )
     docs = build_corpus(
         include_resume=include_seed,
         include_jobs=include_seed,
@@ -382,7 +404,9 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
         rrf_k=args.rrf_k,
         rrf_weights=weights,
         rewriter=build_rewriter(getattr(args, "rewrite", "none")),
-        **({"fixed_recall_k": args.recall_k} if getattr(args, "recall_k", None) else {}),
+        **(
+            {"fixed_recall_k": args.recall_k} if getattr(args, "recall_k", None) else {}
+        ),
     )
 
 

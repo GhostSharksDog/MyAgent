@@ -130,18 +130,21 @@ def reciprocal_rank(ranked: list[Chunk], gold: list[GoldCondition]) -> float:
     return 0.0
 
 
-def ndcg_at_k(ranked: list[Chunk], gold: list[GoldCondition], k: int) -> float:
+def ndcg_at_k(ranked: list[Chunk], gold: list[GoldCondition], k: int, corpus: list[Chunk]) -> float:
     """NDCG@k：带位置衰减的排序质量。
 
     本实现用二元相关性（相关=1，不相关=0），所以 IDCG 是"理想排序下
     前 min(相关块总数, k) 个位置全部命中"的 DCG 值。
+    分母必须包含未召回的相关块；只数实际命中会把漏召回误算为满分。
     """
+    if k < 0:
+        raise ValueError("k 必须大于等于 0")
     dcg = sum(
         1.0 / math.log2(i + 1)
         for i, chunk in enumerate(ranked[:k], start=1)
         if _is_relevant(chunk, gold)
     )
-    n_relevant = min(sum(1 for c in ranked[:k] if _is_relevant(c, gold)), k)
+    n_relevant = sum(1 for c in corpus if _is_relevant(c, gold))
     # 理想情况下前面全是相关块
     ideal_hits = min(n_relevant, k)
     if ideal_hits == 0:
@@ -167,6 +170,7 @@ class QueryResult(BaseModel):
 class EvalReport(BaseModel):
     eval_set: str
     retriever: str
+    metric_version: str = "ndcg-corpus-v2"
     # 管线配置必须随报告一起留档：否则过几天看到一份 JSON 报告，
     # 根本不知道它是哪套配置跑出来的，消融对比也就无从谈起。
     mode: str = ""
@@ -219,7 +223,7 @@ async def evaluate(
         r = recall_at_k(ranked, item.gold, k, corpus)
         p = precision_at_k(ranked, item.gold, k)
         rr = reciprocal_rank(ranked, item.gold)
-        ndcg = ndcg_at_k(ranked, item.gold, k)
+        ndcg = ndcg_at_k(ranked, item.gold, k, corpus)
 
         hit_rank = next((i for i, c in enumerate(ranked, 1) if _is_relevant(c, item.gold)), None)
 

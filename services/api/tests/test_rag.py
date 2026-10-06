@@ -415,16 +415,47 @@ class TestMetrics:
     def test_ndcg_perfect_ranking_is_one(self) -> None:
         gold = [GoldCondition(text_contains="t")]
         ranked = [_chunk("a", "t"), _chunk("b", "t")]
-        assert ndcg_at_k(ranked, gold, 2) == pytest.approx(1.0)
+        assert ndcg_at_k(ranked, gold, 2, ranked) == pytest.approx(1.0)
 
     def test_ndcg_penalizes_lower_rank(self) -> None:
         gold = [GoldCondition(text_contains="t")]
-        high = ndcg_at_k([_chunk("a", "t"), _chunk("b", "x")], gold, 2)
-        low = ndcg_at_k([_chunk("b", "x"), _chunk("a", "t")], gold, 2)
+        corpus = [_chunk("a", "t"), _chunk("b", "x")]
+        high = ndcg_at_k(corpus, gold, 2, corpus)
+        low = ndcg_at_k(list(reversed(corpus)), gold, 2, corpus)
         assert high > low
 
     def test_ndcg_miss_is_zero(self) -> None:
-        assert ndcg_at_k([_chunk("a", "x")], [GoldCondition(text_contains="t")], 1) == 0.0
+        corpus = [_chunk("a", "x")]
+        assert ndcg_at_k(corpus, [GoldCondition(text_contains="t")], 1, corpus) == 0.0
+
+    @pytest.mark.parametrize("include_tail", [True, False])
+    def test_ndcg_missing_relevant_chunk_is_not_perfect(self, include_tail: bool) -> None:
+        corpus = [_chunk("a", "target A"), _chunk("b", "target B"), _chunk("c", "noise")]
+        ranked = [corpus[0], corpus[2]] + ([corpus[1]] if include_tail else [])
+        score = ndcg_at_k(ranked, [GoldCondition(text_contains="target")], 2, corpus)
+        assert score == pytest.approx(0.6131471927654585)
+
+    @pytest.mark.parametrize("k", [1, 2, 5])
+    def test_ndcg_matches_independent_reference(self, k: int) -> None:
+        from itertools import permutations
+
+        from sklearn.metrics import ndcg_score
+
+        corpus = [_chunk(str(i), "target" if i < 3 else "noise") for i in range(5)]
+        gold = [GoldCondition(text_contains="target")]
+        for order in permutations(range(5)):
+            scores = [0] * 5
+            for rank, index in enumerate(order):
+                scores[index] = 5 - rank
+            expected = ndcg_score([[1, 1, 1, 0, 0]], [scores], k=k)
+            assert ndcg_at_k([corpus[i] for i in order], gold, k, corpus) == pytest.approx(expected)
+
+    def test_ndcg_zero_cutoff_and_negative_cutoff(self) -> None:
+        corpus = [_chunk("a", "target")]
+        gold = [GoldCondition(text_contains="target")]
+        assert ndcg_at_k(corpus, gold, 0, corpus) == 0
+        with pytest.raises(ValueError, match="k"):
+            ndcg_at_k(corpus, gold, -1, corpus)
 
     def test_gold_conditions_are_and(self) -> None:
         """同一条件内的多个字段是 AND 语义。"""
@@ -435,6 +466,28 @@ class TestMetrics:
 
 
 class TestEvaluateHarness:
+    async def test_ndcg_uses_full_retriever_corpus(self) -> None:
+        corpus = [_chunk("a", "target A"), _chunk("b", "target B"), _chunk("c", "noise")]
+
+        class PartialRetriever:
+            chunks = corpus
+
+            def stats(self):
+                return {"embedder": "synthetic"}
+
+            async def aretrieve(self, query, k):
+                return [
+                    SearchHit(chunk=corpus[0], score=2, rank=1),
+                    SearchHit(chunk=corpus[2], score=1, rank=2),
+                ]
+
+        queries = EvalSet(
+            queries=[EvalQuery(query="target", gold=[GoldCondition(text_contains="target")])]
+        )
+        report = await evaluate(PartialRetriever(), queries, k=2)
+        assert report.metrics["ndcg"] == pytest.approx(0.6131471927654585)
+        assert report.metric_version == "ndcg-corpus-v2"
+
     def _retriever(self):
         from app.rag.retriever import Retriever
 
