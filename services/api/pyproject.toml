@@ -11,6 +11,8 @@ dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "sse-starlette>=2.1",
+    # SSE 断开时用取消作用域保护摘要收尾，避免持久化再次被取消。
+    "anyio>=4.0",
     # starlette 是 fastapi 的传递依赖，但 main.py **直接 import 了它的
     # starlette.exceptions.HTTPException（和 fastapi 那个是父子关系，
     # 捕获方向搞反就会静默失效 —— 见 mount_frontend 的注释）。

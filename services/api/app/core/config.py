@@ -433,6 +433,33 @@ class SessionSettings(BaseSettings):
     max_sessions: int = Field(default=500, ge=1)
 
 
+class RunHistorySettings(BaseSettings):
+    """运行摘要默认只存内存；持久化必须显式开启，切换需重启。
+
+    不记录输入、答案、工具参数/结果或模型生成的任务描述。
+    有界保留避免演示服务一直运行时积累无限记录；SQLite 只用于单机单进程。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="RUN_HISTORY_",
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+    backend: Literal["memory", "sql"] = "memory"
+    path: str = str(PROJECT_ROOT / "data" / "run-history.db")
+    max_records: int = Field(default=200, ge=1, le=10000)
+    max_events: int = Field(default=256, ge=1, le=2000)
+
+    @field_validator("path")
+    @classmethod
+    def _resolve_path(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("RUN_HISTORY_PATH 不能为空，请指定 SQLite 文件路径")
+        path = Path(value).expanduser()
+        return str(path if path.is_absolute() else (PROJECT_ROOT / path).resolve())
+
+
 class MemorySettings(BaseSettings):
     """记忆模块配置。
 
@@ -624,6 +651,7 @@ class Settings(BaseSettings):
     rag: RagSettings = Field(default_factory=RagSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
+    run_history: RunHistorySettings = Field(default_factory=RunHistorySettings)
     tasks: TaskSettings = Field(default_factory=TaskSettings)
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)

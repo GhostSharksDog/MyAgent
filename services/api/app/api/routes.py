@@ -17,13 +17,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 
 from app import __version__
 from app.agent.events import AgentEvent, EventType
@@ -31,6 +34,7 @@ from app.agent.loop import Agent
 from app.agent.memory import ConversationMemory
 from app.agent.multi import SupervisorAgent
 from app.agent.planning import PlanAndExecuteAgent
+from app.agent.runtime import RunContext
 from app.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -44,6 +48,7 @@ from app.core.telemetry import METRICS, record_agent_event
 from app.llm.tokens import tokenizer_name
 from app.llm.types import ChatMessage
 from app.rag.backend import describe_knowledge_backend
+from app.runs.history import RunHistory, RunRecord, RunRecorder
 from app.session.models import Session
 from app.session.store import SessionStore
 
@@ -356,6 +361,68 @@ def _raise_429(bucket: TokenBucket, reason: str) -> None:
 # ============================================================
 # 对话（非流式）
 # ============================================================
+async def _start_run(
+    request: Request, payload: ChatRequest, session: Session | None, *, replay: bool = False
+) -> tuple[RunHistory, RunRecorder, RunContext]:
+    settings = request.app.state.settings
+    ledger = request.app.state.run_history
+    recorder = RunRecorder(
+        RunRecord(
+            mode=payload.mode,
+            session_id=session.id if session else None,
+            source="demo_replay" if replay else "agent",
+        ),
+        ledger.settings,
+        request.app.state.tools.names(),
+    )
+    limit = {
+        "react": 0,
+        "plan": settings.agent.plan_max_total_tokens,
+        "multi": settings.agent.multi_max_total_tokens,
+    }[payload.mode]
+    context = RunContext.create(settings.agent, token_limit=limit)
+    context.observer = recorder.observe_runtime
+    try:
+        await ledger.save(recorder.record)
+    except Exception as exc:
+        logger.exception("运行记录初始化失败")
+        raise HTTPException(
+            503, "无法创建运行摘要。请检查 RUN_HISTORY_PATH 的写权限或切回 memory 后重启"
+        ) from exc
+    logger.info("开始运行 run_id=%s mode=%s", recorder.record.run_id, payload.mode)
+    return ledger, recorder, context
+
+
+async def _finish_run(ledger: RunHistory, recorder: RunRecorder, reason: str | None = None) -> bool:
+    # SSE 断开由 AnyIO 取消作用域驱动；shield 保证摘要收尾仍能完成。
+    with anyio.CancelScope(shield=True):
+        try:
+            await ledger.save(recorder.finish(reason))
+            logger.info(
+                "运行结束 run_id=%s reason=%s",
+                recorder.record.run_id,
+                recorder.record.stopped_reason,
+            )
+            return True
+        except Exception:
+            logger.exception("运行摘要保存失败，run_id=%s", recorder.record.run_id)
+            return False
+
+
+async def _finish_unstarted_run(ledger: RunHistory, recorder: RunRecorder) -> None:
+    if recorder.record.finished_at is None:
+        await _finish_run(ledger, recorder, "cancelled")
+
+
+def _run_kwargs(agent: Any, context: RunContext) -> dict[str, Any]:
+    # 保持注入式事件源与离线回放兼容；真实三种内核共享同一个上下文。
+    return (
+        {"run_context": context}
+        if isinstance(agent, (Agent, PlanAndExecuteAgent, SupervisorAgent))
+        else {}
+    )
+
+
 @router.post("/api/chat", response_model=ChatResponse, summary="对话（非流式）")
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     await _enforce_rate_limit(request, payload)
@@ -364,7 +431,30 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     # 会话模式以服务端历史为准，忽略客户端传来的 history。
     # 这是刻意的：两套历史同时生效必然导致重复或错序。
     history = [] if session is not None else _to_history(payload.history)
-    result = await agent.run(payload.message, history)
+    ledger, recorder, context = await _start_run(request, payload, session)
+    try:
+        result = await agent.run(payload.message, history, **_run_kwargs(agent, context))
+        if not recorder.runtime_observed:
+            for call in result.tool_calls:
+                recorder.observe(AgentEvent(type=EventType.TOOL_CALL, tool_name=call.get("name")))
+            recorder.observe(
+                AgentEvent(
+                    type=EventType.DONE,
+                    steps_used=result.steps_used,
+                    stopped_reason=result.stopped_reason,
+                    usage=result.usage,
+                    usage_complete=result.usage_complete,
+                    context_trimmed=result.context_trimmed,
+                    context_tokens=result.context_tokens,
+                )
+            )
+    except asyncio.CancelledError:
+        await _finish_run(ledger, recorder, "cancelled")
+        raise
+    except Exception:
+        await _finish_run(ledger, recorder, "error")
+        raise
+    record_saved = await _finish_run(ledger, recorder)
 
     if result.answer and result.stopped_reason == "finished":
         await _persist(
@@ -377,6 +467,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         )
 
     return ChatResponse(
+        run_id=recorder.record.run_id,
+        record_saved=record_saved,
         answer=result.answer,
         steps_used=result.steps_used,
         usage=result.usage,
@@ -409,6 +501,10 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
     agent, session = await _resolve(request, payload)
     store = _get_store(request)
     history = None if session is not None else _to_history(payload.history)
+    replayer = getattr(request.app.state, "replayer", None)
+    ledger, recorder, context = await _start_run(
+        request, payload, session, replay=replayer is not None
+    )
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         final_answer = ""
@@ -421,16 +517,18 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         # 下面的 `async for` 循环体完全不变 —— 同一套事件序列化、同一套指标采集、
         # 同一套持久化。回放之所以可信，正是因为它走的是**完全相同的路径**，
         # 区别只在事件从哪来。这正是一个适配器应该做到的事。
-        replayer = getattr(request.app.state, "replayer", None)
         source = (
             replayer.stream(speed=request.app.state.settings.demo_replay_speed)
             if replayer is not None
-            else agent.run_stream(payload.message, history)
+            else agent.run_stream(payload.message, history, **_run_kwargs(agent, context))
         )
 
         try:
             async with aclosing(source):
                 async for event in source:
+                    if not recorder.runtime_observed:
+                        recorder.observe(event)
+                    event = event.model_copy(update={"run_id": recorder.record.run_id})
                     # 边转发边收集需要持久化的信息。
                     # 不能等流结束再重跑一遍 —— 那会重复调用模型与工具。
                     if event.type is EventType.FINAL:
@@ -444,6 +542,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                         # 持久化它之后，下一轮的历史里才会有"我查过什么"那一行。
                         # 从事件里取而不是重新算一遍 —— Agent 内部才知道完整的调用轨迹。
                         tool_summary = event.tool_summary
+                        event.record_saved = await _finish_run(ledger, recorder)
 
                     # 指标采集放在**消费端**而不是 Agent 内核里：
                     # 内核有 CLI / HTTP / 测试等多种调用方式，让它直接打点会把
@@ -452,6 +551,28 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                     record_agent_event(event, mode=payload.mode)
 
                     yield event.to_sse()
+                    if saw_done:
+                        break
+            if not saw_done:
+                recorder.record.usage_complete = False
+                done = AgentEvent(
+                    type=EventType.DONE,
+                    stopped_reason="error",
+                    usage_complete=False,
+                    run_id=recorder.record.run_id,
+                )
+                done.record_saved = await _finish_run(ledger, recorder, "error")
+                saw_done = True
+                yield AgentEvent(
+                    type=EventType.ERROR,
+                    content="事件流提前结束，请在运行记录中查看摘要",
+                    run_id=recorder.record.run_id,
+                ).to_sse()
+                yield done.to_sse()
+        except asyncio.CancelledError:
+            if not saw_done:
+                await _finish_run(ledger, recorder, "cancelled")
+            raise
         except Exception as exc:
             # 流已经开始后无法改 HTTP 状态码，只能以事件形式告知前端。
             #
@@ -462,11 +583,22 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
             # 而这时流已经开始了，用户只会看到"连接中断"而非真正的错误原因。
             # 正确做法是复用 AgentEvent 自己的序列化 —— 单一事实来源。
             logger.exception("流式对话异常")
-            yield AgentEvent(type=EventType.ERROR, content=f"服务内部错误：{exc}").to_sse()
+            yield AgentEvent(
+                type=EventType.ERROR, content=f"服务内部错误：{exc}", run_id=recorder.record.run_id
+            ).to_sse()
             if not saw_done:
+                saved = await _finish_run(ledger, recorder, "error")
+                saw_done = True
                 yield AgentEvent(
-                    type=EventType.DONE, stopped_reason="error", usage_complete=False
+                    type=EventType.DONE,
+                    stopped_reason="error",
+                    usage_complete=False,
+                    run_id=recorder.record.run_id,
+                    record_saved=saved,
                 ).to_sse()
+        finally:
+            if recorder.record.finished_at is None:
+                await _finish_run(ledger, recorder, "cancelled")
 
         # 持久化放在 `async for` 之外：即使流中途出错，只要已经产出了完整答案
         # 就应当保存（异常分支没有 return，控制流会走到这里）。
@@ -475,4 +607,9 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                 store, session, payload.message, final_answer, total_tokens, tool_summary
             )
 
-    return EventSourceResponse(event_generator(), ping=15)
+    return EventSourceResponse(
+        event_generator(),
+        ping=15,
+        headers={"X-Run-Id": recorder.record.run_id},
+        background=BackgroundTask(_finish_unstarted_run, ledger, recorder),
+    )

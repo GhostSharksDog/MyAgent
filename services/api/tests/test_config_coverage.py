@@ -107,6 +107,7 @@ class TestEnvExampleCoverage:
     _NORMALIZED: ClassVar[dict[str, Callable[[str], object]]] = {
         # 相对路径 → 项目根下的绝对路径（见 Settings._resolve_sqlite_path）
         "DATABASE_URL": staticmethod(lambda raw: Settings._resolve_sqlite_path(raw)),
+        "RUN_HISTORY_PATH": staticmethod(lambda raw: str((PROJECT_ROOT / raw).resolve())),
     }
 
     def test_every_documented_key_is_readable(self) -> None:

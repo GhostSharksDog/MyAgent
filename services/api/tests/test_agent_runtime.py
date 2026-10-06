@@ -83,8 +83,11 @@ def _usage() -> Usage:
     return Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10)
 
 
+@pytest.mark.parametrize("history_backend", ["memory", "sql"])
 async def test_sse_disconnect_cancels_and_waits_for_all_experts(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    history_backend: str,
 ) -> None:
     from app.api.routes import chat_stream
     from app.api.schemas import ChatRequest
@@ -103,6 +106,13 @@ async def test_sse_disconnect_cancels_and_waits_for_all_experts(
     app.state.tools = ToolRegistry()
     app.state.sessions = InMemorySessionStore()
     app.state.settings = Settings(agent=AgentSettings(_env_file=None))
+    from app.runs.history import RunHistory
+
+    history_settings = app.state.settings.run_history.model_copy(
+        update={"backend": history_backend, "path": str(tmp_path / "runs.db")}
+    )
+    app.state.run_history = RunHistory(history_settings)
+    await app.state.run_history.ensure_ready()
     scope = {
         "type": "http",
         "method": "POST",
@@ -123,6 +133,16 @@ async def test_sse_disconnect_cancels_and_waits_for_all_experts(
     await asyncio.wait_for(response(scope, receive, send), timeout=2)
     assert llm.active == 0
     assert llm.closed == 3
+    records = app.state.run_history.list()
+    assert len(records) == 1
+    assert records[0].stopped_reason == "cancelled"
+    assert not records[0].usage_complete
+    assert records[0].usage.total_tokens > 0  # 路由用量在专家取消后仍保留。
+    if history_backend == "sql":
+        restarted = RunHistory(history_settings)
+        await restarted.ensure_ready()
+        assert restarted.list()[0].stopped_reason == "cancelled"
+        assert restarted.list()[0].usage.total_tokens == records[0].usage.total_tokens
 
 
 @pytest.mark.parametrize("mode", ["react", "plan", "multi"])

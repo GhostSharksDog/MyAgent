@@ -32,6 +32,7 @@ from app.api.files import router as files_router
 from app.api.metrics import router as metrics_router
 from app.api.models import router as models_router
 from app.api.routes import router
+from app.api.runs import router as runs_router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
@@ -39,6 +40,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.core.telemetry import METRICS, set_trace_id
 from app.demo.replay import build_replayer
+from app.runs.history import RunHistory
 from app.session.factory import build_session_store
 from app.tasks.factory import build_task_queue
 
@@ -69,6 +71,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 换模型（POST /api/models/{id}/activate）要重跑完全相同的装配，
     # 所以它不能留在这里手写一遍 —— 两份迟早漂移，而漂移的表现是
     # "界面切了模型，但某条路径还在用旧的"。
+    run_history = RunHistory(settings.run_history)
+    await run_history.ensure_ready()
     stack = build_agent_stack(settings)
 
     # 会话存储：`auto` 会优先连真 Redis，失败则降级到内存（并打 WARNING）
@@ -93,6 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sessions = sessions
     app.state.tasks = tasks
     app.state.replayer = replayer
+    app.state.run_history = run_history
 
     logger.info(
         "装配完成：profile=%s，model=%s，工具 %d 个（%s），max_steps=%d，记忆=%s，会话=%s，任务队列=%s",
@@ -253,7 +258,7 @@ if _cors_origins:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Trace-Id"],
+        expose_headers=["X-Trace-Id", "X-Run-Id"],
     )
 elif _app_host_is_loopback:
     app.add_middleware(
@@ -264,7 +269,7 @@ elif _app_host_is_loopback:
         allow_headers=["*"],
         # 前端要能读到 trace id，必须显式暴露 —— CORS 默认不允许 JS 读取
         # 自定义响应头，不暴露的话前端拿到的永远是 null
-        expose_headers=["X-Trace-Id"],
+        expose_headers=["X-Trace-Id", "X-Run-Id"],
     )
 else:
     logger.warning(
@@ -274,6 +279,7 @@ else:
     )
 
 app.include_router(router)
+app.include_router(runs_router)
 app.include_router(sessions_router)
 app.include_router(tasks_router)
 app.include_router(metrics_router)

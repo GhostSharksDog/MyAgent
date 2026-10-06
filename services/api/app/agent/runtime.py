@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -41,6 +41,9 @@ class RunContext:
     context_trimmed: bool = False
     context_tokens: int = 0
     tool_trace: list[dict[str, object]] = field(default_factory=list)
+    observer: Callable[[AgentEvent, bool, RunContext], None] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @classmethod
     def create(cls, settings: AgentSettings, *, token_limit: int = 0) -> RunContext:
@@ -96,6 +99,12 @@ class RunContext:
             )
 
     def decorate(self, event: AgentEvent, *, root: bool) -> AgentEvent:
+        decorated = self._decorate(event, root=root)
+        if self.observer is not None:
+            self.observer(decorated, root, self)
+        return decorated
+
+    def _decorate(self, event: AgentEvent, *, root: bool) -> AgentEvent:
         if event.type is not EventType.DONE:
             return event
         return event.model_copy(
@@ -218,7 +227,10 @@ async def guarded_stream(
                 break
     except StopAsyncIteration:
         # 无终态的生成器不是成功，调用方必须能结束等待并知道结果不完整。
-        yield AgentEvent(type=EventType.ERROR, content="执行流提前结束；请检查服务日志后重试。")
+        yield context.decorate(
+            AgentEvent(type=EventType.ERROR, content="执行流提前结束；请检查服务日志后重试。"),
+            root=root,
+        )
         yield context.decorate(AgentEvent(type=EventType.DONE, stopped_reason="error"), root=root)
     except RunBudgetExceeded as exc:
         token = _current.set(context)
@@ -233,14 +245,19 @@ async def guarded_stream(
                     conclusions.append(f"步骤 {item['id']}：{item['result']}")
                 elif item.get("status") in {"pending", "running"}:
                     item.update(status="skipped", error=str(exc))
-            yield AgentEvent(type=EventType.PLAN_STEP, plan=plan, content=str(exc), step=step)
+            yield context.decorate(
+                AgentEvent(type=EventType.PLAN_STEP, plan=plan, content=str(exc), step=step),
+                root=root,
+            )
         partial = "\n\n".join(conclusions) or "".join(parts)
         if not saw_final:
             answer = f"任务未完成：{exc}"
             if partial:
                 answer += f"\n\n已获得的部分结果：\n{partial}"
             yield AgentEvent(type=EventType.FINAL, content=answer, step=step)
-        yield AgentEvent(type=EventType.ERROR, content=str(exc), step=step)
+        yield context.decorate(
+            AgentEvent(type=EventType.ERROR, content=str(exc), step=step), root=root
+        )
         yield context.decorate(
             AgentEvent(
                 type=EventType.DONE,
@@ -258,7 +275,10 @@ async def guarded_stream(
             await source.aclose()  # type: ignore[attr-defined]
         finally:
             _current.reset(token)
-        yield AgentEvent(type=EventType.ERROR, content=f"执行失败：{exc}；请检查日志后重试。")
+        yield context.decorate(
+            AgentEvent(type=EventType.ERROR, content=f"执行失败：{exc}；请检查日志后重试。"),
+            root=root,
+        )
         yield context.decorate(AgentEvent(type=EventType.DONE, stopped_reason="error"), root=root)
         return
     finally:

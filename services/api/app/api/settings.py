@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,6 +46,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 # 允许通过界面修改的键。**白名单而不是黑名单** —— 黑名单意味着
 # 以后新增的任何配置项都默认可以被界面改，包括那些不该被改的。
 EDITABLE_KEYS = {
+    "RUN_HISTORY_BACKEND",
     "AGENT_PLAN_MAX_TOTAL_TOKENS",
     "AGENT_MULTI_MAX_TOTAL_TOKENS",
     "LLM_API_KEY",
@@ -197,10 +199,19 @@ class AgentView(BaseModel):
     corpus_doc_count: int = 0
 
 
+class RunHistoryView(BaseModel):
+    backend: str
+    active_backend: str
+    restart_required: bool
+    max_records: int
+    max_events: int
+
+
 class SettingsView(BaseModel):
     llm: LLMView
     agent: AgentView
     env_path: str
+    run_history: RunHistoryView | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -230,6 +241,7 @@ class SettingsUpdate(BaseModel):
     file_allow_secrets: bool | None = None
     plan_max_total_tokens: int | None = Field(default=None, ge=0)
     multi_max_total_tokens: int | None = Field(default=None, ge=0)
+    run_history_backend: Literal["memory", "sql"] | None = None
 
 
 class TestConnectionResult(BaseModel):
@@ -271,13 +283,23 @@ def _current_view() -> SettingsView:
 
 
 @router.get("", response_model=SettingsView, summary="读取当前设置")
-async def get_settings_view() -> SettingsView:
+async def get_settings_view(request: Request) -> SettingsView:
     """读取当前设置。**API Key 只返回掩码。**
 
     另外附上"知识库实际加载了多少文档" —— 用户改完语料配置后
     最想知道的就是"生效了没有"，而让他去翻日志不算答案。
     """
     view = _current_view()
+    configured = get_settings().run_history
+    active = getattr(request.app.state, "run_history", None)
+    active_backend = active.backend if active is not None else configured.backend
+    view.run_history = RunHistoryView(
+        backend=configured.backend,
+        active_backend=active_backend,
+        restart_required=configured.backend != active_backend,
+        max_records=active.settings.max_records if active else configured.max_records,
+        max_events=active.settings.max_events if active else configured.max_events,
+    )
     try:
         from app.rag.factory import get_shared_retriever
 
@@ -338,13 +360,15 @@ def _validate_paths_sync(
 async def update_settings(payload: SettingsUpdate, request: Request) -> SettingsView:
     """更新设置并写入 `.env`。
 
-    写完之后**立即生效**（清缓存 + 重建索引），不需要重启服务。
-    改完还要用户手动重启，那和让他直接编辑 .env 没有区别。
+    能力与预算写完立即生效（清缓存 + 重建索引）。运行记录存储后端
+    跟随进程生命周期，切换需重启；响应分别报告配置与实际后端。
     """
     import asyncio
 
     s = get_settings()
     updates: dict[str, str] = {}
+    if payload.run_history_backend is not None:
+        updates["RUN_HISTORY_BACKEND"] = payload.run_history_backend
     for name in ("plan_max_total_tokens", "multi_max_total_tokens"):
         value = getattr(payload, name)
         if value is not None:
@@ -414,7 +438,7 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
             )
             request.app.state.settings = current.model_copy(update={"agent": budget_settings})
 
-    return await get_settings_view()
+    return await get_settings_view(request)
 
 
 @router.post("/test", response_model=TestConnectionResult, summary="测试模型连通性")

@@ -51,6 +51,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    run_id: str | None = None
+    record_saved: bool = True
     answer: str
     steps_used: int
     usage: Usage

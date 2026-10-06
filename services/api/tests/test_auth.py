@@ -96,7 +96,16 @@ class TestPublicPaths:
         assert is_public_path(path)
 
     @pytest.mark.parametrize(
-        "path", ["/api/chat", "/api/files/content", "/metrics", "/docs", "/openapi.json"]
+        "path",
+        [
+            "/api/chat",
+            "/api/files/content",
+            "/api/runs",
+            "/api/runs/one",
+            "/metrics",
+            "/docs",
+            "/openapi.json",
+        ],
     )
     def test_protected(self, path: str) -> None:
         assert not is_public_path(path)
