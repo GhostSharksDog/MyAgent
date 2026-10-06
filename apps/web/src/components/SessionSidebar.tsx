@@ -124,7 +124,7 @@ export function SessionSidebar({
                 type="button"
                 className="btn btn--ghost ws__btn ws__btn--danger"
                 onClick={onCloseFolder}
-                title="关闭工作区（Agent 将不能再读写文件）"
+                title="关闭工作区（Agent 将不能再访问文件）"
               >
                 关闭
               </button>

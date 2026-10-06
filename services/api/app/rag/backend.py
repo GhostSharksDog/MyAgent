@@ -230,12 +230,32 @@ class RemoteKnowledgeBackend:
         消耗都会明显上升。这是跨进程调用最容易忽视的性能陷阱：
         把本地函数调用换成 HTTP 之后，延迟从微秒变成毫秒，
         而连接复用是这个量级差里最容易拿回来的一部分。
+
+        【`trust_env=False` 不是优化，是修一个会给出错误诊断的 bug】
+
+        httpx 默认 `trust_env=True`，会去读**系统级**代理配置。在 Windows 上
+        那意味着注册表里的 `ProxyEnable/ProxyServer` —— 实测（开着本地代理时）：
+
+            urllib.request.getproxies() -> {'http': 'http://127.0.0.1:7890', ...}
+            连 http://127.0.0.1:1（本机一个没人监听的端口）
+              默认 trust_env=True : httpx.ReadTimeout  ← 请求被塞给了代理
+              trust_env=False     : httpx.ConnectTimeout ← 正确：直连被拒
+
+        两种异常在这段代码里走的是**不同的分支、给出不同的结论**：
+        `ReadTimeout` 被归类成"服务可能过载"，于是运维会去查 RAG 服务为什么慢，
+        而真相是这个请求根本没到 RAG 服务那里 —— 它去了桌面代理。
+
+        这不是配置问题而是**边界问题**：RAG 服务是部署内部的依赖
+        （compose 里它是 `http://rag:8001`），内部调用不该经过用户桌面的代理。
+        （对外部 API 的调用不这么做 —— 那里的代理往往是用户**需要**的，
+        见 `llm/client.py` 的说明。）
         """
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=self._timeout,
                 headers={"User-Agent": "legacy-agent/0.1"},
+                trust_env=False,
             )
         return self._client
 

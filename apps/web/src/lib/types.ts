@@ -353,6 +353,10 @@ export interface AgentSettingsView {
   corpus_paths: string[]
   corpus_include_seed: boolean
   file_max_chars: number
+  /** 是否允许 Agent 写文件（T23）。默认 false —— 写是不可撤销的动作。 */
+  file_write_enabled: boolean
+  /** 是否允许文件工具碰 `.env` / 私钥这类敏感文件名。默认 false。 */
+  file_allow_secrets: boolean
   /** 知识库实际加载了多少文档 —— 改完配置最想知道的就是"生效了没有" */
   corpus_loaded: boolean
   corpus_doc_count: number
@@ -377,6 +381,9 @@ export interface SettingsUpdatePayload {
   corpus_paths?: string[]
   corpus_include_seed?: boolean
   file_max_chars?: number
+  /** 写权限（T23）。不传 = 不改动。 */
+  file_write_enabled?: boolean
+  file_allow_secrets?: boolean
 }
 
 export interface TestConnectionResult {

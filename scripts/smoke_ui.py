@@ -28,6 +28,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import httpx
+
 EDGE_CANDIDATES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -57,6 +59,22 @@ def find_browser() -> str | None:
 def http_json(url: str) -> object:
     with urllib.request.urlopen(url, timeout=5) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _server_flag(name: str) -> object:
+    """读服务端当前的一项 agent 配置（用于断言"界面反映的是真实配置"）。"""
+    import os
+
+    headers = {}
+    key = os.environ.get("SECURITY_API_KEY", "").strip()
+    if key:
+        headers["X-API-Key"] = key
+    try:
+        with httpx.Client(base_url="http://127.0.0.1:8000", timeout=10.0) as api:
+            return api.get("/api/settings", headers=headers).json()["agent"].get(name)
+    except (httpx.HTTPError, KeyError, ValueError):
+        # 读不到就不硬失败 —— 这一项只是"顺带核对"，界面渲染的检查在别处
+        return None
 
 
 class Cdp:
@@ -274,6 +292,50 @@ def main() -> int:
         check(
             cdp.eval("!!document.querySelector('.model-form input[type=range]')"),
             "温度滑块在",
+        )
+
+        print("\n=== 6.5 工作区页：写权限开关必须可见（T23）===")
+        # 这是"Agent 能不能改我的文件"这个问题的**唯一界面答案** ——
+        # 用户问过它（"为什么我的 agent 还不能写文件"），所以它必须真的渲染出来。
+        cdp.eval(
+            """
+            (() => {
+              const item = [...document.querySelectorAll('.dialog__nav .navitem')]
+                .find(b => b.textContent.includes('工作区'));
+              if (item) item.click();
+              return !!item;
+            })()
+            """
+        )
+        time.sleep(0.6)
+        check(
+            cdp.eval("document.body.textContent.includes('允许 Agent 写入文件')"),
+            "「允许 Agent 写入文件」开关在页面上",
+        )
+        check(
+            cdp.eval("document.body.textContent.includes('敏感文件名')"),
+            "敏感文件名开关也在（它是另一个独立决定）",
+        )
+        # 【这条断言不能写死 false —— 第一次就是这么写错的】
+        # 我把服务端起在 AGENT_FILE_WRITE_ENABLED=true 上，界面**正确地**勾上了它，
+        # 而检查却在断言"必须是未勾选"，于是报了 FAIL —— 失败的是检查，不是界面。
+        # 真正该验的是**界面与服务端一致**：这既证明开关渲染出来了，
+        # 也证明它接到了真实配置上（而不是一个点了没反应的控件）。
+        expected = _server_flag("file_write_enabled")
+        checked_now = cdp.eval(
+            """
+            (() => {
+              const labels = [...document.querySelectorAll('.settings__field--check')];
+              const box = labels.find(l => l.textContent.includes('允许 Agent 写入文件'))
+                ?.querySelector('input[type=checkbox]');
+              return box ? box.checked : null;
+            })()
+            """
+        )
+        check(
+            checked_now is not None and checked_now == expected,
+            "写权限复选框与服务端配置一致（不是写死的默认值）",
+            f"界面={checked_now} 服务端={expected}",
         )
 
         print("\n=== 7. 关闭对话框 ===")

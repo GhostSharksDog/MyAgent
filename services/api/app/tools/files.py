@@ -2,7 +2,7 @@
 
 【这个模块最重要的部分不是功能，是那个 `_resolve` 函数】
 
-给 Agent 文件访问权，等于把一个"能读能写"的程序交给模型驱动。风险不在
+给 Agent 文件访问权，等于把一个"能读、还可能能写"的程序交给模型驱动。风险不在
 "模型会不会故意作恶"，而在三个更现实的路径：
 
 1. **提示词注入**。用户让 Agent 看一个文件夹，里面某个文件写着
@@ -132,12 +132,20 @@ def _resolve(rel: str, *, must_exist: bool = True) -> Path:
     return resolved
 
 
-def _check_secret(path: Path, *, allow: bool) -> None:
+def _check_secret(path: Path, *, allow: bool, verb: str = "读取") -> None:
+    """拒绝**读或写**敏感文件名的文件。
+
+    写也要拦（T23）：黑名单里的 `.env` / 私钥 / `.git-credentials` 一旦能被
+    Agent 改写，就不只是"信息流出去"的问题了 —— 它可以把配置改成指向别处、
+    或把凭据替换掉。而"改配置"这件事有专门的入口（设置界面 → 写 `.env`），
+    不需要模型代劳。
+    """
     if allow:
         return
     if path.name in SECRET_NAMES or path.suffix.lower() in SECRET_SUFFIXES:
+        verb_cn = "写入" if verb == "写入" else "读取"
         raise FileAccessError(
-            f"拒绝读取敏感文件 {path.name}。"
+            f"拒绝{verb_cn}敏感文件 {path.name}。"
             f"如果确实需要，请在配置中设置 AGENT_FILE_ALLOW_SECRETS=true。"
         )
 
@@ -180,6 +188,30 @@ class GrepParams(BaseModel):
     path: str = Field(default=".", description="搜索范围，相对工作区根目录")
     include: str = Field(default="", description="只搜索匹配此 glob 的文件，如 '*.py'")
     limit: int = Field(default=50, ge=1, le=200, description="最多返回多少条匹配")
+
+
+class WriteFileParams(BaseModel):
+    path: str = Field(description="要写入的文件，相对工作区根目录。例如 notes/summary.md")
+    content: str = Field(description="要写入的**完整内容**（不是片段）。")
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "目标文件已存在时是否覆盖。默认 false —— 已存在会失败，"
+            "这是为了让「我想新建」与「我要改掉它」成为两个不同的动作。"
+            "要局部修改已有文件请用 edit_file。"
+        ),
+    )
+
+
+class EditFileParams(BaseModel):
+    path: str = Field(description="要修改的文件，相对工作区根目录")
+    old_text: str = Field(
+        description=(
+            "要被替换的原文，**必须与文件内容逐字符一致**（含缩进与换行）。"
+            "为保证唯一性，请带上足够长的上下文。"
+        )
+    )
+    new_text: str = Field(description="替换成的新文本。传空字符串表示删除这段原文。")
 
 
 # ============================================================
@@ -256,7 +288,7 @@ class ReadFileTool(Tool):
         settings = get_settings()
         try:
             target = _resolve(p.path)
-            _check_secret(target, allow=settings.agent.profile == "jobhunt")
+            _check_secret(target, allow=settings.agent.file_allow_secrets)
         except FileAccessError as exc:
             return ToolResult.failure(str(exc))
 
@@ -356,7 +388,8 @@ class GrepTool(Tool):
             return ToolResult.failure(f"正则表达式无效：{exc}")
 
         settings = get_settings()
-        allow_secrets = settings.agent.profile == "jobhunt"
+        # 用配置项而不是 profile：见 config.AgentSettings.file_allow_secrets 的说明
+        allow_secrets = settings.agent.file_allow_secrets
         hits: list[str] = []
         scanned = 0
         skipped = 0
@@ -396,17 +429,193 @@ class GrepTool(Tool):
         return ToolResult.success(out)
 
 
-def build_file_tools() -> list[Tool]:
+def build_file_tools(include_write: bool = False) -> list[Tool]:
     """文件工具集。**未配置工作区根目录时返回空列表。**
 
     返回空列表（而不是返回一堆会报错的工具）是刻意的：
     工具列表是给模型看的"我能做什么"，列出一堆注定失败的工具
     只会诱导模型去调用它们，然后拿到一串错误 —— 白白消耗步数与 token。
     **能力不存在时就不该出现在菜单上。**
+
+    `include_write` 默认 **False**（T23）：写文件是这台机器上**不可撤销**的动作 ——
+    没有版本控制时，Agent 改错一个文件就是真的改错了。所以它必须由用户
+    显式开启（`AGENT_FILE_WRITE_ENABLED=true` 或设置界面里的开关），
+    而不是"配了工作区就顺便能写"。这条与本项目其它默认值同一条纪律：
+    **默认值决定没读文档的人会得到什么，那必须是最无害的那个。**
     """
     if workspace_root() is None:
         logger.info(
             "未配置 AGENT_WORKSPACE_ROOT，文件工具未加载。在设置界面里指定一个目录即可启用。"
         )
         return []
-    return [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]
+    tools: list[Tool] = [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]
+    if include_write:
+        tools.extend([WriteFileTool(), EditFileTool()])
+    return tools
+
+
+# ============================================================
+# 写工具（T23）—— 默认不加载，见 build_file_tools 的说明
+# ============================================================
+
+#: 单次写入的字符上限。
+#:
+#: 这不是磁盘配额，而是**给"模型一次吐出的内容"设一个理智上限**：
+#: 模型自己的 max_tokens 已经在几千量级，所以这个值实际上不会碰到 ——
+#: 它防的是"循环里把某个变量喂进来导致写了一个巨大的东西"这类意外。
+#: 取 200k（约 600KB UTF-8）是为了不挡住"生成一份长文档"这种正当用途。
+MAX_WRITE_CHARS = 200_000
+
+#: `edit_file` 能处理的文件大小上限（字节）。
+#:
+#: 编辑要先把整个文件读进内存并做精确匹配，超大文件既慢又容易误判。
+#: 超过就明确拒绝，并让模型改用别的方式（分块读取后 write_file 重写）。
+MAX_EDIT_BYTES = 2_000_000
+
+
+class WriteFileTool(Tool):
+    name = "write_file"
+    description = (
+        "在工作区内**新建**或（显式允许时）覆盖一个文本文件。"
+        "适用于：生成报告、保存分析结果、创建配置文件与示例代码。"
+        "默认不覆盖已存在的文件；要局部修改已有文件请用 edit_file，"
+        "要覆盖必须显式传 overwrite=true。"
+    )
+    params_model = WriteFileParams
+    # 【有副作用的工具必须串行】见 base.Tool.serial 的说明：
+    # 两个协程交错地写同一个文件，结果是不可复现的，而且只在
+    # "模型一次吐出多个调用"时出现 —— 那正是最难查的一类 bug。
+    serial = True
+
+    async def run(self, params: BaseModel) -> ToolResult:
+        p = WriteFileParams.model_validate(params.model_dump())
+        settings = get_settings()
+
+        if len(p.content) > MAX_WRITE_CHARS:
+            return ToolResult.failure(
+                f"内容太长（{len(p.content)} 字符，上限 {MAX_WRITE_CHARS}）。"
+                f"请分成多个文件，或先写主体再追加细节。"
+            )
+
+        try:
+            # must_exist=False：新建时文件还不存在，但路径仍要过边界校验
+            target = _resolve(p.path, must_exist=False)
+            _check_secret(target, allow=settings.agent.file_allow_secrets, verb="写入")
+        except FileAccessError as exc:
+            return ToolResult.failure(str(exc))
+
+        if target.is_dir():
+            return ToolResult.failure(f"{p.path!r} 是一个目录，不能写入。")
+
+        existed = target.is_file()
+        old_size = target.stat().st_size if existed else 0
+        if existed and not p.overwrite:
+            return ToolResult.failure(
+                f"{p.path!r} 已存在（{old_size} 字节），未做任何改动。"
+                f"要**局部修改**请用 edit_file（更安全，只替换你指定的那段）；"
+                f"要**整体覆盖**请在参数里显式传 overwrite=true。"
+            )
+
+        try:
+            # 父目录不存在时一并创建：让模型先说"写 notes/2026/summary.md"
+            # 再因为目录不存在而失败，只会浪费一轮往返。
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # newline="\n"：不让 Windows 把 \n 翻译成 \r\n。
+            # 生成的是给人看、也常被 git 管理的文本，换行必须**跨平台一致** ——
+            # 否则同一段内容在不同机器上产出不同的字节，diff 会整篇变红。
+            target.write_text(p.content, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            return ToolResult.failure(f"写入 {p.path!r} 失败：{exc}")
+
+        size = target.stat().st_size
+        lines = p.content.count("\n") + (1 if p.content and not p.content.endswith("\n") else 0)
+        verb = "已覆盖" if existed else "已创建"
+        detail = f"（原 {old_size} 字节 → 新 {size} 字节）" if existed else f"（{size} 字节）"
+        logger.info("文件工具写入：%s %s", verb, target)
+        return ToolResult.success(f"{verb} {_rel(target)}{detail}，{lines} 行。")
+
+
+class EditFileTool(Tool):
+    name = "edit_file"
+    description = (
+        "在已有文件里**精确替换**一段文本（比整体重写安全，改动最小）。"
+        "old_text 必须与文件内容逐字符一致；它在文件中出现多次时会失败，"
+        "所以请带上足够长的上下文让它唯一。"
+    )
+    params_model = EditFileParams
+    serial = True
+
+    async def run(self, params: BaseModel) -> ToolResult:
+        p = EditFileParams.model_validate(params.model_dump())
+        settings = get_settings()
+
+        # 【为什么拒绝空 old_text】
+        # 空串"在文件里出现了无数次"，任何基于它的替换都是任意的 ——
+        # 与其猜一个位置（文件开头？结尾？），不如让模型说清楚要改哪一段。
+        if not p.old_text:
+            return ToolResult.failure(
+                "old_text 不能为空。要新建文件请用 write_file；"
+                "要插入内容，请以它**前面或后面的原文**作为 old_text 一起替换。"
+            )
+        if p.old_text == p.new_text:
+            return ToolResult.failure("old_text 与 new_text 相同，没有需要修改的内容。")
+
+        try:
+            target = _resolve(p.path)  # must_exist=True：编辑的对象必须已存在
+            _check_secret(target, allow=settings.agent.file_allow_secrets, verb="写入")
+        except FileAccessError as exc:
+            return ToolResult.failure(str(exc))
+
+        if not target.is_file():
+            return ToolResult.failure(f"{p.path!r} 不是文件。要新建请用 write_file。")
+
+        size = target.stat().st_size
+        if size > MAX_EDIT_BYTES:
+            return ToolResult.failure(
+                f"{p.path!r} 有 {size} 字节，超过精确编辑的上限（{MAX_EDIT_BYTES}）。"
+                f"请先用 grep 定位、read_file 读取相关片段，再用 write_file 重写整个文件。"
+            )
+
+        try:
+            raw = target.read_bytes()
+        except OSError as exc:
+            return ToolResult.failure(f"无法读取 {p.path!r}：{exc}")
+        if b"\x00" in raw[:4096]:
+            return ToolResult.failure(f"{p.path!r} 看起来是二进制文件，无法作为文本编辑。")
+
+        text = raw.decode("utf-8", errors="replace")
+        occurrences = text.count(p.old_text)
+        if occurrences == 0:
+            return ToolResult.failure(
+                f"在 {p.path!r} 里没有找到 old_text。请先用 read_file 读取原文核对 —— "
+                f"缩进、全角/半角标点、换行都必须完全一致（复制粘贴回来最保险）。"
+            )
+        if occurrences > 1:
+            return ToolResult.failure(
+                f"old_text 在 {p.path!r} 里出现了 {occurrences} 次，无法确定改哪一处。"
+                f"请**扩大上下文**（把前后几行一起放进 old_text）让它唯一。"
+            )
+
+        updated = text.replace(p.old_text, p.new_text)
+        if len(updated) > MAX_WRITE_CHARS:
+            return ToolResult.failure(
+                f"替换后文件将达到 {len(updated)} 字符，超过上限（{MAX_WRITE_CHARS}）。"
+            )
+        try:
+            # 【`newline=""` 是"原样写回"，不是"用某种换行"】
+            # 文件是按字节读出再解码的，所以 `updated` 里已经带着原文的换行风格
+            # （`\r\n` 或 `\n`）。此时：
+            #   newline="\r\n" → Python 会把每个 `\n` 都翻译一遍，
+            #                    于是 `\r\n` 变成 `\r\r\n`（实测踩到）
+            #   newline=""     → 不翻译，字符串里是什么就写什么
+            # 编辑不该顺手改掉整个文件的换行符 —— 那会让 git diff 变成
+            # "整篇都变了"，真正的那一处改动被淹没。
+            target.write_text(updated, encoding="utf-8", newline="")
+        except OSError as exc:
+            return ToolResult.failure(f"写入 {p.path!r} 失败：{exc}")
+
+        new_size = target.stat().st_size
+        logger.info("文件工具编辑：%s（替换 1 处）", target)
+        return ToolResult.success(
+            f"已修改 {_rel(target)}：替换 1 处，{size} 字节 → {new_size} 字节。"
+        )

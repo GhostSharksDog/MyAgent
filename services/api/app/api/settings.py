@@ -54,6 +54,10 @@ EDITABLE_KEYS = {
     "AGENT_CORPUS_PATHS",
     "AGENT_CORPUS_INCLUDE_SEED",
     "AGENT_FILE_MAX_CHARS",
+    # 写权限（T23）：**必须能在界面上开关**，否则"Agent 能不能改我的文件"
+    # 就只能去翻 .env —— 而那正是这个设置界面想消灭的事。
+    "AGENT_FILE_WRITE_ENABLED",
+    "AGENT_FILE_ALLOW_SECRETS",
 }
 
 # 这些键写进 .env 时**不加引号会被 shell/docker 解析出问题**，统一加引号
@@ -180,6 +184,10 @@ class AgentView(BaseModel):
     corpus_paths: list[str]
     corpus_include_seed: bool
     file_max_chars: int
+    # 写权限（T23）。界面据此显示开关状态 —— 它是"Agent 能不能改我的文件"
+    # 这个问题的唯一答案，必须能一眼看到，而不是要去翻 .env。
+    file_write_enabled: bool = False
+    file_allow_secrets: bool = False
     # 便于界面显示当前实际加载了多少文档（改完配置能立刻看到效果）
     corpus_loaded: bool = False
     corpus_doc_count: int = 0
@@ -213,6 +221,9 @@ class SettingsUpdate(BaseModel):
     corpus_paths: list[str] | None = None
     corpus_include_seed: bool | None = None
     file_max_chars: int | None = Field(default=None, gt=0)
+    # 写权限（T23）。`None` = 不改动 —— 与其它字段同一语义。
+    file_write_enabled: bool | None = None
+    file_allow_secrets: bool | None = None
 
 
 class TestConnectionResult(BaseModel):
@@ -244,6 +255,8 @@ def _current_view() -> SettingsView:
             corpus_paths=s.agent.corpus_path_list,
             corpus_include_seed=s.agent.corpus_include_seed,
             file_max_chars=s.agent.file_max_chars,
+            file_write_enabled=s.agent.file_write_enabled,
+            file_allow_secrets=s.agent.file_allow_secrets,
         ),
         env_path=str(ENV_PATH),
     )
@@ -368,6 +381,10 @@ async def update_settings(payload: SettingsUpdate) -> SettingsView:
         updates["AGENT_CORPUS_INCLUDE_SEED"] = "true" if payload.corpus_include_seed else "false"
     if payload.file_max_chars is not None:
         updates["AGENT_FILE_MAX_CHARS"] = str(payload.file_max_chars)
+    if payload.file_write_enabled is not None:
+        updates["AGENT_FILE_WRITE_ENABLED"] = "true" if payload.file_write_enabled else "false"
+    if payload.file_allow_secrets is not None:
+        updates["AGENT_FILE_ALLOW_SECRETS"] = "true" if payload.file_allow_secrets else "false"
 
     if updates:
         written = _write_env(updates)

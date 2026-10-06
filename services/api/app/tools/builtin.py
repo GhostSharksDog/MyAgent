@@ -270,6 +270,7 @@ def build_default_registry(
     *,
     profile: str = "general",
     include_file_tools: bool = True,
+    file_write: bool = False,
 ) -> ToolRegistry:
     """按 profile 构造工具集。
 
@@ -277,7 +278,8 @@ def build_default_registry(
 
         核心层    calculator / get_current_time / search_knowledge
                   —— 任何场景都要用
-        文件层    list_dir / read_file / glob / grep
+        文件层    list_dir / read_file / glob / grep（只读）
+                  + write_file / edit_file（**只在显式开启时**，见 file_write）
                   —— 需要用户先指定工作区根目录，否则**一个都不注册**
         技能包    read_resume / search_jobs（jobhunt 专属）
                   —— 只在 profile=jobhunt 时加载
@@ -287,10 +289,15 @@ def build_default_registry(
     拿到错误、浪费一步、然后很可能**换一种方式硬编**。
     **能力不存在时就不该出现在菜单上** —— 这与记忆工具的既有做法一致。
 
+    写工具同样遵守这条：没开启写权限时它们**根本不存在**，
+    模型不会尝试、也不会在回答里承诺"我已经帮你写好了"。
+
     Args:
         long_term_memory: 传入 `LongTermMemory` 时会额外注册 `remember_fact`。
         profile: `general`（默认）或 `jobhunt`。
         include_file_tools: 允许关掉文件工具（测试里用，避免依赖工作区配置）。
+        file_write: 是否加载**写**工具（T23）。默认 False —— 写文件不可撤销，
+            必须由用户显式开启（`AGENT_FILE_WRITE_ENABLED=true`）。
     """
     registry = ToolRegistry()
 
@@ -321,7 +328,7 @@ def build_default_registry(
     if include_file_tools:
         from app.tools.files import build_file_tools
 
-        for tool in build_file_tools():
+        for tool in build_file_tools(include_write=file_write):
             registry.register(tool)
 
     # ---------- 技能包：只在 jobhunt 时加载 ----------

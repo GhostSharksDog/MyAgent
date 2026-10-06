@@ -290,7 +290,7 @@ export function FolderPicker({ open, onClose, onPick, current, note }: FolderPic
         <div className="picker__divider">或手动浏览</div>
 
         <p className="picker__note">
-          Agent 只能读写你选中的这个目录**以内**的文件。这里只显示目录名，不显示文件内容。
+          Agent 只能访问你选中的这个目录**以内**的文件（写权限在设置里单独开关）。这里只显示目录名，不显示文件内容。
         </p>
 
         {/* 路径栏：显示当前位置，也允许直接粘贴一个绝对路径 */}

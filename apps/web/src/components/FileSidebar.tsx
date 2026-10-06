@@ -141,7 +141,7 @@ export function FileSidebar({ root, onClose, onOpenFolder, onSwitchFolder }: Fil
         <div className="fileside__empty">
           <p>还没有打开文件夹。</p>
           <p className="settings__hint settings__hint--block">
-            Agent 只能读写你**显式选中**的目录。打开一个文件夹作为工作区，
+            Agent 只能访问你**显式选中**的目录。打开一个文件夹作为工作区，
             路径穿越与符号链接逃逸都会被拦下。
           </p>
           <button type="button" className="btn btn--primary btn--block" onClick={onOpenFolder}>

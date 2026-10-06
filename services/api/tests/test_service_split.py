@@ -250,6 +250,24 @@ class TestRemoteFailureModes:
 
         httpx 里 `ConnectTimeout` 同时继承 TimeoutException 与 TransportError，
         所以异常分支的顺序是有语义的 —— 这个用例把它固定下来。
+
+        【这条用例真的抓到过东西 —— 值得记下来】
+
+        它原本只接受"无法连接"。某天开始稳定失败，报的是"响应超时（服务可能过载）"。
+        查下去发现两件事叠在一起：
+
+          1. 这台机器上环回地址的"连接被拒"要 **2.04 秒**才返回（系统代理在跑）；
+          2. 更关键的是 `httpx` 默认 `trust_env=True`，会读**系统级**代理配置 ——
+             于是连往 `127.0.0.1:1` 的请求被塞给了桌面代理，拿到的是
+             `ReadTimeout`（代理接了连接然后干等），而代码把它归类成"服务过载"。
+
+        也就是说：**这条断言防的正是"给出误导性诊断"**，而它守住了
+        （尽管当时的失败看起来像"测试太脆"）。修的是实现：
+        `RemoteKnowledgeBackend` 现在用 `trust_env=False` ——
+        内部服务调用不该经过用户桌面的代理。
+
+        （那个 2.04 秒同时解释了一个更早的悬案：Redis 探测为什么恰好也是
+        2.04 秒、而且"关掉重试"没用 —— 那两秒是**建连本身**，不是重试。）
         """
         backend = RemoteKnowledgeBackend("http://127.0.0.1:1", timeout=1.0)
         with pytest.raises(KnowledgeBackendError) as ei:

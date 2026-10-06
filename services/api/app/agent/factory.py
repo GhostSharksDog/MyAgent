@@ -109,7 +109,16 @@ def build_agent_stack(settings: Settings | None = None) -> AgentStack:
 
     # 工具集与提示词都由 profile 决定：general（默认）只加载核心工具，
     # jobhunt 才额外加载简历/岗位。见 build_default_registry 的分层说明。
-    tools = build_default_registry(long_term_memory=long_term, profile=s.agent.profile)
+    #
+    # 写工具（T23）**默认不加载**：写文件不可撤销，必须由用户显式开启
+    # （`AGENT_FILE_WRITE_ENABLED=true`，或设置界面里的开关）。
+    # 没开启时它们根本不在工具表里 —— 模型不会尝试，也不会在回答里
+    # 承诺"我已经帮你写好了"。
+    tools = build_default_registry(
+        long_term_memory=long_term,
+        profile=s.agent.profile,
+        file_write=s.agent.file_write_enabled,
+    )
 
     agent = Agent(llm_client, tools, s.agent, memory=short_memory, long_term=long_term)
     return AgentStack(
