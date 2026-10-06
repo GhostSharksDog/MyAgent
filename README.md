@@ -17,7 +17,7 @@ Python 3.12 / FastAPI + React 19 / TypeScript 全栈项目，面向 AI 应用与
 | 文件 | 显式工作区、越界拒绝、敏感文件保护；write_file/edit_file 须显式开启 |
 | RAG | 章节切分、TF-IDF、手写 BM25、RRF、特征/可选 LLM 重排、可选改写、引用与相关性闸门 |
 | 会话与记忆 | 窗口/摘要/长期事实；memory、SQLite、Redis。Plan/Supervisor 本轮不使用会话历史 |
-| Web | SSE 答案、工具时间线、计划与专家结果、预算终态、用量完整性、停止按钮、设置与模型管理 |
+| Web | 暖白／石墨简约界面、统一执行过程、预算终态与用量完整性、停止按钮、五类设置、工作区与响应式抽屉 |
 | 服务工程 | 内存/Redis 队列、trace id、指标、熔断、限流、已有 api/rag/worker/Redis Compose 拆分 |
 | 可复现性 | Windows CI、Python 运行时 lock、pnpm lock、默认离线测试、公开样本评测、Edge 冒烟 |
 
@@ -67,6 +67,18 @@ CLI：`powershell -File scripts/dev.ps1 cli`。没有 dist 时不会挂载界面
 本机用 `.venv/Scripts/python.exe`；手动安装前清除错误的 `PIP_TARGET`，见 AGENTS。
 Docker：`docker compose up -d --build` 后运行 `scripts/verify_compose.py`；本轮未重新部署验证。
 
+## 界面与演示
+
+首屏展示通用示例，点击只填写草稿；发送后同一个输入区移到聊天底部。
+「执行过程」统一查看计划、专家与工具，预算、错误、停止和裁剪提示始终显示在答案旁。
+点击顶栏模型名进入模型设置；工作区必须显式选择，写权限与敏感文件权限分别保存。
+新用户默认浅色，已有 light／dark／system 偏好保留；手机会话与文件抽屉互斥。
+
+![Legacy 浅色首屏](docs/screenshots/ui-redesign/01-home-light-1440.png)
+
+设计、截图与合成接口验收见 [界面记录](docs/06-ui-design.md)。
+`scripts/smoke_ui.py --visual` 使用合成 API/SSE 检查真实 Edge 渲染，不调用模型或修改 `.env`。
+
 ## API 与结束契约
 
 端点仍为 `POST /api/chat`、`POST /api/chat/stream`，现有请求字段与事件类型兼容。
@@ -109,6 +121,10 @@ token 阈值、整轮超时和专家启动后的取消已验证，受限脚本�
 Edge 冒烟已验证模式提示、预算状态、统计不完整与停止按钮；
 `scripts/smoke_ui.py --reliability` 使用合成 SSE，不消耗模型额度。
 
+同日界面重设计的最终门禁：**998 后端通过 + 1 live 跳过、159 前端通过**；
+三种尺寸共 10 张 Edge 截图已复核，完整合成 API/SSE 冒烟全部通过。
+本轮新增真实模型请求 0 次，用户 `.env` 未修改；详情见 [界面验收](docs/06-ui-design.md)。
+
 公开 RAG 复测：14 条查询，section/min_size=120，k=5。
 TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 全部参数见 [证据记录](docs/05-reliability-evidence.md)。小样本结果不推断生产效果；
@@ -120,6 +136,7 @@ GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线�
 ## 文档与求职材料
 
 - [可靠性证据与未验证项](docs/05-reliability-evidence.md)
+- [界面设计、验收与演示截图](docs/06-ui-design.md)
 - [架构、设计决策与历史修复](docs/01-architecture.md)（第 8/10 节为当前补充）
 - [交接说明](AGENTS.md)
 - [项目一页纸](docs/04-career/01-onepager.md)

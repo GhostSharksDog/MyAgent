@@ -19,11 +19,12 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **995 后端通过 + 1 live 跳过、96 前端通过**；证据见 `docs/05-reliability-evidence.md`
+- 测试：2026-10-06 **998 后端通过 + 1 live 跳过、159 前端通过**；界面验收见 `docs/06-ui-design.md`，上一轮内核证据保留在 `docs/05-reliability-evidence.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - Plan/Supervisor 本轮不使用会话历史；HTTP/SSE 只持久化 `finished`。缺 Usage 时 `usage_complete=false`
+- Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -43,7 +44,7 @@ git status --short
 # 2) 后端能不能跑（默认离线，1 个 live skipped；最新通过数见证据文档）
 & .venv\Scripts\python.exe -m pytest services\api\tests -o addopts="" -q --no-header
 
-# 3) 前端测试与类型（期望：96 pass / 无类型错误）
+# 3) 前端测试与类型（最新通过数见界面验收 / 无类型错误）
 cd apps\web; pnpm test; pnpm run typecheck; cd ..\..
 ```
 
@@ -109,7 +110,7 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 
 | 脚本 | 前提 | 它证明什么 |
 |---|---|---|
-| `python scripts\smoke_ui.py [--reliability]` | 服务在 8000 跑着；本机有 Edge | **界面真的渲染**（Edge + CDP）；可靠性扩展用合成 SSE 验证模式、预算与停止。前端 96 个测试不验证组件渲染 |
+| `python scripts\smoke_ui.py [--visual / --reliability]` | 界面服务在跑；本机有 Edge | **界面真的渲染**（Edge + CDP）；`--visual` 全部 API/SSE 合成，覆盖三视口、主题、设置、焦点、模式与取消，不读私人配置、不调用模型。默认与 `--reliability` 的非聊天接口仍读取现有服务 |
 | `python scripts\verify_models.py` | 服务在跑 | 多模型流程端到端（会临时改 `.env`，**结束时自动还原**） |
 | `python scripts\verify_compose.py` | `docker compose up -d` 之后 | 四个容器、三个 backend、界面、鉴权、**跨进程任务**。它会先在容器内探一次 `/healthz`，核对"我打到的到底是不是那个容器" |
 | `python scripts\bench_session_store.py [--memory]` | 无 | 会话后端延迟分布。`sqlite_store.py` 里的性能结论就是这个脚本量的 |
@@ -144,7 +145,8 @@ services/api/app/
 
 apps/web/src/
   App.tsx            组装；lib/（api/stream/sse/types/picker/access/models-*）
-  components/        SettingsDialog + settings/{General,Models}Section …
+  components/        ExecutionProcess / SettingsDialog + settings/{General,Models}Section …
+  hooks/             useDialogFocus 模态焦点；聊天、会话、设置、服务刷新防迟到响应覆盖
   styles/            tokens.css 定义变量；**组件样式不许写死颜色**
 ```
 
@@ -214,7 +216,9 @@ apps/web/src/
 - `AGENT_CONTEXT_TOKEN_BUDGET=32000` 是具体值而非 0：与时长预算的代价不对称
   （猜小了只是少放几轮旧对话，而"完全不设上限"迟早撞一次硬失败）。
 - 前端只有 `react` + `react-dom` 两个运行时依赖，测试用 `node --test`（无 jsdom）：
-  **纯逻辑刻意放在 `lib/*.ts` 里做成可测的纯函数**，组件只负责摆状态。
+  **纯逻辑刻意放在 `lib/*.ts` 里做成可测的纯函数**。Hook 生命周期用隔离的 Hook 宿主执行真实源码；真实组件 DOM 与键盘行为另用 Edge/CDP 验证。
+- 主题存储键仍为 `legacy.theme`：已有 light/dark/system 偏好保留；新用户、非法值或存储异常回退 light。同步 HTML 首屏脚本与 Hook，不能只改一处。
+- Settings 保存只提交当前 Agent／工作区页，不能连带保存另一页权限。配置刷新和会话请求有代际保护，不能删除这些检查。
 
 ---
 
@@ -265,6 +269,10 @@ apps/web/src/
 已在途调用可超额，缺失 Usage 不得当成零成本；可选 RAG 改写/重排用量不属于当前对话账本。
 工具共享互斥限于同进程同注册表；线程副作用取消时等待完成，因此清理可能超时，不回滚写入。
 界面回归：`smoke_ui.py --reliability`（浏览器内合成 SSE，不会调用模型）。
+完整界面验收：`smoke_ui.py --visual --target http://127.0.0.1:8097/ --screenshots-dir data/ui-redesign`；
+可仅提供 `apps/web/dist` 静态站，全部 API/SSE 在页面挂载前替换为公开合成数据。
+10 张展示截图保存在 `docs/screenshots/ui-redesign/`，原始日志在忽略提交的 `data/ui-redesign/`。
+新增源码后端测试仅验证冒烟错误采集与 API 拦截，不把模拟接口当作真实模型证据。
 
 | 事项 | 为什么还没做 |
 |---|---|
