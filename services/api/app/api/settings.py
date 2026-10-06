@@ -61,6 +61,8 @@ EDITABLE_KEYS = {
     # 写权限（T23）：**必须能在界面上开关**，否则"Agent 能不能改我的文件"
     # 就只能去翻 .env —— 而那正是这个设置界面想消灭的事。
     "AGENT_FILE_WRITE_ENABLED",
+    "AGENT_FILE_APPROVAL_REQUIRED",
+    "AGENT_FILE_APPROVAL_TIMEOUT",
     "AGENT_FILE_ALLOW_SECRETS",
 }
 
@@ -193,6 +195,8 @@ class AgentView(BaseModel):
     # 写权限（T23）。界面据此显示开关状态 —— 它是"Agent 能不能改我的文件"
     # 这个问题的唯一答案，必须能一眼看到，而不是要去翻 .env。
     file_write_enabled: bool = False
+    file_approval_required: bool = True
+    file_approval_timeout: float = 300
     file_allow_secrets: bool = False
     # 便于界面显示当前实际加载了多少文档（改完配置能立刻看到效果）
     corpus_loaded: bool = False
@@ -238,6 +242,8 @@ class SettingsUpdate(BaseModel):
     file_max_chars: int | None = Field(default=None, gt=0)
     # 写权限（T23）。`None` = 不改动 —— 与其它字段同一语义。
     file_write_enabled: bool | None = None
+    file_approval_required: bool | None = None
+    file_approval_timeout: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     file_allow_secrets: bool | None = None
     plan_max_total_tokens: int | None = Field(default=None, ge=0)
     multi_max_total_tokens: int | None = Field(default=None, ge=0)
@@ -276,6 +282,8 @@ def _current_view() -> SettingsView:
             corpus_include_seed=s.agent.corpus_include_seed,
             file_max_chars=s.agent.file_max_chars,
             file_write_enabled=s.agent.file_write_enabled,
+            file_approval_required=s.agent.file_approval_required,
+            file_approval_timeout=s.agent.file_approval_timeout,
             file_allow_secrets=s.agent.file_allow_secrets,
         ),
         env_path=str(ENV_PATH),
@@ -419,6 +427,12 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
         updates["AGENT_FILE_MAX_CHARS"] = str(payload.file_max_chars)
     if payload.file_write_enabled is not None:
         updates["AGENT_FILE_WRITE_ENABLED"] = "true" if payload.file_write_enabled else "false"
+    if payload.file_approval_required is not None:
+        updates["AGENT_FILE_APPROVAL_REQUIRED"] = (
+            "true" if payload.file_approval_required else "false"
+        )
+    if payload.file_approval_timeout is not None:
+        updates["AGENT_FILE_APPROVAL_TIMEOUT"] = str(payload.file_approval_timeout)
     if payload.file_allow_secrets is not None:
         updates["AGENT_FILE_ALLOW_SECRETS"] = "true" if payload.file_allow_secrets else "false"
 
@@ -430,13 +444,13 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
         if hasattr(request.app.state, "settings"):
             fresh = get_settings().agent
             current = request.app.state.settings
-            budget_settings = current.agent.model_copy(
-                update={
-                    name: getattr(fresh, name)
-                    for name in ("plan_max_total_tokens", "multi_max_total_tokens")
-                }
-            )
-            request.app.state.settings = current.model_copy(update={"agent": budget_settings})
+            request.app.state.settings = current.model_copy(update={"agent": fresh})
+            if any(key.startswith("AGENT_") for key in updates) and hasattr(
+                request.app.state, "llm"
+            ):
+                from app.agent.factory import refresh_agent_tools
+
+                refresh_agent_tools(request.app, request.app.state.settings)
 
     return await get_settings_view(request)
 

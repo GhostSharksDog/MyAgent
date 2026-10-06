@@ -33,6 +33,8 @@ class EventType(StrEnum):
     FINAL = "final"  # 最终答案（完整文本）
     ERROR = "error"  # 出错，**非**正常终止
     DONE = "done"  # 流结束哨兵，携带累计用量
+    APPROVAL_REQUEST = "approval_request"  # 完整文件差异，等待人确认
+    APPROVAL_UPDATE = "approval_update"  # 决定与实际写入状态分别报告
 
     # ---------- Plan-and-Execute 专用 ----------
     # 这几个事件只在规划型 Agent 上出现。ReAct 的消费者看不见它们，
@@ -50,6 +52,7 @@ class EventType(StrEnum):
 class AgentEvent(BaseModel):
     run_id: str | None = None
     record_saved: bool | None = None
+    approval: dict[str, Any] | None = None
     """单一事件。字段是各类型的并集，未用到的字段保持默认值。"""
 
     type: EventType

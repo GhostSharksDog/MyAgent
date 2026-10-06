@@ -249,6 +249,12 @@ class AgentSettings(BaseSettings):
     # 而"同一个目录，写权限单独开关"只多一个布尔值，组合状态少得多。
     file_write_enabled: bool = False
 
+    # 打开写权限后，默认仍需在流式界面逐次确认完整差异；HTTP/CLI 无审批通道时拒绝写入。
+    # 显式关闭才恢复直接写入。等待确认同时消耗原整轮 deadline，不能重领预算。
+    file_approval_required: bool = True
+    # 避免无整轮超时时遗留永久等待：默认给人 5 分钟；0 表示仅受整轮预算约束。
+    file_approval_timeout: float = Field(default=300, ge=0, allow_inf_nan=False)
+
     # 是否允许文件工具读写**敏感文件名**（`.env` / `id_rsa` / `*.pem` …）。
     #
     # 【为什么这个开关必须存在，而且默认 false】

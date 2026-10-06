@@ -140,3 +140,20 @@ def mount_agent_stack(app: Any, stack: AgentStack) -> LLMClient | None:
     app.state.memory = stack.memory
     app.state.long_term = stack.long_term
     return previous
+
+
+def refresh_agent_tools(app: Any, settings: Settings) -> None:
+    """保存能力设置后刷新工具/提示词，不重建或关闭在途请求的模型连接。"""
+    tools = build_default_registry(
+        long_term_memory=getattr(app.state, "long_term", None),
+        profile=settings.agent.profile,
+        file_write=settings.agent.file_write_enabled,
+    )
+    app.state.tools.replace_tools(tools)
+    app.state.agent = Agent(
+        app.state.llm,
+        app.state.tools,
+        settings.agent,
+        memory=getattr(app.state, "memory", None),
+        long_term=getattr(app.state, "long_term", None),
+    )

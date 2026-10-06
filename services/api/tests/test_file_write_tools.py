@@ -55,7 +55,13 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         settings,
         "agent",
-        settings.agent.model_copy(update={"workspace_root": str(root), "file_write_enabled": True}),
+        settings.agent.model_copy(
+            update={
+                "workspace_root": str(root),
+                "file_write_enabled": True,
+                "file_approval_required": False,
+            }
+        ),
         raising=False,
     )
     return root

@@ -21,14 +21,16 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
 from sse_starlette.sse import EventSourceResponse
 from starlette.background import BackgroundTask
 
 from app import __version__
+from app.agent.approvals import ApprovalBroker, ApprovalUnavailable, merge_approval_events
 from app.agent.events import AgentEvent, EventType
 from app.agent.loop import Agent
 from app.agent.memory import ConversationMemory
@@ -55,6 +57,26 @@ from app.session.store import SessionStore
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class ApprovalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["approve", "reject"]
+
+
+@router.post("/api/runs/{run_id}/approvals/{approval_id}", summary="批准或拒绝当前文件差异")
+async def decide_file_change(
+    run_id: str, approval_id: str, payload: ApprovalDecision, request: Request
+) -> dict[str, str]:
+    # 与其余 API 使用相同的鉴权中间件；决定只能投递到绑定的活跃请求。
+    brokers = getattr(request.app.state, "file_approvals", {})
+    broker = brokers.get(run_id)
+    if broker is None:
+        raise HTTPException(409, "运行已结束或没有待批准修改；请重新生成差异。")
+    try:
+        return {"status": broker.decide(approval_id, payload.decision)}
+    except ApprovalUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def _get_agent(request: Request) -> Agent:
@@ -512,18 +534,25 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         tool_summary = ""
         stopped_reason = "error"
         saw_done = False
+        broker = ApprovalBroker(get_settings().agent.file_approval_timeout)
+        context.approvals = broker
+        brokers = getattr(request.app.state, "file_approvals", None)
+        if brokers is None:
+            brokers = {}
+            request.app.state.file_approvals = brokers
+        brokers[recorder.record.run_id] = broker
 
         # 【离线回放：只换数据源，不换任何下游逻辑】
         # 下面的 `async for` 循环体完全不变 —— 同一套事件序列化、同一套指标采集、
         # 同一套持久化。回放之所以可信，正是因为它走的是**完全相同的路径**，
         # 区别只在事件从哪来。这正是一个适配器应该做到的事。
-        source = (
-            replayer.stream(speed=request.app.state.settings.demo_replay_speed)
-            if replayer is not None
-            else agent.run_stream(payload.message, history, **_run_kwargs(agent, context))
-        )
-
         try:
+            source = (
+                replayer.stream(speed=request.app.state.settings.demo_replay_speed)
+                if replayer is not None
+                else agent.run_stream(payload.message, history, **_run_kwargs(agent, context))
+            )
+            source = merge_approval_events(source, broker)
             async with aclosing(source):
                 async for event in source:
                     if not recorder.runtime_observed:
@@ -597,6 +626,9 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                     record_saved=saved,
                 ).to_sse()
         finally:
+            broker.close()
+            brokers.pop(recorder.record.run_id, None)
+            context.approvals = None
             if recorder.record.finished_at is None:
                 await _finish_run(ledger, recorder, "cancelled")
 

@@ -41,6 +41,8 @@ class RunContext:
     context_trimmed: bool = False
     context_tokens: int = 0
     tool_trace: list[dict[str, object]] = field(default_factory=list)
+    # 仅互动入口提供；不放在共享 Agent/工具实例上，避免跨请求串审批。
+    approvals: Any = field(default=None, repr=False, compare=False)
     observer: Callable[[AgentEvent, bool, RunContext], None] | None = field(
         default=None, repr=False, compare=False
     )

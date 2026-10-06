@@ -34,10 +34,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.llm.types import ToolCall
 from app.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -142,7 +144,7 @@ def _check_secret(path: Path, *, allow: bool, verb: str = "读取") -> None:
     """
     if allow:
         return
-    if path.name in SECRET_NAMES or path.suffix.lower() in SECRET_SUFFIXES:
+    if path.name.casefold() in SECRET_NAMES or path.suffix.lower() in SECRET_SUFFIXES:
         verb_cn = "写入" if verb == "写入" else "读取"
         raise FileAccessError(
             f"拒绝{verb_cn}敏感文件 {path.name}。"
@@ -473,7 +475,20 @@ MAX_WRITE_CHARS = 200_000
 MAX_EDIT_BYTES = 2_000_000
 
 
-class WriteFileTool(Tool):
+class FileMutationTool(Tool):
+    async def prepare_execution(self, call: ToolCall) -> Any:
+        from app.tools.file_changes import prepare_change
+
+        return await prepare_change(self, call)
+
+    async def execute_prepared(self, call: ToolCall, preparation: Any) -> ToolResult:
+        from app.tools.file_changes import bind_change
+
+        with bind_change(preparation):
+            return await self.execute(call)
+
+
+class WriteFileTool(FileMutationTool):
     name = "write_file"
     description = (
         "在工作区内**新建**或（显式允许时）覆盖一个文本文件。"
@@ -488,6 +503,10 @@ class WriteFileTool(Tool):
     serial = True
 
     async def run(self, params: BaseModel) -> ToolResult:
+        from app.tools.file_changes import guarded_change
+
+        if result := guarded_change(self.name, params):
+            return result
         p = WriteFileParams.model_validate(params.model_dump())
         settings = get_settings()
 
@@ -535,7 +554,7 @@ class WriteFileTool(Tool):
         return ToolResult.success(f"{verb} {_rel(target)}{detail}，{lines} 行。")
 
 
-class EditFileTool(Tool):
+class EditFileTool(FileMutationTool):
     name = "edit_file"
     description = (
         "在已有文件里**精确替换**一段文本（比整体重写安全，改动最小）。"
@@ -546,6 +565,10 @@ class EditFileTool(Tool):
     serial = True
 
     async def run(self, params: BaseModel) -> ToolResult:
+        from app.tools.file_changes import guarded_change
+
+        if result := guarded_change(self.name, params):
+            return result
         p = EditFileParams.model_validate(params.model_dump())
         settings = get_settings()
 

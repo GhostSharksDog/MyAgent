@@ -114,6 +114,13 @@ class Tool(ABC):
             },
         }
 
+    async def prepare_execution(self, call: ToolCall) -> Any:
+        """可选的只读准备/人审，发生在副作用互斥和工具执行超时之外。"""
+        return None
+
+    async def execute_prepared(self, call: ToolCall, preparation: Any) -> ToolResult:
+        return await self.execute(call)
+
     async def _invoke(self, params: BaseModel) -> ToolResult:
         """按 `run` 的实际形态分派：协程直接等，同步函数丢线程池。
 
@@ -301,6 +308,10 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return sorted(self._tools)
 
+    def replace_tools(self, registry: ToolRegistry) -> None:
+        """配置刷新时保留注册表与共享锁；在途调用继续持有已取出的工具。"""
+        self._tools = registry._tools.copy()
+
     def is_serial(self, name: str) -> bool:
         """这个工具是否声明了"不可并发"。
 
@@ -321,6 +332,9 @@ class ToolRegistry:
         if tool is None:
             available = "、".join(self.names()) or "（无）"
             return ToolResult.failure(f"不存在名为 {call.name!r} 的工具。当前可用工具：{available}")
+        preparation = await tool.prepare_execution(call)
+        if isinstance(preparation, ToolResult):
+            return preparation
         if tool.serial:
             async with self._serial_lock:
                 # 排队期间其他专家可能耗尽共享预算；拿到锁后不能继续启动副作用。
@@ -328,8 +342,8 @@ class ToolRegistry:
 
                 if context := current_run_context():
                     context.check()
-                return await tool.execute(call)
-        return await tool.execute(call)
+                return await tool.execute_prepared(call, preparation)
+        return await tool.execute_prepared(call, preparation)
 
 
 __all__ = [
