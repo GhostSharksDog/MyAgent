@@ -134,7 +134,7 @@ Edge 冒烟已验证模式提示、预算状态、统计不完整与停止按钮
 三种尺寸共 10 张 Edge 截图已复核，完整合成 API/SSE 冒烟全部通过。
 本轮新增真实模型请求 0 次，用户 `.env` 未修改；详情见 [界面验收](docs/06-ui-design.md)。
 
-公开 RAG 复测：14 条查询，section/min_size=120，k=5。
+首次公开 RAG 复测（检索修复前的历史基线）：14 条查询，section/min_size=120，k=5。
 TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 全部参数见 [证据记录](docs/05-reliability-evidence.md)。小样本结果不推断生产效果；
 历史 LLM 重排/HyDE 数字见 [检索日志](docs/03-journal/2026-09-13-P2-检索基线评测.md)，本轮未复测。
@@ -152,7 +152,11 @@ TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 该轮门禁：**1103 后端通过 + 1 live 跳过、159 前端通过**；参数、失败与原始JSON已留档。
 
 随后增加[任务运行记录](docs/09-run-history.md)：默认有界内存摘要、显式单机 SQLite、失败与取消查询、子任务工具统计及隐私白名单。
-最新门禁：**1132 后端通过 + 1 live 跳过、166 前端通过**，格式、lint、lock、类型及构建通过；Edge 合成界面 245 项验收通过，新增真实模型请求 0 次。
+该轮门禁：**1132 后端通过 + 1 live 跳过、166 前端通过**，格式、lint、lock、类型及构建通过；Edge 合成界面 245 项验收通过，新增真实模型请求 0 次。
+
+随后修复[检索召回与阶段诊断](docs/10-rag-retrieval.md)：标题参与索引、零匹配不补位、同分稳定截断、BM25 改写保持单路；`--diagnostics` 直接指出每项证据在召回、闸门或最终 top-k 中的去向，不增加模型调用。
+两套公开集的默认混合+重排指标保持不变；纯RRF旧集 Recall=.798、MRR=.702、NDCG=.710，部分管线退化已留档。多证据仍找齐8/12、无答案仍12/12返回片段，不能宣称质量问题已全部解决。
+最新门禁：**1182 后端通过 + 1 live 跳过、166 前端通过**；格式、lint、依赖锁、类型与构建通过，本轮真实模型请求0次；参数、前后报告与证据阶段见该页。
 
 GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线检查与前端构建。
 远端 CI 首跑需用户推送后确认；当前只报告本地检查。
@@ -164,6 +168,7 @@ GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线�
 - [通用任务评测、运行记录与指标校正](docs/07-agent-evaluation.md)
 - [通用 RAG 基准与失败分析](docs/08-general-rag-benchmark.md)
 - [运行记录、失败排查与隐私边界](docs/09-run-history.md)
+- [检索修复、证据阶段与前后消融](docs/10-rag-retrieval.md)
 - [架构、设计决策与历史修复](docs/01-architecture.md)（第 8/10 节为当前补充）
 - [交接说明](AGENTS.md)
 - [项目一页纸](docs/04-career/01-onepager.md)

@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1132 后端通过 + 1 live 跳过、166 前端通过**；运行记录见 `docs/09-run-history.md`，通用检索见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-06 **1182 后端通过 + 1 live 跳过、166 前端通过**；最新检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
@@ -28,6 +28,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
 - `scripts/eval_agent.py` 默认离线：30 个通用公开任务 × 三模式，合成 LLM 驱动真实内核和只读工具。90 轮通过是框架验收，不是模型成功率；可离线重新评分已有 RunBundle
 - RAG NDCG 已按全语料相关块校正，报告标记 `ndcg-corpus-v2`；历史 top-k 命中数分母的数字不能与新版本直接比较
 - 通用RAG基准：`eval_rag.py --compare --dataset general`，16份虚构文档/60查询，manifest逐文件校验；严格离线、不读配置。48正例与12无答案分开统计，完整证据率和非空返回率不能冒充模型正确率；原始报告在 `docs/evidence/rag-general-v1`
+- 检索已索引完整章节名并排除零分补位；同分按语料顺序稳定截断；SPARSE 改写只用 BM25。`--diagnostics` 逐项记录证据阶段，不增加调用，轨迹必须每次独立持有。新旧报告在 `docs/evidence/rag-retrieval-v1`，默认带重排组合分数不变，部分消融退化如实留档
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -161,7 +162,7 @@ apps/web/src/
 
 1. **配置只有一个来源**：所有可调项在 `app/core/config.py`，界面写的就是 `.env`，
    不许在业务代码里散落 `os.getenv`。
-2. **默认值必须最无害**：`AGENT_PROFILE=general`、语料为空、重排/改写/限流/记忆默认关、
+2. **默认值必须最无害**：`AGENT_PROFILE=general`、语料为空、LLM 重排/改写/限流/记忆默认关（离线 lexical 重排默认启用）、
    `AGENT_RUN_TIMEOUT=0`、`AGENT_FILE_WRITE_ENABLED=false`。
    *要开一个新能力，先问"没读文档的人会得到什么"。*
 3. **能力不存在时就不该出现在菜单上**：没配工作区 → 文件工具一个都不注册；
@@ -269,6 +270,8 @@ HTTP/SSE 运行摘要已接通，入口见 `docs/09-run-history.md`。默认 `RU
 只有 `pytest -m live` 或 `--run-live` 才联网。不要为“全绿”消耗真实模型额度。
 公开 RAG 复测用 `scripts/eval_rag.py --compare --sample`，不读私人 notes 或额外语料。
 通用公开基准用 `--dataset general`，旧14查询与新60查询分数不能直接比较。闸门对照只改本轮评测，不改服务配置。
+证据阶段用 `--diagnostics`；candidate_rank 是融合后、重排前的位置。每路 recall_k 不等于并集总宽度。当前14查询的纯RRF Recall=.798、MRR=.702、NDCG=.710；旧 .869/.657/.692 属于修复前基线，不能写成当前值。
+通用集默认组合的4条多证据遗漏和2条改述遗漏均为 outside_top_k；多证据仍8/12找齐，无答案仍12/12返回片段。下一步排序实验须保留正例与负例对照，不凭这次零分过滤宣称解决拒答或幻觉。
 真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
 并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
 旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。
