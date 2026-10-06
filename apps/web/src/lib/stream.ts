@@ -51,6 +51,7 @@ import type {
   ToolCallView,
   TurnPhase,
 } from './types'
+import { closeApprovals, mergeApproval, readApproval } from './approvals.ts'
 
 // ============================================================
 // 初始状态与状态转移
@@ -69,6 +70,7 @@ export function emptyTurn(phase: TurnPhase = 'connecting'): AssistantTurnState {
     phase,
     plan: null,
     delegations: [],
+    approvals: [],
     contextTrimmed: false,
     contextTokens: 0,
   }
@@ -97,11 +99,19 @@ function patchStep(
  * 旧前端遇到不认识的事件应当继续保持可用，而不是崩在 `switch` 的默认分支上。
  */
 export function applyEvent(turn: AssistantTurnState, event: AgentEvent): AssistantTurnState {
+  if (turn.runId && event.run_id && turn.runId !== event.run_id) return turn
   if (event.run_id) turn = { ...turn, runId: event.run_id }
   if (event.record_saved !== undefined) turn = { ...turn, recordSaved: event.record_saved }
   const stepIndex = typeof event.step === 'number' ? event.step : lastStepIndex(turn.steps)
 
   switch (event.type) {
+    case 'approval_request':
+    case 'approval_update': {
+      if (turn.stoppedReason !== null || turn.phase === 'aborted' || turn.phase === 'error') return turn
+      const proposal = readApproval(event.approval)
+      if (!proposal) return turn
+      return { ...turn, approvals: mergeApproval(turn.approvals, proposal) }
+    }
     case 'start':
       return { ...turn, phase: 'thinking' }
 
@@ -219,6 +229,8 @@ export function applyEvent(turn: AssistantTurnState, event: AgentEvent): Assista
           typeof event.context_tokens === 'number' ? event.context_tokens : turn.contextTokens,
         // 只有真的出错才进 error 相；预算终止进 done 相，由 UI 用警告色区分
         phase: failed ? 'error' : 'done',
+        approvals: closeApprovals(turn.approvals,
+          '本轮已结束，确认入口已关闭。未收到写入成功事件；已完成的写入不会自动撤销。'),
       }
     }
 

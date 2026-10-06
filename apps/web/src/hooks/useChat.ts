@@ -24,10 +24,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { ApiError, openChatStream } from '../lib/api'
+import { ApiError, decideFileApproval, openChatStream } from '../lib/api'
+import { closeApprovals } from '../lib/approvals'
 import { streamAgentEvents } from '../lib/sse'
 import { applyEvent, emptyTurn } from '../lib/stream'
-import type { AgentMode, AssistantTurnState, ChatItem, SessionTurn } from '../lib/types'
+import type { AgentMode, AssistantTurnState, ChatItem, FileApprovalDecision, SessionTurn } from '../lib/types'
 
 function createId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -51,11 +52,15 @@ function patchAssistant(
 export interface UseChatOptions {
   /** 一轮结束后回调（用于刷新侧边栏的标题/轮次/token 统计）。 */
   onTurnSettled?: () => void
+  /** 打开另一个会话期间暂时封闭审批；失败后保留原任务。 */
+  approvalDisabled?: boolean
 }
 
 export interface UseChatResult {
   items: ChatItem[]
   isStreaming: boolean
+  activeAssistantId: string | null
+  decideApproval: (assistantId: string, approvalId: string, decision: FileApprovalDecision) => Promise<void>
   /** 顶部/底部的临时提示（例如"已停止生成"）。 */
   notice: string | null
   send: (text: string, sessionId: string | null, mode?: AgentMode) => Promise<void>
@@ -73,6 +78,9 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
   const controllerRef = useRef<AbortController | null>(null)
   const streamingRef = useRef(false)
   const aliveRef = useRef(true)
+  const activeTurnRef = useRef<{ id: string; turn: AssistantTurnState; controller: AbortController } | null>(null)
+  const approvalDisabledRef = useRef(options.approvalDisabled === true)
+  approvalDisabledRef.current = options.approvalDisabled === true
   // onTurnSettled 放进 ref：它是调用方每次渲染新建的函数，
   // 直接进 useCallback 依赖会让 send 的引用每帧都变，进而让下游 memo 全部失效。
   const settledRef = useRef(options.onTurnSettled)
@@ -84,16 +92,26 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
       aliveRef.current = false
       // 组件卸载（或切页）时断流：否则后台还在跑 Agent，用户却看不到任何反馈
       controllerRef.current?.abort()
+      activeTurnRef.current = null
     }
   }, [])
 
   const abort = useCallback(() => {
+    const active = activeTurnRef.current
+    if (active && active.turn.stoppedReason === null) {
+      const close = (state: AssistantTurnState): AssistantTurnState => ({ ...state, phase: 'aborted',
+        approvals: closeApprovals(state.approvals,
+          '已停止本轮，不能再确认修改。未收到写入成功事件；已完成的写入不会自动撤销。') })
+      active.turn = close(active.turn)
+      setItems((previous) => patchAssistant(previous, active.id, close))
+    }
     controllerRef.current?.abort()
   }, [])
 
   const clear = useCallback(() => {
     const previous = controllerRef.current
     controllerRef.current = null
+    activeTurnRef.current = null
     streamingRef.current = false
     setIsStreaming(false)
     previous?.abort()
@@ -104,6 +122,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
   const loadHistory = useCallback((turns: SessionTurn[]) => {
     const previous = controllerRef.current
     controllerRef.current = null
+    activeTurnRef.current = null
     streamingRef.current = false
     setIsStreaming(false)
     previous?.abort()
@@ -149,6 +168,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
 
       const controller = new AbortController()
       controllerRef.current = controller
+      activeTurnRef.current = { id: assistantId, turn: emptyTurn('connecting'), controller }
       streamingRef.current = true
       setIsStreaming(true)
       setNotice(null)
@@ -163,11 +183,15 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
         }
 
         const runId = response.headers.get('X-Run-Id')
-        if (runId) setItems((prev) => patchAssistant(prev, assistantId, (state) => ({ ...state, runId })))
+        if (runId) {
+          if (activeTurnRef.current) activeTurnRef.current.turn = { ...activeTurnRef.current.turn, runId }
+          setItems((prev) => patchAssistant(prev, assistantId, (state) => ({ ...state, runId })))
+        }
         for await (const event of streamAgentEvents(response, { signal: controller.signal })) {
           // 切换历史或清空后，旧流的迟到事件不能修改当前轮次。
           if (controllerRef.current !== controller || !aliveRef.current) break
           if (event.type === 'done') sawDone = true
+          if (activeTurnRef.current) activeTurnRef.current.turn = applyEvent(activeTurnRef.current.turn, event)
           setItems((prev) => patchAssistant(prev, assistantId, (state) => applyEvent(state, event)))
         }
 
@@ -181,6 +205,8 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
                 : {
                     ...state,
                     phase: 'aborted',
+                    approvals: closeApprovals(state.approvals,
+                      '连接已中断，确认入口已关闭。未收到写入成功事件，请检查文件后重新发起任务。'),
                     error: state.error ?? '连接在收到结束事件（done）之前中断，本轮结果可能不完整。',
                   },
             ),
@@ -188,6 +214,8 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
         }
       } catch (error) {
         if (controllerRef.current !== controller || !aliveRef.current) return
+        // done 已确认结束。连接收尾的取消或异常不能把终态改成失败/手动停止。
+        if (sawDone) return
         if (controller.signal.aborted) {
           setItems((prev) =>
             patchAssistant(prev, assistantId, (state) => ({ ...state, phase: 'aborted' })),
@@ -205,6 +233,8 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
               ...state,
               phase: 'error',
               error: detail,
+              approvals: closeApprovals(state.approvals,
+                '请求失败，确认入口已关闭。未收到写入成功事件，请检查文件后重新发起任务。'),
             })),
           )
         }
@@ -213,7 +243,11 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
         if (controllerRef.current === controller) {
           streamingRef.current = false
           controllerRef.current = null
+          activeTurnRef.current = null
           if (aliveRef.current) {
+            setItems((previous) => patchAssistant(previous, assistantId, (state) => ({ ...state,
+              approvals: closeApprovals(state.approvals,
+                '本轮连接已结束，不能再确认修改。未收到写入成功事件；已完成的写入不会自动撤销。') })))
             setIsStreaming(false)
             settledRef.current?.()
           }
@@ -223,5 +257,36 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     [],
   )
 
-  return { items, isStreaming, notice, send, abort, clear, loadHistory }
+  const decideApproval = useCallback(async (assistantId: string, approvalId: string,
+    decision: FileApprovalDecision) => {
+    const active = activeTurnRef.current
+    if (approvalDisabledRef.current || !active || active.id !== assistantId || controllerRef.current !== active.controller ||
+      active.controller.signal.aborted || !aliveRef.current || !streamingRef.current ||
+      active.turn.stoppedReason !== null || ['done', 'error', 'aborted'].includes(active.turn.phase)) return
+    const proposal = active.turn.approvals.find((item) => item.id === approvalId)
+    if (!active.turn.runId || !proposal || proposal.status !== 'pending' || proposal.busy) return
+    const update = (patch: Partial<typeof proposal>) => {
+      const change = (state: AssistantTurnState) => ({ ...state, approvals: state.approvals.map((item) =>
+        item.id === approvalId && item.status === 'pending' ? { ...item, ...patch } : item) })
+      active.turn = change(active.turn)
+      setItems((previous) => patchAssistant(previous, assistantId, change))
+    }
+    update({ busy: true, error: null })
+    const isCurrent = () => activeTurnRef.current === active &&
+      controllerRef.current === active.controller && !active.controller.signal.aborted && aliveRef.current &&
+      active.turn.stoppedReason === null
+    try {
+      const result = await decideFileApproval(active.turn.runId, approvalId, decision, active.controller.signal)
+      if (!isCurrent()) return
+      update({ status: result.status, busy: false, error: null,
+        message: result.status === 'approved' ? '已批准，服务正在重新核验文件与权限；收到写入成功事件后才算完成。'
+          : '已拒绝此修改，Agent 将收到拒绝结果。' })
+    } catch (error) {
+      if (!isCurrent()) return
+      update({ busy: false, error: error instanceof Error ? error.message : '确认请求失败，请重试。' })
+    }
+  }, [])
+
+  return { items, isStreaming, activeAssistantId: activeTurnRef.current?.id ?? null,
+    decideApproval, notice, send, abort, clear, loadHistory }
 }

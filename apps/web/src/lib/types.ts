@@ -49,6 +49,8 @@ export type AgentEventType =
   | 'token'
   | 'tool_call'
   | 'tool_result'
+  | 'approval_request'
+  | 'approval_update'
   | 'final'
   | 'error'
   | 'done'
@@ -104,6 +106,28 @@ export interface Usage {
   total_tokens: number
 }
 
+export type FileApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'conflict' | 'applied' | 'failed'
+export type FileApprovalDecision = 'approve' | 'reject'
+
+/** 完整修改预览仅存在当前轮界面，不写入会话或运行摘要。 */
+export interface FileApproval {
+  id: string
+  path: string
+  operation: 'create' | 'overwrite' | 'edit'
+  diff: string
+  before_bytes: number
+  after_bytes: number
+  before_format?: string
+  after_format?: string
+  status: FileApprovalStatus
+  message: string
+}
+
+export interface FileApprovalView extends FileApproval {
+  busy: boolean
+  error: string | null
+}
+
 /** 一条 Agent 事件。
  *
  *  `type` 放宽成 string：后端将来新增事件类型时，旧前端应当**忽略未知事件**
@@ -147,6 +171,7 @@ export interface AgentEvent {
   plan?: PlanPayload
   /** 被派发的专家名。delegate / delegate_result 携带。 */
   specialist?: string
+  approval?: FileApproval
 }
 
 // ============================================================
@@ -299,6 +324,7 @@ export interface AssistantTurnState {
   plan: PlanPayload | null
   /** 被派发过的专家（多 Agent）。按派发顺序排列。 */
   delegations: DelegationView[]
+  approvals: FileApprovalView[]
   /**
    * 这一轮是否因为超出上下文预算而丢弃过消息（技术债 T09）。
    *
@@ -363,6 +389,9 @@ export interface AgentSettingsView {
   file_max_chars: number
   /** 是否允许 Agent 写文件（T23）。默认 false —— 写是不可撤销的动作。 */
   file_write_enabled: boolean
+  /** 旧服务缺字段时按默认需确认展示。 */
+  file_approval_required?: boolean
+  file_approval_timeout?: number
   /** 是否允许文件工具碰 `.env` / 私钥这类敏感文件名。默认 false。 */
   file_allow_secrets: boolean
   /** 知识库实际加载了多少文档 —— 改完配置最想知道的就是"生效了没有" */
@@ -401,6 +430,8 @@ export interface SettingsUpdatePayload {
   file_max_chars?: number
   /** 写权限（T23）。不传 = 不改动。 */
   file_write_enabled?: boolean
+  file_approval_required?: boolean
+  file_approval_timeout?: number
   file_allow_secrets?: boolean
 }
 

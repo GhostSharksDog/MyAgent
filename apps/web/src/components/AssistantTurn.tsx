@@ -1,17 +1,20 @@
 import { isTurnRunning, runWarnings } from '../lib/runtime'
 import { computeTurnView } from '../lib/stream'
 import { formatCompact, formatNumber } from '../lib/format'
-import type { ChatItem } from '../lib/types'
+import type { ChatItem, FileApprovalDecision } from '../lib/types'
 import { ExecutionProcess } from './ExecutionProcess'
 import { IconCoins, IconLayers } from './Icons'
 import { Markdown } from './Markdown'
 import { Notice } from './Notice'
+import { FileApprovalPanel } from './FileApprovalPanel'
 
 type AssistantItem = Extract<ChatItem, { kind: 'assistant' }>
 
-export interface AssistantTurnProps { item: AssistantItem; showMeta?: boolean; onOpenRun?: (id: string) => void }
+export interface AssistantTurnProps { item: AssistantItem; showMeta?: boolean; onOpenRun?: (id: string) => void;
+  active?: boolean; approvalDisabled?: boolean;
+  onDecideApproval?: (assistantId: string, id: string, decision: FileApprovalDecision) => Promise<void> }
 
-export function AssistantTurn({ item, showMeta = true, onOpenRun }: AssistantTurnProps) {
+export function AssistantTurn({ item, showMeta = true, onOpenRun, active = false, approvalDisabled, onDecideApproval }: AssistantTurnProps) {
   const { state } = item
   const view = computeTurnView(state)
   const streaming = isTurnRunning(state)
@@ -29,9 +32,12 @@ export function AssistantTurn({ item, showMeta = true, onOpenRun }: AssistantTur
           {!view.answerIsFinal && streaming && <span className="caret" />}</div>
           : streaming ? <div className="thinking" role="status">
             <span className="thinking__dots"><span /><span /><span /></span>
-            <span>{state.phase === 'connecting' ? '正在连接…' : view.runningTool ? '正在调用 ' + view.runningTool.name : '正在思考…'}</span>
+            <span>{state.phase === 'connecting' ? '正在连接…' : state.approvals.some((approval) => approval.status === 'pending')
+              ? '请核对下方修改预览并决定是否批准' : view.runningTool ? '正在调用 ' + view.runningTool.name : '正在思考…'}</span>
           </div> : !state.error && !item.restored ? <p className="muted">本轮没有产出答案，可展开执行过程查看已有内容。</p> : null}
       </div>
+      <FileApprovalPanel approvals={state.approvals} active={active && streaming && !!state.runId}
+        disabled={approvalDisabled} assistantId={item.id} onDecide={onDecideApproval} />
       {!!warnings.length && <div className="run-warnings" data-testid="run-warnings">
         {warnings.map((warning) => <Notice key={warning.title} tone={warning.tone}
           role={warning.tone === 'error' ? 'alert' : undefined} title={warning.title} text={warning.text} />)}

@@ -33,7 +33,7 @@ export default function App() {
   const server = useServerInfo()
   const sessions = useSessions()
   const settings = useSettings()
-  const chat = useChat({ onTurnSettled: sessions.refresh })
+  const chat = useChat({ onTurnSettled: sessions.refresh, approvalDisabled: sessions.transitioning })
   const [width, setWidth] = useState(window.innerWidth)
   const widthRef = useRef(width)
   const narrow = width <= MOBILE_BREAKPOINT
@@ -207,7 +207,9 @@ export default function App() {
                   action={<button type="button" className="btn" onClick={handleRefresh}>重试连接</button>} />
               </div>
             ) : hasMessages ? (
-              <div className="chat__inner"><MessageList items={chat.items} showMeta={prefs.prefs.showMeta} onOpenRun={openRuns} /></div>
+              <div className="chat__inner"><MessageList items={chat.items} showMeta={prefs.prefs.showMeta} onOpenRun={openRuns}
+                activeAssistantId={chat.activeAssistantId} approvalDisabled={sessions.transitioning}
+                onDecideApproval={chat.decideApproval} /></div>
             ) : <EmptyState />}
           </div>
           <div className="composer-wrap">

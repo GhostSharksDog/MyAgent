@@ -31,6 +31,7 @@ import type { Preferences } from '../hooks/usePreferences'
 import type { ThemePreference } from '../hooks/useTheme'
 import { getAccessKey, setAccessKey } from '../lib/access'
 import { parseTokenBudget } from '../lib/runtime'
+import { parseApprovalTimeout } from '../lib/approvals'
 import type { SettingsUpdatePayload } from '../lib/types'
 import type { useSettings } from '../hooks/useSettings'
 import { useDialogFocus } from '../hooks/useDialogFocus'
@@ -90,6 +91,8 @@ export function SettingsDialog({
   const [corpusIncludeSeed, setCorpusIncludeSeed] = useState(false)
   // 写权限（T23）与敏感文件权限。默认 false，打开要用户显式勾。
   const [fileWriteEnabled, setFileWriteEnabled] = useState(false)
+  const [fileApprovalRequired, setFileApprovalRequired] = useState(true)
+  const [fileApprovalTimeout, setFileApprovalTimeout] = useState('300')
   const [allowSecrets, setAllowSecrets] = useState(false)
   const [planBudget, setPlanBudget] = useState('60000')
   const [multiBudget, setMultiBudget] = useState('80000')
@@ -124,6 +127,8 @@ export function SettingsDialog({
     setCorpusPaths(saved.agent.corpus_paths.join('\n'))
     setCorpusIncludeSeed(saved.agent.corpus_include_seed)
     setFileWriteEnabled(saved.agent.file_write_enabled)
+    setFileApprovalRequired(saved.agent.file_approval_required ?? true)
+    setFileApprovalTimeout(String(saved.agent.file_approval_timeout ?? 300))
     setAllowSecrets(saved.agent.file_allow_secrets)
     setPlanBudget(String(saved.agent.plan_max_total_tokens ?? 60000))
     setMultiBudget(String(saved.agent.multi_max_total_tokens ?? 80000))
@@ -136,6 +141,8 @@ export function SettingsDialog({
     const plan = parseTokenBudget(planBudget)
     const multi = parseTokenBudget(multiBudget)
     if (section === 'agent' && (plan === null || multi === null)) return
+    const approvalTimeout = parseApprovalTimeout(fileApprovalTimeout)
+    if (section === 'workspace' && approvalTimeout === null) return
     // 键名是**后端的字段名**（snake_case）。写错会被后端 extra="forbid" 拒成 422，
     // 而那正是想要的：宁可当场报错，也不要静默地什么都没改。
     const payload: SettingsUpdatePayload = section === 'agent' ? {
@@ -151,6 +158,8 @@ export function SettingsDialog({
     } : {
       workspace_root: workspaceRoot,
       file_write_enabled: fileWriteEnabled,
+      file_approval_required: fileApprovalRequired,
+      file_approval_timeout: approvalTimeout ?? 300,
       file_allow_secrets: allowSecrets,
     }
     if (await save(payload)) onUpdated?.()
@@ -371,6 +380,30 @@ export function SettingsDialog({
                   </span>
                 </label>
 
+                <label className="settings__field settings__field--check">
+                  <input type="checkbox" checked={fileApprovalRequired} disabled={!fileWriteEnabled}
+                    onChange={(event) => setFileApprovalRequired(event.target.checked)} />
+                  <span>写入前预览确认（推荐）
+                    <span className="settings__hint">
+                      开启写权限后，先展示完整差异，由你逐次批准或拒绝；批准后再次核验文件与权限。
+                      文件发生变化时，此次修改不写入，需要重新预览。
+                    </span>
+                  </span>
+                </label>
+                {fileWriteEnabled && !fileApprovalRequired && <p className="settings__alert" role="alert">
+                  已选择直接写入：Agent 调用写工具时不再等待你的逐次确认，完成的修改不会自动撤销。
+                </p>}
+                <label className="settings__field">
+                  <span className="settings__label">文件确认等待时限（秒）</span>
+                  <input className="settings__input" type="number" min="0" step="any"
+                    disabled={!fileWriteEnabled || !fileApprovalRequired} value={fileApprovalTimeout}
+                    onChange={(event) => setFileApprovalTimeout(event.target.value)} />
+                  <span className="settings__hint">默认 300 秒，0 表示不单独限时。等待仍消耗本轮时长预算。
+                    确认方式与等待时限保存后从下一轮开始生效。</span>
+                </label>
+                {parseApprovalTimeout(fileApprovalTimeout) === null &&
+                  <p role="alert" className="settings__alert">确认等待时限须为非负有限数字。</p>}
+
                 <p className="settings__hint settings__hint--warn">
                   <IconAlert size={14} /> 只授权需要的目录。文件中的恶意指令可能影响模型行为，请留意工具操作。
                 </p>
@@ -456,6 +489,7 @@ export function SettingsDialog({
                 className="btn btn--primary"
                 onClick={() => void handleSave()}
                 disabled={saving || loading || !saved ||
+                  (section === 'workspace' && parseApprovalTimeout(fileApprovalTimeout) === null) ||
                   (section === 'agent' && (parseTokenBudget(planBudget) === null || parseTokenBudget(multiBudget) === null))}
               >
                 {saving ? '保存中…' : '保存此页'}

@@ -15,6 +15,7 @@
 import { accessHeaders } from './access'
 import type {
   AgentMode,
+  FileApprovalDecision,
   ApiMeta,
   DeleteResponse,
   HealthStatus,
@@ -137,6 +138,16 @@ export function fetchMeta(signal?: AbortSignal): Promise<ApiMeta> {
 
 export function fetchTools(signal?: AbortSignal): Promise<ToolInfo[]> {
   return requestJson<ToolInfo[]>('/api/tools', { signal })
+}
+
+export async function decideFileApproval(runId: string, id: string, decision: FileApprovalDecision,
+  signal?: AbortSignal): Promise<{ status: 'approved' | 'rejected' }> {
+  const result = await requestJson<{ status?: unknown }>(`/api/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(id)}`,
+    { method: 'POST', body: { decision }, signal })
+  if (!result || (result.status !== 'approved' && result.status !== 'rejected')) {
+    throw new ApiError(502, '服务未返回有效确认状态，请等待执行事件或检查服务日志，不能据此认定写入成功。')
+  }
+  return { status: result.status }
 }
 
 // ============================================================

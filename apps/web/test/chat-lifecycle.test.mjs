@@ -5,6 +5,7 @@ import test from 'node:test'
 
 import { streamAgentEvents } from '../src/lib/sse.ts'
 import { applyEvent, emptyTurn } from '../src/lib/stream.ts'
+import { closeApprovals } from '../src/lib/approvals.ts'
 
 // 执行真实 Hook 源码，只替换 React 的状态容器和网络入口。
 // 取消底层流的延迟保留为真实 ReadableStream 行为，不能让旧轮次立刻消失。
@@ -12,7 +13,8 @@ const source = stripTypeScriptTypes(readFileSync(new URL('../src/hooks/useChat.t
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"]\s*$/gm, '')
   .replace(/^export /gm, '')
 const makeHook = new Function('useState', 'useRef', 'useCallback', 'useEffect',
-  'openChatStream', 'streamAgentEvents', 'applyEvent', 'emptyTurn', 'ApiError', source + '\nreturn useChat;')
+  'openChatStream', 'streamAgentEvents', 'applyEvent', 'emptyTurn', 'ApiError', 'closeApprovals',
+  'decideFileApproval', source + '\nreturn useChat;')
 
 function deferred() {
   let resolve, reject
@@ -20,7 +22,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-function harness(open) {
+function harness(open, decide = async () => ({ status: 'approved' })) {
   const slots = []
   const cleanups = []
   let cursor = 0
@@ -47,11 +49,11 @@ function harness(open) {
     }
   }
   const useChat = makeHook(useState, useRef, (callback) => callback, useEffect,
-    open, streamAgentEvents, applyEvent, emptyTurn, class ApiError extends Error {})
+    open, streamAgentEvents, applyEvent, emptyTurn, class ApiError extends Error {}, closeApprovals, decide)
   let settled = 0
-  const render = () => {
+  const render = (options = {}) => {
     cursor = 0
-    return useChat({ onTurnSettled: () => { settled++ } })
+    return useChat({ onTurnSettled: () => { settled++ }, ...options })
   }
   return { render, unmount: () => cleanups.forEach((cleanup) => cleanup()),
     get settled() { return settled }, get updates() { return updates } }
@@ -166,4 +168,200 @@ test('旧请求迟到异常不污染当前轮；卸载后不更新状态或刷�
   await current
   assert.equal(view.updates, count, '卸载后的异常不能 setState')
   assert.equal(view.settled, 0)
+})
+
+const approval = (extra = {}) => ({ id: 'proposal-1', path: 'public.txt', operation: 'create',
+  diff: '--- /dev/null\n+++ b/public.txt\n@@ -0,0 +1 @@\n+公开样本\n',
+  before_bytes: 0, after_bytes: 12, status: 'pending', message: '请确认', ...extra })
+
+function controlledChat(decide) {
+  const streams = []
+  const h = harness(async () => {
+    let streamController
+    const body = new ReadableStream({ start(controller) { streamController = controller } })
+    streams.push({ push(event) { streamController.enqueue(new TextEncoder().encode(
+      `data: ${JSON.stringify(event)}\n\n`)) }, close() { streamController.close() } })
+    return new Response(body, { headers: { 'X-Run-Id': `run-${streams.length}` } })
+  }, decide)
+  return { h, streams }
+}
+
+test('确认同步锁挡住同帧双击，POST 成功只显示 approved；applied 由 SSE 确认', async () => {
+  const request = deferred()
+  const calls = []
+  const { h, streams } = controlledChat((...args) => { calls.push(args); return request.promise })
+  const sending = h.render().send('建立公开文件', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const chat = h.render()
+  const id = chat.activeAssistantId
+  const deciding = chat.decideApproval(id, 'proposal-1', 'approve')
+  await chat.decideApproval(id, 'proposal-1', 'approve')
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0].slice(0, 3), ['run-1', 'proposal-1', 'approve'])
+  assert.equal(h.render().items.at(-1).state.approvals[0].busy, true)
+  request.resolve({ status: 'approved' })
+  await deciding
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'approved')
+  assert.match(h.render().items.at(-1).state.approvals[0].message, /才算完成/)
+  streams[0].push({ type: 'approval_update', approval: approval({ status: 'applied', message: '写入完成' }) })
+  streams[0].push({ type: 'done', stopped_reason: 'finished' })
+  streams[0].close()
+  await sending
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'applied')
+  await h.render().decideApproval(id, 'proposal-1', 'approve')
+  assert.equal(calls.length, 1, 'done 后旧确认不能发请求')
+})
+
+test('写入 SSE 先于 HTTP 返回时，迟到 approved 不覆盖 applied', async () => {
+  const request = deferred()
+  const { h, streams } = controlledChat(() => request.promise)
+  const sending = h.render().send('建立公开文件', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const deciding = h.render().decideApproval(h.render().activeAssistantId, 'proposal-1', 'approve')
+  streams[0].push({ type: 'approval_update', approval: approval({ status: 'applied' }) })
+  await tick()
+  request.resolve({ status: 'approved' })
+  await deciding
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'applied')
+  h.render().abort()
+  await sending
+})
+
+test('确认失败保留后端可操作错误，释放 busy 后可重试拒绝', async () => {
+  const calls = []
+  const { h, streams } = controlledChat((...args) => {
+    const request = deferred(); calls.push({ args, ...request }); return request.promise
+  })
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const id = h.render().activeAssistantId
+  const first = h.render().decideApproval(id, 'proposal-1', 'approve')
+  calls[0].reject(new Error('访问密钥无效，请重新填写'))
+  await first
+  assert.equal(h.render().items.at(-1).state.approvals[0].busy, false)
+  assert.match(h.render().items.at(-1).state.approvals[0].error, /重新填写/)
+  const retry = h.render().decideApproval(id, 'proposal-1', 'reject')
+  assert.equal(calls[1].args[2], 'reject')
+  calls[1].resolve({ status: 'rejected' })
+  await retry
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'rejected')
+  h.render().abort()
+  await sending
+})
+
+for (const change of ['abort', 'clear', 'loadHistory']) {
+  test(`${change} 立即关闭确认并取消其网络；迟到结果不能影响新轮`, async () => {
+    const request = deferred()
+    const calls = []
+    const { h, streams } = controlledChat((...args) => { calls.push(args); return request.promise })
+    const sending = h.render().send('公开旧任务', null)
+    await tick()
+    streams[0].push({ type: 'approval_request', approval: approval() })
+    await tick()
+    const id = h.render().activeAssistantId
+    const deciding = h.render().decideApproval(id, 'proposal-1', 'approve')
+    if (change === 'loadHistory') h.render().loadHistory([])
+    else h.render()[change]()
+    assert.equal(calls[0][3].aborted, true)
+    if (change === 'abort') assert.equal(h.render().items.at(-1).state.approvals[0].status, 'cancelled')
+    await h.render().decideApproval(id, 'proposal-1', 'approve')
+    assert.equal(calls.length, 1)
+    await sending
+    const current = h.render().send('公开新任务', null)
+    await tick()
+    request.resolve({ status: 'approved' })
+    await deciding
+    assert.deepEqual(h.render().items.at(-1).state.approvals, [])
+    assert.equal(h.render().isStreaming, true)
+    h.render().abort()
+    await current
+  })
+}
+
+test('未决确认遇到预算 done 后关闭，后续点击不能发 POST', async () => {
+  let decisions = 0
+  const { h, streams } = controlledChat(async () => { decisions++; return { status: 'approved' } })
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const id = h.render().activeAssistantId
+  streams[0].push({ type: 'done', stopped_reason: 'timeout' })
+  streams[0].close()
+  await sending
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'cancelled')
+  await h.render().decideApproval(id, 'proposal-1', 'approve')
+  assert.equal(decisions, 0)
+})
+
+test('只能决定活跃助手消息中的已收到提案，不能猜测旧消息或提案 ID', async () => {
+  let calls = 0
+  const { h, streams } = controlledChat(async () => { calls++; return { status: 'approved' } })
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  await h.render().decideApproval('history-1', 'proposal-1', 'approve')
+  await h.render().decideApproval(h.render().activeAssistantId, 'unknown', 'approve')
+  assert.equal(calls, 0)
+  h.render().abort()
+  await sending
+})
+
+test('卸载后在途确认响应不更新状态，当前 SSE 也被取消', async () => {
+  const request = deferred()
+  let signal
+  const { h, streams } = controlledChat((...args) => { signal = args[3]; return request.promise })
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const deciding = h.render().decideApproval(h.render().activeAssistantId, 'proposal-1', 'approve')
+  h.unmount()
+  const updates = h.updates
+  assert.equal(signal.aborted, true)
+  request.resolve({ status: 'approved' })
+  await deciding
+  await sending
+  assert.equal(h.updates, updates)
+})
+
+test('切换会话读取期间真实 Hook 暂停审批，失败返回原会话后可继续决定', async () => {
+  let calls = 0
+  const { h, streams } = controlledChat(async () => { calls++; return { status: 'rejected' } })
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: approval() })
+  await tick()
+  const previousAction = h.render().decideApproval
+  const id = h.render().activeAssistantId
+  h.render({ approvalDisabled: true })
+  await previousAction(id, 'proposal-1', 'approve')
+  assert.equal(calls, 0, '旧渲染保存的回调也必须读取当前切换标记')
+  assert.equal(h.render({ approvalDisabled: true }).items.at(-1).state.approvals[0].status, 'pending')
+  await h.render({ approvalDisabled: false }).decideApproval(id, 'proposal-1', 'reject')
+  assert.equal(calls, 1)
+  h.render().abort()
+  await sending
+})
+
+test('done 后连接尚未收尾时点停止，不覆盖权威终态和已写入记录', async () => {
+  const { h, streams } = controlledChat(async () => ({ status: 'approved' }))
+  const sending = h.render().send('公开任务', null)
+  await tick()
+  streams[0].push({ type: 'approval_update', approval: approval({ status: 'applied' }) })
+  streams[0].push({ type: 'done', stopped_reason: 'finished' })
+  await tick()
+  h.render().abort()
+  await sending
+  assert.equal(h.render().items.at(-1).state.phase, 'done')
+  assert.equal(h.render().items.at(-1).state.stoppedReason, 'finished')
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'applied')
+  assert.equal(h.render().notice, null)
 })
