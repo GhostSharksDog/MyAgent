@@ -40,6 +40,7 @@ from app.api.schemas import (
 from app.core.config import get_settings
 from app.core.resilience import TokenBucket
 from app.core.telemetry import METRICS, record_agent_event
+from app.llm.tokens import tokenizer_name
 from app.llm.types import ChatMessage
 from app.rag.backend import describe_knowledge_backend
 from app.session.models import Session
@@ -213,6 +214,12 @@ async def healthz(request: Request) -> dict[str, object]:
         # 排查会从"检索为什么没结果"这个完全错误的方向开始。
         "circuit_enabled": rc.circuit_enabled,
         "rate_limit_enabled": rc.rate_limit_enabled,
+        # 上下文预算与**估算器**必须可见（技术债 T09）。
+        # 估算器是"精确分词"还是"启发式"，两者的精度差一个量级 ——
+        # 只看到一个 token 数的话，没人知道该不该信它。
+        # 0 表示不限制（与配置项同义）。
+        "context_token_budget": settings.agent.context_token_budget,
+        "tokenizer": tokenizer_name(),
         # 回放状态必须可见：演示前最怕"以为在放录制内容，其实在真调模型" ——
         # 那会在现场变成一个无法解释的等待（或者直接失败）。
         "demo_replay": (

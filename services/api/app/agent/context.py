@@ -98,15 +98,27 @@ class ContextBudget:
     def enabled(self) -> bool:
         return self.budget_tokens > 0
 
-    def fit(self, messages: Sequence[ChatMessage]) -> tuple[list[ChatMessage], TrimReport]:
-        """返回 (裁剪后的消息, 报告)。未启用预算时原样返回。"""
+    def fit(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        protect_prefix: int | None = None,
+    ) -> tuple[list[ChatMessage], TrimReport]:
+        """返回 (裁剪后的消息, 报告)。未启用预算时原样返回。
+
+        `protect_prefix` 可以**按次覆盖**：调用方比构造函数更清楚这一次
+        前几条是"背景"（系统提示 / 长期记忆 / 摘要）。实测中这一点有意义 ——
+        长期记忆没召回任何事实时它那一条根本不存在，构造时按"有长期记忆"
+        猜出来的条数会多保护一条真实的对话消息。
+        """
         report = TrimReport(before_tokens=count_messages_tokens(messages))
         if not self.enabled:
             report.after_tokens = report.before_tokens
             return list(messages), report
 
-        head = list(messages[: self.protect_prefix])
-        rest = list(messages[self.protect_prefix :])
+        prefix = self.protect_prefix if protect_prefix is None else max(0, protect_prefix)
+        head = list(messages[:prefix])
+        rest = list(messages[prefix:])
         groups = _group(rest)
 
         head_tokens = count_messages_tokens(head)

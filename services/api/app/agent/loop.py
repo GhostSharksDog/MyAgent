@@ -42,7 +42,7 @@ from app.agent.prompts import build_system_prompt
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
 from app.llm.tokens import record_prompt_estimate, tokenizer_name
-from app.llm.types import ChatMessage, ToolCall, Usage
+from app.llm.types import ChatMessage, Role, ToolCall, Usage
 from app.tools.base import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,25 @@ def _call_signature(call: ToolCall) -> str:
     else:
         payload = f"{call.name}|{call.raw_arguments.strip()}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _leading_system_count(messages: Sequence[ChatMessage]) -> int:
+    """开头连续有多少条 `system` 消息。
+
+    它们是要被**保护**的前缀：系统提示（角色设定）、长期记忆（跨会话的稳定事实）、
+    前情摘要（较早对话的压缩）。三者都是"背景"，裁掉任何一个的损失都大于
+    裁掉一轮旧对话。
+
+    用"数一遍"而不是构造时约定一个数字：这几条是否存在取决于本次调用
+    （长期记忆可能一条事实都没召回，摘要可能还没生成）。约定数字会在
+    那种情况下多保护一条**真实的对话消息**，而那条消息本该是最先被丢的。
+    """
+    count = 0
+    for message in messages:
+        if message.role is not Role.SYSTEM:
+            break
+        count += 1
+    return count
 
 
 class Agent:
@@ -207,7 +226,14 @@ class Agent:
             # 只在开头检查等于没检查 —— 增长全发生在后面。
             #
             # 未启用（budget=0）时 `fit()` 会立刻返回，只多一次 token 计数。
-            messages, trim = self._context_budget.fit(messages)
+            #
+            # 保护前缀**按实际的前导 system 消息数**算，而不是构造时猜一个：
+            # 系统提示、长期记忆、前情摘要都是"背景"，但它们存在的条数
+            # 取决于这次调用（长期记忆没召回事实时那一条就不存在）。
+            # 猜多了会把一条真实的旧对话永久保护起来。
+            messages, trim = self._context_budget.fit(
+                messages, protect_prefix=_leading_system_count(messages)
+            )
 
             # ---------- 1. 调用模型（流式） ----------
             accumulator = StreamAccumulator()
