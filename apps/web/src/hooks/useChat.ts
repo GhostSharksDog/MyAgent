@@ -162,6 +162,8 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
           return
         }
 
+        const runId = response.headers.get('X-Run-Id')
+        if (runId) setItems((prev) => patchAssistant(prev, assistantId, (state) => ({ ...state, runId })))
         for await (const event of streamAgentEvents(response, { signal: controller.signal })) {
           // 切换历史或清空后，旧流的迟到事件不能修改当前轮次。
           if (controllerRef.current !== controller || !aliveRef.current) break

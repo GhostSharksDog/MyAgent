@@ -24,3 +24,4 @@
 /* 设置窗口外壳（圆角窗口 + 左栏分类 + 模型卡片）。
    排在 settings.css 之后：它要能覆盖表单原子的默认间距。 */
 @import './dialog.css';
+@import './runs.css';

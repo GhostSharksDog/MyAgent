@@ -14,6 +14,7 @@ import { FolderPicker } from './components/FolderPicker'
 import { SettingsDialog } from './components/SettingsDialog'
 import type { SettingsSection } from './components/SettingsDialog'
 import { ToolsDrawer } from './components/ToolsDrawer'
+import { RunHistoryDialog } from './components/RunHistoryDialog'
 import { TopBar } from './components/TopBar'
 import { useChat } from './hooks/useChat'
 import { useServerInfo } from './hooks/useServerInfo'
@@ -39,6 +40,8 @@ export default function App() {
   const fileOverlay = width < FILE_OVERLAY_BREAKPOINT
   const [draft, setDraft] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [runsOpen, setRunsOpen] = useState(false)
+  const [runId, setRunId] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false)
@@ -88,6 +91,11 @@ export default function App() {
   const openSettings = useCallback((section: SettingsSection = 'general') => {
     setSettingsSection(section)
     setSettingsOpen(true)
+  }, [])
+  const openRuns = useCallback((id: string | null = null) => {
+    setRunId(id)
+    setRunsOpen(true)
+    if (window.innerWidth <= MOBILE_BREAKPOINT) setSidebarOpen(false)
   }, [])
   const handleRefresh = useCallback(() => {
     void server.reload()
@@ -181,6 +189,7 @@ export default function App() {
           onClose={() => setSidebarOpen(false)} onSelect={handleSelect} onCreate={handleCreate}
           onDelete={(id) => void sessions.remove(id)} onRefresh={handleRefresh}
           onOpenTools={() => setToolsOpen(true)} onOpenSettings={() => openSettings('workspace')}
+          onOpenRuns={() => openRuns()}
           status={status} workspaceRoot={settings.saved?.agent.workspace_root ?? ''}
           workspaceLoaded={settings.saved !== null} workspaceLoading={settings.loading}
           workspaceError={settings.error} workspaceWritable={settings.saved?.agent.file_write_enabled === true}
@@ -198,7 +207,7 @@ export default function App() {
                   action={<button type="button" className="btn" onClick={handleRefresh}>重试连接</button>} />
               </div>
             ) : hasMessages ? (
-              <div className="chat__inner"><MessageList items={chat.items} showMeta={prefs.prefs.showMeta} /></div>
+              <div className="chat__inner"><MessageList items={chat.items} showMeta={prefs.prefs.showMeta} onOpenRun={openRuns} /></div>
             ) : <EmptyState />}
           </div>
           <div className="composer-wrap">
@@ -236,6 +245,7 @@ export default function App() {
             onSwitchFolder={() => void handleOpenFolder()} />
         </>}
       </div>
+      <RunHistoryDialog open={runsOpen} initialId={runId} sessionId={sessions.activeId} onClose={() => setRunsOpen(false)} />
       <ToolsDrawer open={toolsOpen} tools={server.tools} meta={server.meta} health={server.health}
         sessionId={sessions.activeId} onRefresh={handleRefresh} onClose={() => setToolsOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)}

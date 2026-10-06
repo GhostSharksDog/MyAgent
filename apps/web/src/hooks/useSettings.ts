@@ -96,7 +96,9 @@ export function useSettings() {
       const result = await fetchSettings()
       if (!isCurrent()) return false
       setSaved(result)
-      setNotice('已保存并立即生效，无需重启')
+      setNotice(result.run_history?.restart_required
+        ? '已保存。运行记录的存储切换需重启服务；其他设置立即生效。'
+        : '已保存并立即生效，无需重启')
       return true
     } catch (err) {
       if (isCurrent()) setError(err instanceof Error ? err.message : '保存失败')

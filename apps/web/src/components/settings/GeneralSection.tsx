@@ -52,6 +52,7 @@ export function GeneralSection({
                 className={`theme-card${active ? ' theme-card--active' : ''}`}
                 onClick={() => onThemeChange(item.value)}
                 aria-pressed={active}
+                aria-label={item.label}
               >
                 <span className={`theme-card__preview theme-card__preview--${item.value}`} aria-hidden>
                   <span className="theme-card__bar" />

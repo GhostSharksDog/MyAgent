@@ -97,6 +97,8 @@ function patchStep(
  * 旧前端遇到不认识的事件应当继续保持可用，而不是崩在 `switch` 的默认分支上。
  */
 export function applyEvent(turn: AssistantTurnState, event: AgentEvent): AssistantTurnState {
+  if (event.run_id) turn = { ...turn, runId: event.run_id }
+  if (event.record_saved !== undefined) turn = { ...turn, recordSaved: event.record_saved }
   const stepIndex = typeof event.step === 'number' ? event.step : lastStepIndex(turn.steps)
 
   switch (event.type) {

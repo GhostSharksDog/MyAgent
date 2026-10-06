@@ -815,6 +815,275 @@ def keyboard_checks(cdp: Cdp) -> None:
     close_settings(cdp)
 
 
+def run_history_checks(cdp: Cdp, directory: Path) -> None:
+    print("\n=== 运行记录验收（合成 API，无模型请求）===")
+    cdp.viewport(1440, 900)
+    check(
+        cdp.click(
+            "查看运行摘要",
+            scope="[...document.querySelectorAll('article.turn')].at(-1)",
+        ),
+        "答案附近可直接打开本轮摘要",
+    )
+    check(cdp.wait("!!document.querySelector('.runs-detail h3')"), "本轮执行摘要已读取")
+    check(
+        cdp.eval(
+            "document.querySelector('.runs-detail')?.textContent.includes('已取消')"
+        ),
+        "停止后的轮次保留取消状态",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('.runs-detail')?.textContent.includes('用量统计不完整')"
+        ),
+        "取消后的未知用量明确显示",
+    )
+    focus_trap_check(cdp, "运行记录")
+    check(cdp.click("关闭运行记录"), "关闭运行记录")
+    if cdp.eval(
+        "document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='true'"
+    ):
+        cdp.click("切换会话列表")
+    check(
+        cdp.click("运行记录", scope="document.querySelector('.sidebar')"),
+        "会话栏可进入所有运行记录",
+    )
+    check(
+        cdp.wait("document.querySelectorAll('.runs-row').length>0"),
+        "历史运行列表有可点击记录",
+    )
+    cdp.eval(
+        "(()=>{const s=document.querySelector('[aria-label=\"运行状态\"]');s.value='token_budget';s.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    )
+    check(
+        cdp.wait(
+            "document.querySelectorAll('.runs-row').length>0&&[...document.querySelectorAll('.runs-row')].every(e=>e.textContent.includes('累计 token'))"
+        ),
+        "状态筛选只显示 token 预算终止",
+    )
+    cdp.eval(
+        "[...document.querySelectorAll('.runs-row')].find(e=>e.textContent.includes('public-archi'))?.click()"
+    )
+    check(
+        cdp.wait(
+            "document.querySelector('.runs-detail')?.textContent.includes('public-archive-budget')"
+        ),
+        "旧预算终止可以重新查看",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('.runs-detail')?.textContent.includes('上下文已裁剪')&&document.querySelector('.runs-detail')?.textContent.includes('执行摘要已截断')"
+        ),
+        "裁剪与摘要截断保持可见",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('.runs-timeline')?.textContent.includes('子任务')&&document.querySelector('.runs-timeline')?.textContent.includes('结果已截断')"
+        ),
+        "子任务工具摘要可查看",
+    )
+    layout_check(cdp, "1440×900 运行记录")
+    cdp.screenshot(directory, "11-runs-light-1440")
+    cdp.viewport(1024, 768)
+    layout_check(cdp, "1024×768 运行记录")
+    cdp.screenshot(directory, "12-runs-light-1024")
+    cdp.viewport(390, 844)
+    layout_check(cdp, "390×844 运行记录")
+    cdp.screenshot(directory, "13-runs-light-390")
+    check(
+        cdp.eval(
+            "document.querySelector('.runs-detail').clientHeight>100&&getComputedStyle(document.querySelector('.runs-detail')).overflowY==='auto'"
+        ),
+        "手机摘要有独立滚动区",
+    )
+    cdp.click("关闭运行记录")
+    check(cdp.wait("!document.querySelector('.runs-dialog')"), "手机运行记录可以关闭")
+    check(cdp.click("切换会话列表"), "手机重新打开会话抽屉")
+    check(
+        cdp.click("运行记录", scope="document.querySelector('.sidebar')"),
+        "手机会话入口可打开运行记录",
+    )
+    check(
+        cdp.wait(
+            "!!document.querySelector('.runs-dialog')&&document.querySelector('.sidebar').getAttribute('aria-hidden')==='true'"
+        ),
+        "手机打开记录时会话抽屉关闭",
+    )
+    cdp.click("关闭运行记录")
+    check(
+        cdp.wait("!document.querySelector('.runs-dialog')"),
+        "手机会话入口打开的记录可以关闭",
+    )
+    check(
+        cdp.eval("document.activeElement?.getAttribute('aria-label')==='切换会话列表'"),
+        "手机关闭记录后焦点回到可见入口",
+    )
+    cdp.viewport(1440, 900)
+    cdp.click("切换会话列表")
+    cdp.click("运行记录", scope="document.querySelector('.sidebar')")
+    check(
+        cdp.wait("document.querySelectorAll('.runs-row').length>3"),
+        "桌面重新打开记录列表",
+    )
+    # The first delayed detail must not replace the subsequently selected run.
+    cdp.eval(
+        "(()=>{const s=document.querySelector('[aria-label=\"运行状态\"]');s.value='';s.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    )
+    check(cdp.wait("document.querySelectorAll('.runs-row').length>3"), "恢复全部记录")
+    cdp.eval(
+        "window.__fixture.deferRunDetail=true;[...document.querySelectorAll('.runs-row')].find(e=>e.textContent.includes('执行出错'))?.click()"
+    )
+    check(cdp.wait("window.__fixture.pendingRuns.length===1"), "对照组挂起旧详情请求")
+    cdp.eval(
+        "[...document.querySelectorAll('.runs-row')].find(e=>e.textContent.includes('正常结束'))?.click()"
+    )
+    check(
+        cdp.wait(
+            "document.querySelector('.runs-detail h3')?.textContent.includes('正常结束')"
+        ),
+        "新选择读取正常结束摘要",
+    )
+    cdp.eval("window.__fixture.releaseRuns()")
+    check(
+        cdp.wait(
+            "window.__fixture.pendingRuns.length===0&&document.querySelector('.runs-detail h3')?.textContent.includes('正常结束')"
+        ),
+        "迟到的旧详情不能覆盖新选择",
+    )
+    before = cdp.eval("window.__fixture.runs.length")
+    check(
+        cdp.click("删除记录", scope="document.querySelector('.runs-detail')"),
+        "删除先进入确认状态",
+    )
+    check(cdp.eval(f"window.__fixture.runs.length==={before}"), "首次点击不删除")
+    check(cdp.click("确认删除这条摘要"), "确认后删除摘要")
+    check(
+        cdp.wait(
+            f"window.__fixture.runs.length==={before - 1}&&!document.querySelector('.runs-detail h3')"
+        ),
+        "删除完成后列表和详情更新",
+    )
+    cdp.eval("window.__fixture.runsFailure=true")
+    check(
+        cdp.click("刷新", scope="document.querySelector('.runs-dialog')"),
+        "刷新运行列表",
+    )
+    check(
+        cdp.wait(
+            "document.querySelector('.runs-dialog')?.textContent.includes('运行记录暂不可用')"
+        ),
+        "读取失败显示可操作错误",
+    )
+    check(
+        cdp.eval(
+            "!document.querySelector('.runs-dialog').textContent.includes('没有符合条件')"
+        ),
+        "读取失败不能冒充空记录",
+    )
+    cdp.eval("window.__fixture.runsFailure=false")
+    check(
+        cdp.click("刷新", scope="document.querySelector('.runs-dialog')"),
+        "失败后可以重试",
+    )
+    check(
+        cdp.wait(
+            "document.querySelectorAll('.runs-row').length>0&&!document.querySelector('.runs-dialog').textContent.includes('暂不可用')"
+        ),
+        "重试恢复列表",
+    )
+    cdp.click("关闭运行记录")
+    check(
+        cdp.wait("!document.querySelector('.runs-dialog')"), "运行记录关闭后回到主界面"
+    )
+    check(cdp.click("设置"), "运行记录关闭后可打开设置")
+    check(
+        cdp.wait("!!document.querySelector('[aria-label=\"设置\"] .dialog__nav')"),
+        "设置分类已挂载",
+    )
+    check(
+        cdp.click(
+            "Agent",
+            scope="document.querySelector('[role=dialog][aria-label=\"设置\"]')",
+        ),
+        "定位 Agent 设置分类",
+    )
+    check(
+        cdp.wait(
+            "[...document.querySelectorAll('[role=dialog][aria-label=\"设置\"] button')].some(b=>b.textContent.trim()==='保存此页'&&!b.disabled)"
+        ),
+        "设置读取完成且可保存",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('[role=dialog][aria-label=\"设置\"]')?.textContent.includes('持久保存运行摘要')"
+        ),
+        "Agent 设置包含明确持久化开关",
+    )
+    cdp.eval(
+        "(()=>{const l=[...document.querySelectorAll('label')].find(l=>l.textContent.includes('持久保存运行摘要'));l.querySelector('input').click();})()"
+    )
+    check(cdp.click("保存此页"), "保存持久化配置")
+    check(
+        cdp.wait(
+            "document.querySelector('[role=dialog][aria-label=\"设置\"]')?.textContent.includes('等待重启')"
+        ),
+        "已保存配置与当前内存存储区分",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('[role=dialog][aria-label=\"设置\"]')?.textContent.includes('存储切换需重启')"
+        ),
+        "保存反馈说明存储切换需要重启",
+    )
+    # Restore only the fixture state, never the user's settings.
+    cdp.eval(
+        "(()=>{const l=[...document.querySelectorAll('label')].find(l=>l.textContent.includes('持久保存运行摘要'));l.querySelector('input').click();})()"
+    )
+    cdp.click("保存此页")
+    check(
+        cdp.wait(
+            "!document.querySelector('[role=dialog][aria-label=\"设置\"]').textContent.includes('等待重启')"
+        ),
+        "临时演示配置恢复内存",
+    )
+    cdp.click(
+        "通用", scope="document.querySelector('[role=dialog][aria-label=\"设置\"]')"
+    )
+    check(
+        cdp.click(
+            "深色", scope="document.querySelector('[role=dialog][aria-label=\"设置\"]')"
+        ),
+        "切换真实深色偏好",
+    )
+    check(
+        cdp.wait("document.documentElement.dataset.theme==='dark'"),
+        "记录截图使用实际深色主题",
+    )
+    close_settings(cdp)
+    cdp.click("运行记录", scope="document.querySelector('.sidebar')")
+    check(
+        cdp.wait("document.querySelectorAll('.runs-row').length>0"),
+        "深色模式打开运行记录",
+    )
+    cdp.eval(
+        "[...document.querySelectorAll('.runs-row')].find(e=>e.textContent.includes('执行出错'))?.click()"
+    )
+    check(
+        cdp.wait(
+            "document.querySelector('.runs-detail h3')?.textContent.includes('执行出错')&&document.documentElement.dataset.theme==='dark'"
+        ),
+        "深色主题的失败摘要已渲染",
+    )
+    cdp.screenshot(directory, "14-runs-dark-1440")
+    cdp.click("关闭运行记录")
+    cdp.wait("!document.querySelector('.runs-dialog')")
+    cdp.click("设置")
+    cdp.wait("!!document.querySelector('[role=dialog][aria-label=\"设置\"]')")
+    cdp.click("通用")
+    cdp.click("浅色")
+    close_settings(cdp)
+
+
 def visual_checks(cdp: Cdp, directory: Path) -> None:
     print("\n=== 简约界面视觉验收（公开 fixture API，零服务器数据）===")
     cdp.viewport(1440, 900)
@@ -1038,6 +1307,7 @@ def visual_checks(cdp: Cdp, directory: Path) -> None:
     cdp.click("收起会话列表", scope="document.querySelector('.sidebar')")
     cdp.viewport(1440, 900)
     reliability_checks(cdp, visual=True)
+    run_history_checks(cdp, directory)
     # Terminal warnings must survive the presentation-only preference.
     cdp.click("设置")
     cdp.click("通用")

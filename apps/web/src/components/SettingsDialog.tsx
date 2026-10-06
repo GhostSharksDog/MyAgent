@@ -93,6 +93,7 @@ export function SettingsDialog({
   const [allowSecrets, setAllowSecrets] = useState(false)
   const [planBudget, setPlanBudget] = useState('60000')
   const [multiBudget, setMultiBudget] = useState('80000')
+  const [runHistoryBackend, setRunHistoryBackend] = useState<'memory' | 'sql'>('memory')
 
   // 访问密钥是**客户端**状态（localStorage），不来自服务端配置
   const [accessKeyInput, setAccessKeyInput] = useState('')
@@ -126,6 +127,7 @@ export function SettingsDialog({
     setAllowSecrets(saved.agent.file_allow_secrets)
     setPlanBudget(String(saved.agent.plan_max_total_tokens ?? 60000))
     setMultiBudget(String(saved.agent.multi_max_total_tokens ?? 80000))
+    setRunHistoryBackend(saved.run_history?.backend ?? 'memory')
   }, [saved, open])
 
   if (!open) return null
@@ -140,6 +142,7 @@ export function SettingsDialog({
       plan_max_total_tokens: plan ?? 60000,
       multi_max_total_tokens: multi ?? 80000,
       profile,
+      run_history_backend: runHistoryBackend,
       corpus_paths: corpusPaths
         .split('\n')
         .map((line) => line.trim())
@@ -223,6 +226,23 @@ export function SettingsDialog({
 
             {section === 'agent' && (
               <>
+                <section className="settings__group">
+                  <h3 className="settings__legend">运行记录</h3>
+                  <label className="settings__field settings__field--check">
+                    <input type="checkbox" checked={runHistoryBackend === 'sql'}
+                      onChange={(e) => setRunHistoryBackend(e.target.checked ? 'sql' : 'memory')} />
+                    <span>持久保存运行摘要（SQLite）</span>
+                  </label>
+                  <p className="settings__hint settings__hint--block">
+                    默认仅保存在内存，重启后清空。只记录状态、耗时、用量和工具执行摘要，
+                    不记录问题、答案、工具参数及结果原文。存储切换需保存并重启服务；关闭不会删除已有数据库。
+                  </p>
+                  <p className="settings__hint">
+                    当前存储：{!saved?.run_history ? '尚未读取' : saved.run_history.active_backend === 'sql' ? 'SQLite' : '内存'}
+                    {saved?.run_history?.restart_required && ' · 已保存配置，等待重启'}
+                    {saved?.run_history && ` · 最多保留 ${saved.run_history.max_records} 轮`}
+                  </p>
+                </section>
                 <section className="settings__group">
                   <h3 className="settings__legend">Agent 身份</h3>
                   <label className="settings__field">
@@ -423,7 +443,7 @@ export function SettingsDialog({
 
         <footer className="dialog__foot">
           <span className="dialog__env">
-            {NEEDS_SAVE.includes(section) ? '此页修改需保存后生效' : '界面偏好与服务配置'}
+            {section === 'agent' ? '能力与预算保存后生效；记录存储切换需重启' : NEEDS_SAVE.includes(section) ? '此页修改需保存后生效' : '界面偏好与服务配置'}
           </span>
 
           {NEEDS_SAVE.includes(section) ? (

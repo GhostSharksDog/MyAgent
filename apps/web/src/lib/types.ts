@@ -109,6 +109,8 @@ export interface Usage {
  *  `type` 放宽成 string：后端将来新增事件类型时，旧前端应当**忽略未知事件**
  *  而不是抛异常挂掉。这是流式协议最基本的向后兼容策略。 */
 export interface AgentEvent {
+  run_id?: string
+  record_saved?: boolean
   type: AgentEventType | (string & {})
   /** 第几步。start/token/tool_call/tool_result/final/step 都带。 */
   step?: number
@@ -273,6 +275,8 @@ export type TurnPhase =
   | 'aborted'
 
 export interface AssistantTurnState {
+  runId?: string
+  recordSaved?: boolean
   /** 按 step 号递增的步骤列表 —— 这就是"时间线"的数据来源。 */
   steps: StepView[]
   /** `final` 事件给出的权威答案。为空表示这一轮没有产出最终答案。 */
@@ -367,6 +371,13 @@ export interface AgentSettingsView {
 }
 
 export interface SettingsView {
+  run_history?: {
+    backend: 'memory' | 'sql'
+    active_backend: 'memory' | 'sql'
+    restart_required: boolean
+    max_records: number
+    max_events: number
+  }
   llm: LLMSettingsView
   agent: AgentSettingsView
   /** .env 的绝对路径，显示给用户看（"你的配置存在这里"） */
@@ -375,6 +386,7 @@ export interface SettingsView {
 
 /** PUT 的请求体。**全部可选**：只传要改的字段。 */
 export interface SettingsUpdatePayload {
+  run_history_backend?: 'memory' | 'sql'
   plan_max_total_tokens?: number
   multi_max_total_tokens?: number
   /** 留空（或原样回传掩码）= 不修改已保存的密钥 */

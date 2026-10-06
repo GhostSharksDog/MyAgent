@@ -7,6 +7,9 @@
   const models = [model,{...model,id:'public-check',label:'公开核验模型',model:'legacy-check',active:false}];
   const currentModel = () => models.find(m=>m.active);
   const settings = {llm:{...model},agent:{profile:'general',workspace_root:root,corpus_paths:[],corpus_include_seed:false,file_max_chars:20000,file_write_enabled:false,file_allow_secrets:false,corpus_loaded:false,corpus_doc_count:0,plan_max_total_tokens:60000,multi_max_total_tokens:80000},env_path:'临时演示配置（不写入磁盘）'};
+  settings.run_history={backend:'memory',active_backend:'memory',restart_required:false,max_records:200,max_events:256};
+  const makeRun = (id,reason='finished') => ({run_id:id,session_id:'public-session',mode:'react',source:'agent',started_at:'2026-10-06T04:00:00Z',finished_at:'2026-10-06T04:00:01Z',duration_ms:1000,stopped_reason:reason,usage:{prompt_tokens:128,completion_tokens:48,total_tokens:176},usage_complete:reason==='finished',steps_used:2,tool_calls:1,tool_results:1,tool_failures:reason==='error'?1:0,context_trimmed:reason==='token_budget',context_tokens:128,events_dropped:reason==='token_budget'?2:0,events:[{kind:'tool_result',elapsed_ms:48,step:1,scope:'child',tool_name:'calculator',ok:reason!=='error',duration_ms:8,truncated:true,counts:null}]});
+  const runs=[makeRun('public-archive-error','error'),makeRun('public-archive-budget','token_budget'),makeRun('public-archive-finished')];
   const sessions = [
     {id:'public-session',title:'整理一个清晰的行动计划',created_at:now,updated_at:now,turn_count:2,total_tokens:142},
     {id:'public-notes',title:'核验一组计算结果',created_at:now-200,updated_at:now-200,turn_count:1,total_tokens:86},
@@ -19,6 +22,8 @@
   ];
   const currentTools = () => settings.agent.file_write_enabled ? [...tools,{name:'write_file',description:'演示中的写入工具；不会执行真实写入。',parameters:{type:'object',properties:{path:{type:'string'},content:{type:'string'}},required:['path','content']}}] : tools;
   window.__fixture = {case:'finished',cancelled:false,requests:[],blocked:[],settings,model,settingsFailure:sessionStorage.getItem('smoke-settings-failure')==='true',healthCase:sessionStorage.getItem('smoke-health-case')||'ready',delay:35,deferPreview:false,deferListing:false,pendingFiles:[],releasedFiles:0};
+  Object.assign(window.__fixture,{runs,runsFailure:false,detailFailure:false,deferRunDetail:false,pendingRuns:[]});
+  window.__fixture.releaseRuns=()=>{for(const release of window.__fixture.pendingRuns.splice(0))release();};
   window.__fixture.releaseFiles = () => {
     for (const release of window.__fixture.pendingFiles.splice(0)) {
       release();window.__fixture.releasedFiles++;
@@ -29,6 +34,9 @@
   function stream(options) {
     const request = JSON.parse(options.body || '{}');
     const selected = window.__fixture.case;
+    const run=makeRun('public-run-'+runs.length,'running');
+    run.session_id=request.session_id||null;run.mode=request.mode||'react';run.finished_at=null;run.events=[];run.duration_ms=0;run.events_dropped=0;
+    runs.unshift(run);
     window.__fixture.cancelled = false;
     const frames = [{type:'start',step:0}];
     if (request.mode === 'plan') frames.push({type:'plan',plan:plan('running')});
@@ -47,7 +55,12 @@
     }
     let timer;
     let cursor = 0;
-    const encode = e => new TextEncoder().encode('event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n');
+    const encode = e => {
+      if(['start','step','tool_call','tool_result','plan','plan_step','delegate','delegate_result','done','error'].includes(e.type))
+        run.events.push({kind:e.type,elapsed_ms:cursor*35,step:e.step||0,scope:'main',tool_name:e.tool_name||null,ok:e.tool_ok??null,duration_ms:e.duration_ms??null,truncated:e.truncated??null,counts:null});
+      if(e.type==='done')Object.assign(run,{stopped_reason:e.stopped_reason,finished_at:new Date().toISOString(),duration_ms:cursor*35,usage:e.usage,usage_complete:e.usage_complete,context_trimmed:e.context_trimmed||false});
+      return new TextEncoder().encode('event: '+e.type+'\ndata: '+JSON.stringify({...e,run_id:run.run_id,...(e.type==='done'?{record_saved:true}:{})})+'\n\n');
+    };
     const body = new ReadableStream({
       start(controller) {
         const send = () => {
@@ -58,9 +71,9 @@
         };
         send();
       },
-      cancel() {clearTimeout(timer);window.__fixture.cancelled = true;}
+      cancel() {clearTimeout(timer);window.__fixture.cancelled = true;if(run.stopped_reason==='running')Object.assign(run,{stopped_reason:'cancelled',finished_at:new Date().toISOString(),duration_ms:cursor*35,usage_complete:false});}
     });
-    return new Response(body,{headers:{'Content-Type':'text/event-stream'}});
+    return new Response(body,{headers:{'Content-Type':'text/event-stream','X-Run-Id':run.run_id}});
   }
   window.fetch = async (input,options={}) => {
     const url = new URL(typeof input === 'string' ? input : input.url,location.href);
@@ -69,6 +82,22 @@
     const method = options.method || 'GET';
     window.__fixture.requests.push({path,method});
     if (path === '/api/chat/stream') return stream(options);
+    if(path==='/api/runs') {
+      if(window.__fixture.runsFailure)return json({detail:'公开演示：运行记录读取失败，请重试'},503);
+      const filtered=runs.filter(r=>(!url.searchParams.get('session_id')||r.session_id===url.searchParams.get('session_id'))&&(!url.searchParams.get('stopped_reason')||r.stopped_reason===url.searchParams.get('stopped_reason')));
+      const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||50);
+      return json({runs:filtered.slice(offset,offset+limit).map(({events,...r})=>r),backend:'memory',total:filtered.length,limit,offset,max_records:200,summary_only:true});
+    }
+    if(path.startsWith('/api/runs/')) {
+      const id=decodeURIComponent(path.split('/').pop());
+      const index=runs.findIndex(r=>r.run_id===id);
+      if(index<0)return json({detail:'运行记录不存在或已淘汰'},404);
+      if(method==='DELETE') {runs.splice(index,1);return json({deleted:true});}
+      if(window.__fixture.detailFailure)return json({detail:'公开演示：执行摘要读取失败'},503);
+      const snapshot=structuredClone(runs[index]);
+      if(window.__fixture.deferRunDetail){window.__fixture.deferRunDetail=false;return new Promise(resolve=>window.__fixture.pendingRuns.push(()=>resolve(json(snapshot))));}
+      return json(snapshot);
+    }
     if (path === '/healthz') {
       if (window.__fixture.healthCase === 'offline') throw new TypeError('Synthetic offline');
       return json({status:'ok',env:'demo',llm_configured:window.__fixture.healthCase!=='missing-model',auth_required:window.__fixture.healthCase==='missing-key',model:currentModel().model,tools:currentTools().map(t=>t.name),session_backend:'memory'});
@@ -80,6 +109,7 @@
       if (method === 'PUT') {
         const updates = JSON.parse(options.body || '{}');
         Object.assign(settings.agent,updates);
+        if(updates.run_history_backend){settings.run_history.backend=updates.run_history_backend;settings.run_history.restart_required=updates.run_history_backend!==settings.run_history.active_backend;}
       }
       return json(settings);
     }

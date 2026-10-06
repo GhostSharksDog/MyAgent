@@ -59,6 +59,21 @@ function harness(open) {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 
+test('SSE 首帧前取消也保留响应头里的运行标识', async () => {
+  let closed = false
+  const response = new Response(new ReadableStream({ cancel() { closed = true } }),
+    { headers: { 'Content-Type': 'text/event-stream', 'X-Run-Id': 'run-before-first-frame' } })
+  const h = harness(async () => response)
+  const pending = h.render().send('公开任务', null, 'react')
+  await tick()
+  assert.equal(h.render().items.at(-1).state.runId, 'run-before-first-frame')
+  h.render().abort()
+  await pending
+  assert.equal(closed, true)
+  assert.equal(h.render().items.at(-1).state.runId, 'run-before-first-frame')
+  assert.equal(h.render().items.at(-1).state.phase, 'aborted')
+})
+
 for (const change of ['loadHistory', 'clear']) {
   test(`${change} 后旧流迟到清理不能抹掉新流的状态与停止控制器`, async () => {
     const delayedCleanup = deferred()

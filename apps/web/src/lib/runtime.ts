@@ -3,6 +3,9 @@ import type { AssistantTurnState } from './types'
 /** 预算终态和设置校验供组件与离线测试共用。 */
 export function describeStop(reason: string | null): { text: string; tone: 'ok' | 'warn' | 'danger' } {
   switch (reason) {
+    case 'running': return { text: '执行中', tone: 'ok' }
+    case 'cancelled': return { text: '已取消', tone: 'warn' }
+    case 'interrupted': return { text: '服务中断', tone: 'warn' }
     case 'finished': return { text: '正常结束', tone: 'ok' }
     case 'timeout': return { text: '达到整轮时长预算', tone: 'warn' }
     case 'token_budget': return { text: '达到累计 token 预算', tone: 'warn' }
@@ -30,6 +33,8 @@ export interface RunWarning { title: string; text: string; tone: 'warn' | 'error
 export function runWarnings(state: AssistantTurnState, restored = false): RunWarning[] {
   if (restored) return [] // 历史仅保存文本，不能把未保存的统计当作本次模型缺失用量。
   const warnings: RunWarning[] = []
+  if (state.recordSaved === false) warnings.push({ title: '运行摘要未保存',
+    text: '请检查服务日志和运行记录的存储配置。当前回答仍可查看。', tone: 'warn' })
   const running = isTurnRunning(state)
   if (!running && state.phase === 'aborted') {
     warnings.push({ title: state.error ? '连接中断 · 结果可能不完整' : '已停止生成',

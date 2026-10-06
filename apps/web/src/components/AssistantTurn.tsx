@@ -9,9 +9,9 @@ import { Notice } from './Notice'
 
 type AssistantItem = Extract<ChatItem, { kind: 'assistant' }>
 
-export interface AssistantTurnProps { item: AssistantItem; showMeta?: boolean }
+export interface AssistantTurnProps { item: AssistantItem; showMeta?: boolean; onOpenRun?: (id: string) => void }
 
-export function AssistantTurn({ item, showMeta = true }: AssistantTurnProps) {
+export function AssistantTurn({ item, showMeta = true, onOpenRun }: AssistantTurnProps) {
   const { state } = item
   const view = computeTurnView(state)
   const streaming = isTurnRunning(state)
@@ -43,6 +43,8 @@ export function AssistantTurn({ item, showMeta = true }: AssistantTurnProps) {
           {formatCompact(state.usage.prompt_tokens)} / {formatCompact(state.usage.completion_tokens)} / {formatNumber(state.usage.total_tokens)} tokens
         </span>}
       </div>}
+      {state.runId && onOpenRun && <button type="button" className="link-button turn__record"
+        onClick={() => onOpenRun(state.runId!)}>查看运行摘要</button>}
     </article>
   )
 }

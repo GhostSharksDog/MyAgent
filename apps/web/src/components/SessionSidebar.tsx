@@ -18,6 +18,7 @@ export interface SessionSidebarProps {
   onRefresh: () => void
   onOpenTools: () => void
   onOpenSettings: () => void
+  onOpenRuns: () => void
   status: 'loading' | 'offline' | 'unconfigured' | 'ready'
   workspaceRoot: string
   workspaceLoaded: boolean
@@ -86,6 +87,9 @@ export function SessionSidebar(props: SessionSidebarProps) {
         ))}
       </div>
       <div className="sidebar__foot">
+        <button type="button" className="btn btn--ghost sidebar__runs" onClick={props.onOpenRuns}>
+          <IconRefresh size={16} />运行记录
+        </button>
         <div className="sidebar__workspace">
           <span className="sidebar__caption">工作区</span>
           {workspaceLoaded && workspaceError && <div className="ws__pending" role="status">
