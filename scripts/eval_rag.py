@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,17 +38,25 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 from app.core.config import get_settings
+from app.rag.benchmark import load_benchmark
 from app.rag.chunker import ChunkStrategy
-from app.rag.corpus import build_corpus
-from app.rag.evaluate import EvalReport, EvalSet, _is_relevant, evaluate
+from app.rag.corpus import EMPTY_CORPUS_HINT, build_corpus
+from app.rag.evaluate import (
+    EvalReport,
+    EvalSet,
+    _is_relevant,
+    evaluate,
+    validate_labels,
+)
 from app.rag.rerank import LexicalReranker, LLMReranker, Reranker
 from app.rag.retriever import RetrievalMode, Retriever
 
 EVAL_SET_PUBLIC = ROOT / "services" / "api" / "seed" / "eval_set.json"
 EVAL_SET_LOCAL = ROOT / "data" / "eval_set.local.json"
+GENERAL_BENCHMARK = ROOT / "services" / "api" / "seed" / "rag_general"
 
 
-def resolve_eval_set(use_sample: bool) -> Path:
+def resolve_eval_set(use_sample: bool, dataset: str | None = None) -> Path:
     """决定用哪份评测集。
 
     【为什么评测集要分两份】
@@ -58,6 +67,8 @@ def resolve_eval_set(use_sample: bool) -> Path:
     用户自己的那份（`data/eval_set.local.json`）锚定真实简历的内容，
     被 .gitignore 排除、只留在本地。检索真实简历时自动优先使用它。
     """
+    if dataset == "general":
+        return GENERAL_BENCHMARK / "eval_set.json"
     if not use_sample and EVAL_SET_LOCAL.exists():
         return EVAL_SET_LOCAL
     return EVAL_SET_PUBLIC
@@ -102,28 +113,26 @@ def cmd_validate(retriever: Retriever, eval_set: EvalSet) -> int:
     print(f"评测集：{eval_set.name}（{len(eval_set.queries)} 条查询）")
     print(f"语料：{len(corpus)} 个块\n")
 
-    problems = 0
+    problems = validate_labels(eval_set, corpus)
     for i, item in enumerate(eval_set.queries, 1):
         matched = sum(1 for c in corpus if _is_relevant(c, item.gold))
-        conds = " AND ".join(
+        conds = " OR ".join(
             json.dumps(c.model_dump(exclude_none=True), ensure_ascii=False)
             for c in item.gold
         )
-        status = "OK " if matched else "空!"
-        if not matched:
-            problems += 1
+        status = "无答案" if not item.answerable else "OK " if matched else "空!"
         print(f"  {status} [{i:>2}] 匹配 {matched:>2} 块 | {item.query}")
         print(f"          条件: {conds}")
 
     print()
     if problems:
-        print(f"[x] 有 {problems} 条查询的标注匹配不到任何块。")
-        print(
-            "    这类查询的 recall 分母为 0，无法评估。请先修正标注（见 --inspect 输出）。"
-        )
+        print(f"[x] 发现 {len(problems)} 个标注问题：")
+        for problem in problems:
+            print(f"    {problem}")
+        print("    标注条件失效或矛盾会扭曲指标，请先修正标注（见 --inspect 输出）。")
         return 1
 
-    print("[OK] 所有标注都能匹配到至少一个块，评测集可用。")
+    print("[OK] 每条正例证据都能匹配，无答案查询未标正例。语义仍需人工核对。")
     return 0
 
 
@@ -138,7 +147,37 @@ async def cmd_run(
     quiet: bool = False,
 ) -> EvalReport:
     retriever = build_retriever(args)
-    report = await evaluate(retriever, eval_set, k=args.k)
+    report = await evaluate(
+        retriever, eval_set, k=args.k, min_score=getattr(args, "min_score", 0.0)
+    )
+    report.parameters.update(
+        {
+            key: getattr(args, key, None)
+            for key in (
+                "strategy",
+                "size",
+                "overlap",
+                "min_size",
+                "mode",
+                "rerank",
+                "rewrite",
+                "rrf_k",
+                "rrf_weights",
+                "recall_k",
+            )
+        }
+    )
+    report.parameters["retriever_stats"] = retriever.stats()
+    report.provenance = {
+        "source": "general-public"
+        if getattr(args, "dataset", None) == "general"
+        else "jobhunt-public"
+        if args.sample
+        else "declared-local"
+    }
+    if getattr(args, "dataset", None) == "general":
+        _, _, metadata = load_benchmark(GENERAL_BENCHMARK)
+        report.provenance.update(metadata)
 
     if quiet:
         return report
@@ -149,6 +188,13 @@ async def cmd_run(
     print("=" * 76)
     print()
     print(f"  {report.summary_line()}")
+    print(
+        f"  证据条件覆盖={report.metrics['gold_coverage']:.3f}  完整证据率={report.metrics['complete_evidence_rate']:.3f}"
+    )
+    if report.abstention_metrics["count"]:
+        print(
+            f"  无答案非空返回率={report.abstention_metrics['negative_return_rate']:.3f}（仅检索层）"
+        )
 
     # 重排成本：LLM 重排的代价是每查询一次额外调用，必须量化出来
     if "reranker_tokens" in retriever.stats():
@@ -158,6 +204,12 @@ async def cmd_run(
             f"  重排成本：{tokens} tokens / {n} 条查询 = {tokens / n:.0f} tokens/查询"
         )
     print()
+
+    print("--- 分查询类型（有答案）---")
+    for category, metrics in report.by_category.items():
+        print(
+            f"  {category:<18} n={int(metrics['count']):>2} Recall={metrics['recall']:.3f} 完整证据={metrics['complete_evidence_rate']:.3f}"
+        )
 
     print("--- 分难度 ---")
     for level, m in sorted(report.by_difficulty.items()):
@@ -169,8 +221,14 @@ async def cmd_run(
 
     print("--- 逐条结果 ---")
     for r in report.per_query:
-        mark = "✓" if r.hit_rank else "✗"
-        rank = f"第{r.hit_rank}位" if r.hit_rank else "未命中"
+        mark = "✓" if (r.hit_rank if r.answerable else r.abstained) else "✗"
+        rank = (
+            (f"第{r.hit_rank}位" if r.hit_rank else "未命中")
+            if r.answerable
+            else "无答案：空返回"
+            if r.abstained
+            else "无答案：非空返回"
+        )
         print(
             f"  {mark} R={r.recall:.2f} P={r.precision:.2f} "
             f"MRR={r.rr:.2f} NDCG={r.ndcg:.2f} ({rank})  {r.query}"
@@ -187,6 +245,7 @@ async def cmd_run(
                 print(f"  备注: {f['note']}")
 
     if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(
             json_out.write_text,
             report.model_dump_json(indent=2),
@@ -260,14 +319,18 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
     if args.with_llm:
         steps.append(LadderStep("⑥ 混合 + LLM 重排", RetrievalMode.HYBRID, "llm"))
 
-    settings = get_settings()
-    if args.with_llm and not settings.llm.is_configured:
+    settings = (
+        get_settings()
+        if args.with_llm or getattr(args, "with_rewrite", False)
+        else None
+    )
+    if args.with_llm and settings and not settings.llm.is_configured:
         print("[!] 未配置 LLM_API_KEY，跳过 LLM 重排步骤。")
         steps = [s for s in steps if s.reranker != "llm"]
 
     # 改写阶梯需要真实模型（改写本身要调 LLM），没配密钥就跳过
     if getattr(args, "with_rewrite", False):
-        if not settings.llm.is_configured:
+        if settings and not settings.llm.is_configured:
             print("[!] 未配置 LLM_API_KEY，跳过 Query 改写阶梯。")
         else:
             steps.extend(_REWRITE_LADDER)
@@ -285,6 +348,9 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
         report = await cmd_run(eval_set, args=step_args, quiet=True)
         rows.append((step.label, report))
         print(f"  完成 {step.label}: {report.summary_line()}")
+        print(
+            f"    完整证据率={report.metrics['complete_evidence_rate']:.3f}  无答案非空返回率={report.abstention_metrics['negative_return_rate']}"
+        )
 
     print()
     print("=" * 88)
@@ -320,13 +386,11 @@ async def cmd_compare(args: argparse.Namespace, eval_set: EvalSet) -> int:
             {
                 "label": label,
                 "pipeline": r.pipeline(),
-                "metric_version": r.metric_version,
-                "k": r.k,
-                "chunk_count": r.chunk_count,
-                "metrics": r.metrics,
+                **r.model_dump(),
             }
             for label, r in rows
         ]
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -372,27 +436,47 @@ def _llm():  # type: ignore[no-untyped-def]
     return LLMClient(get_settings().llm)
 
 
-def build_retriever(args: argparse.Namespace) -> Retriever:
-    weights = None
-    if getattr(args, "rrf_weights", None):
-        parts = [p.strip() for p in args.rrf_weights.split(",")]
-        if len(parts) != 2:
-            raise ValueError("--rrf-weights 需要两个逗号分隔的数字，例如 '1.0,0.3'")
-        weights = [float(parts[0]), float(parts[1])]
+def parse_rrf_weights(raw: str | None) -> list[float] | None:
+    if raw is None:
+        return None
+    parts = raw.split(",")
+    if len(parts) != 2:
+        raise ValueError("--rrf-weights 需要两个逗号分隔的数字，例如 '1.0,0.3'")
+    weights = [float(part) for part in parts]
+    if (
+        any(not math.isfinite(weight) or weight < 0 for weight in weights)
+        or sum(weights) <= 0
+    ):
+        raise ValueError("--rrf-weights 必须是有限非负数，且至少一路大于0")
+    return weights
 
-    agent = get_settings().agent
+
+def build_retriever(args: argparse.Namespace) -> Retriever:
+    weights = parse_rrf_weights(getattr(args, "rrf_weights", None))
+
     # --sample 是完整的数据源声明，不只是替换简历文件名。
     # 公开基准必须排除私人笔记及 .env 中声明的私人路径。
-    include_seed = (
-        args.sample or agent.profile == "jobhunt" or agent.corpus_include_seed
-    )
-    docs = build_corpus(
-        include_resume=include_seed,
-        include_jobs=include_seed,
-        use_sample_resume=args.sample,
-        include_notes=not args.sample,
-        extra_paths=[] if args.sample else agent.corpus_path_list,
-    )
+    if getattr(args, "dataset", None) == "general":
+        if args.rerank == "llm" or getattr(args, "rewrite", "none") != "none":
+            raise ValueError("通用公开基准只允许离线管线，不能使用模型重排或改写")
+        docs, _, _ = load_benchmark(GENERAL_BENCHMARK)
+    elif args.sample:
+        docs = build_corpus(
+            include_resume=True,
+            include_jobs=True,
+            use_sample_resume=True,
+            include_notes=False,
+            extra_paths=[],
+        )
+    else:
+        agent = get_settings().agent
+        include_seed = agent.profile == "jobhunt" or agent.corpus_include_seed
+        docs = build_corpus(
+            include_resume=include_seed,
+            include_jobs=include_seed,
+            include_notes=True,
+            extra_paths=agent.corpus_path_list,
+        )
     return Retriever.from_documents(
         docs,
         strategy=ChunkStrategy(args.strategy),
@@ -410,7 +494,7 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="RAG 检索质量评测")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--inspect", action="store_true", help="打印语料切块结构")
@@ -419,6 +503,12 @@ def main() -> int:
     mode.add_argument("--compare", action="store_true", help="跑消融阶梯并输出对比表")
 
     parser.add_argument("--k", type=int, default=5, help="检索条数，默认 5")
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        help="原查询的 TF-IDF 相似度闸门，0关闭；仅供对照，不改变服务配置",
+    )
     parser.add_argument(
         "--strategy",
         choices=[s.value for s in ChunkStrategy],
@@ -469,10 +559,16 @@ def main() -> int:
         help="两路 RRF 权重，格式 '向量,BM25'（如 '1.0,0.3'）。默认等权",
     )
     parser.add_argument("--json-out", type=Path, default=None, help="把报告写成 JSON")
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "--sample",
         action="store_true",
         help="用可提交的示例简历与公开评测集（CI / 他人 clone 后应使用这个）",
+    )
+    source.add_argument(
+        "--dataset",
+        choices=["general"],
+        help="60查询的通用公开基准，只加载清单文件，严格离线",
     )
     parser.add_argument(
         "--with-llm",
@@ -487,28 +583,65 @@ def main() -> int:
             "真实调用 API，会计费；改写结果有缓存，同一查询在整轮阶梯里只付一次"
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if (
+        args.k <= 0
+        or args.size <= 0
+        or not 0 <= args.overlap < args.size
+        or args.min_size < 0
+    ):
+        parser.error("k、size 必须大于0，overlap 必须在[0,size)内，min-size不能为负")
+    if not math.isfinite(args.min_score) or not 0 <= args.min_score <= 1:
+        parser.error("--min-score 必须在0到1之间")
+    if args.rrf_k <= 0 or (args.recall_k is not None and args.recall_k <= 0):
+        parser.error("--rrf-k 和 --recall-k 必须大于0")
+    if args.dataset == "general" and (
+        args.with_llm
+        or args.with_rewrite
+        or args.rerank == "llm"
+        or args.rewrite != "none"
+    ):
+        parser.error("--dataset general 是离线基准，不接受模型重排或改写")
+    try:
+        parse_rrf_weights(args.rrf_weights)
+        return execute(args)
+    except (ValueError, OSError) as exc:
+        parser.error(f"评测无法完成：{exc}；请核对数据清单、标注或 --json-out 路径")
+
+
+def execute(args: argparse.Namespace) -> int:
 
     retriever = build_retriever(args)
 
     if len(retriever.chunks) == 0:
-        print("[x] 语料为空。请先准备数据：")
-        print("    python scripts/ingest.py <简历.pdf> --type resume")
+        print(EMPTY_CORPUS_HINT)
+        print("    公开离线评测可用 --dataset general 或 --sample")
         return 1
 
     if args.inspect:
         return cmd_inspect(retriever)
 
-    eval_set_path = resolve_eval_set(args.sample)
+    eval_set_path = resolve_eval_set(args.sample, args.dataset)
     if not eval_set_path.exists():
         print(f"[x] 找不到评测集：{eval_set_path}")
         return 1
 
     eval_set = EvalSet.load(eval_set_path)
-    print(f"评测集来源：{eval_set_path.relative_to(ROOT)}\n")
+    source = (
+        eval_set_path.relative_to(ROOT)
+        if eval_set_path.is_relative_to(ROOT)
+        else eval_set_path
+    )
+    print(f"评测集来源：{source}\n")
 
     if args.validate:
         return cmd_validate(retriever, eval_set)
+
+    problems = validate_labels(eval_set, retriever.chunks)
+    if problems:
+        raise ValueError(
+            "标注无效：" + "; ".join(problems) + "；先运行 --inspect / --validate"
+        )
 
     if args.compare:
         return asyncio.run(cmd_compare(args, eval_set))

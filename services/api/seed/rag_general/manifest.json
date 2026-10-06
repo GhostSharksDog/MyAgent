@@ -1,0 +1,88 @@
+{
+  "dataset_id": "legacy-general-rag",
+  "version": 1,
+  "provenance": "本仓库原创虚构青禾协作组手册，供公开离线检索评测，不采集私人数据或第三方原文。",
+  "documents": [
+    {
+      "file": "documents/team-leave.md",
+      "domain": "team",
+      "sha256": "7c084228bf585e6a2f8b95704527b389acbf81dd9f5ae451afa653835ea54a0d"
+    },
+    {
+      "file": "documents/team-expense.md",
+      "domain": "team",
+      "sha256": "5063d2e39bdfae0fd9c4d505abaa04e7d725c28789bd8f57cc5d80e23438cc1c"
+    },
+    {
+      "file": "documents/team-meetings.md",
+      "domain": "team",
+      "sha256": "54db2734cb4edb9aeaf06e87abb5dcae79dcfcdfc2612a98d74e564e2e47d5f9"
+    },
+    {
+      "file": "documents/team-access.md",
+      "domain": "team",
+      "sha256": "b9beb3d90cb7fa012d943f8941a1a15eed47d2eb66ab853b3f4a013daa6c1674"
+    },
+    {
+      "file": "documents/project-atlas.md",
+      "domain": "project",
+      "sha256": "554e5e64ba7e3191333cd5e14cc819f4a92d8d4cf62fef20248711b64932e03f"
+    },
+    {
+      "file": "documents/project-beacon.md",
+      "domain": "project",
+      "sha256": "806a894467387a47d94ca8e2378ea4644827c7ddfe1da0eed031f756fdfb8557"
+    },
+    {
+      "file": "documents/project-releases.md",
+      "domain": "project",
+      "sha256": "1ccd400ca100ac5e9bc1af45431edeb8e39dffa1fa7804ecdd0183d213086ad8"
+    },
+    {
+      "file": "documents/project-archive.md",
+      "domain": "project",
+      "sha256": "05e02fbb73d18fc1579e3bef4d88bff7c7d4ee1bb3e84bc7aaf16c914af2849f"
+    },
+    {
+      "file": "documents/ops-jobs.md",
+      "domain": "ops",
+      "sha256": "5a3f1033c9f176c655bcd5c494e3bae51ee51f8c3217063efe13c0e27e0674f5"
+    },
+    {
+      "file": "documents/ops-exports.md",
+      "domain": "ops",
+      "sha256": "d0c8fa3fe8436dd40b5de8b01e86dfca2b4f51422ec99dc5e35cac472067e717"
+    },
+    {
+      "file": "documents/ops-incidents.md",
+      "domain": "ops",
+      "sha256": "ec9c481aeaf98695c7aba0e64217df19e838fe4945655c8315b7244b3389a530"
+    },
+    {
+      "file": "documents/ops-storage.md",
+      "domain": "ops",
+      "sha256": "1c41e58db518ab0ca7e88d561e83e7486156b9682d33ef01cba6cacaa8765b3e"
+    },
+    {
+      "file": "documents/knowledge-search.md",
+      "domain": "knowledge",
+      "sha256": "da526788a16f1e8769f4b545970eabe794de1876f6cc6129211c85120577bb12"
+    },
+    {
+      "file": "documents/knowledge-citations.md",
+      "domain": "knowledge",
+      "sha256": "b46f99840b62ff0d5b269de36a7e0fa9ced3f1bbc08b5304ef46329d4c666ea8"
+    },
+    {
+      "file": "documents/knowledge-retention.md",
+      "domain": "knowledge",
+      "sha256": "2ec5809cbcd501d7cccb7f945757a576e9286b9abd68d4614634f78cb545aa3d"
+    },
+    {
+      "file": "documents/knowledge-versions.md",
+      "domain": "knowledge",
+      "sha256": "6f4db7aa4b1bacdfd120160823a5b29f0063b93fd4a73af915fc62dcf56076d6"
+    }
+  ],
+  "eval_set_sha256": "31db4e4e20b9b8377a0b46816a858799940e8c59ae59763d19fb6d6e77a0b9c2"
+}

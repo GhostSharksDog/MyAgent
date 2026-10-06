@@ -34,8 +34,8 @@ EVAL_SET = "services/api/seed/eval_set.json"
 
 # 下界阈值。
 #
-# 当前基线（公开集 / 示例简历 / k=5 / min_size=120 / hybrid + 词法重排）：
-#   Recall@5 = 0.821   MRR = 0.685   NDCG@5 = 0.717
+# 当前基线（公开集 / 示例简历 / k=5 / min_size=120 / hybrid，无重排）：
+#   Recall@5 = 0.869   MRR = 0.657   NDCG@5 = 0.692（ndcg-corpus-v2）
 #
 # 阈值取基线的约 90%：放过正常波动，拦住真实劣化。
 #
@@ -75,7 +75,13 @@ def public_retriever() -> Retriever:
     `use_sample_resume=True`：CI 与协作者都必须能跑，
     不能依赖一个被 gitignore 的真实简历文件。
     """
-    docs = build_corpus(include_resume=True, include_jobs=True, use_sample_resume=True)
+    docs = build_corpus(
+        include_resume=True,
+        include_jobs=True,
+        use_sample_resume=True,
+        include_notes=False,
+        extra_paths=[],
+    )
     return Retriever.from_documents(
         docs,
         strategy=ChunkStrategy.SECTION,
@@ -105,10 +111,9 @@ class TestRetrievalRegression:
     ) -> None:
         """召回率应高于 MRR。
 
-        这是一个**结构性断言**而非数值断言：只要"召回宽、排序窄"的两段式
-        架构还成立，召回率就应该高于 MRR（因为答案常常不在第一位）。
-        两者相等或倒挂，说明重排器把什么都排到了第一位 ——
-        那通常不是好事，而是重排逻辑退化成了"原样返回"。
+        这是固定旧基准上的排序信号，不是所有语料的数学不变量。
+        多相关块查询可能 Recall < MRR；合理改动失败时应检查逐条结果，
+        不能仅凭倒挂就判断检索器损坏。
         """
         report = await evaluate(public_retriever, public_eval_set, k=5)
         assert report.metrics["recall"] >= report.metrics["mrr"]

@@ -1,0 +1,902 @@
+{
+  "name": "legacy-general-rag-v1",
+  "description": "16份虚构通用文档，60条人工查询：48有答案、12无答案。只评价检索证据。",
+  "queries": [
+    {
+      "id": "direct-01",
+      "query": "计划休假应提前多少个工作日申请？",
+      "gold": [
+        {
+          "doc_id": "team-leave.md",
+          "text_contains": "提前两个工作日"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "两个工作日。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-02",
+      "query": "报销材料最迟在费用发生后多久提交？",
+      "gold": [
+        {
+          "doc_id": "team-expense.md",
+          "text_contains": "十个工作日内提交"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "十个工作日。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-03",
+      "query": "青禾项目例会几点开始、持续多久？",
+      "gold": [
+        {
+          "doc_id": "team-meetings.md",
+          "text_contains": "周三下午三点"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "周三15点，40分钟。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-04",
+      "query": "外部访客工作区只读权限最多保留多久？",
+      "gold": [
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "最多保留七天"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "七天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-05",
+      "query": "阿特拉斯的冻结日和验收日各是哪天？",
+      "gold": [
+        {
+          "doc_id": "project-atlas.md",
+          "text_contains": "五月十二日"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "5月12日冻结，5月20日验收。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-06",
+      "query": "灯塔项目的交付目标是什么？",
+      "gold": [
+        {
+          "doc_id": "project-beacon.md",
+          "text_contains": "可检索条目"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "知识手册检索条目、检索结果和引用。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-07",
+      "query": "分批发布先覆盖多少流量、观察多久？",
+      "gold": [
+        {
+          "doc_id": "project-releases.md",
+          "text_contains": "百分之十的样本流量"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "10%，15分钟。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-08",
+      "query": "未验收草稿在项目结束后保留多久？",
+      "gold": [
+        {
+          "doc_id": "project-archive.md",
+          "text_contains": "保留三十天"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "30天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-09",
+      "query": "日报任务 daily_digest 什么时候运行？",
+      "gold": [
+        {
+          "doc_id": "ops-jobs.md",
+          "text_contains": "每天早上八点"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "每天早上8点。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-10",
+      "query": "青禾导出要求包含哪两个文件？",
+      "gold": [
+        {
+          "doc_id": "ops-exports.md",
+          "text_contains": "summary.csv"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "summary.csv与sources.json。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-11",
+      "query": "事故恢复需要哪些验证？",
+      "gold": [
+        {
+          "doc_id": "ops-incidents.md",
+          "text_contains": "连续十分钟成功健康检查"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "10分钟健康检查成功，加一次公开查询验证。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "direct-12",
+      "query": "公开检索日志保留多少天？",
+      "gold": [
+        {
+          "doc_id": "knowledge-retention.md",
+          "text_contains": "检索日志保留十四天"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "14天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-01",
+      "query": "准备出去休息几天，代理人要接收哪些待办信息？",
+      "gold": [
+        {
+          "doc_id": "team-leave.md",
+          "text_contains": "未完成任务、相关文档"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "任务、文档、截止日期和风险；代理人确认接手。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-02",
+      "query": "审核过的费用数字填错了，现在能直接改原单吗？",
+      "gold": [
+        {
+          "doc_id": "team-expense.md",
+          "text_contains": "需要发起更正单"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能；发更正单，由财务暂停原单并核对。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-03",
+      "query": "会上说了要做一件事，怎样才算真的派给某个人？",
+      "gold": [
+        {
+          "doc_id": "team-meetings.md",
+          "text_contains": "必须有负责人和截止日期"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "负责人和截止日期齐全，负责人确认。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-04",
+      "query": "同事离开小组后，文档的所有权和访问资格怎么收尾？",
+      "gold": [
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "一个工作日内撤销"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "负责人移交任务和所有权，管理员一个工作日内撤权。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-05",
+      "query": "会议记录里有两个人重名，另有一个待办没说哪天完成，整理时怎么办？",
+      "gold": [
+        {
+          "doc_id": "project-atlas.md",
+          "text_contains": "日期未出现时保留待定"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "角色区分同名；未给日期保持待定，引用原句。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-06",
+      "query": "检索项目验收时，为什么不能只挑能查到答案的问题？",
+      "gold": [
+        {
+          "doc_id": "project-beacon.md",
+          "text_contains": "有答案查询和无答案查询"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "还需看无答案误返回和证据是否齐全。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-07",
+      "query": "新版本上线后错误比例持续升高，何时恢复上一版、谁操作？",
+      "gold": [
+        {
+          "doc_id": "project-releases.md",
+          "text_contains": "连续五分钟超过百分之二"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "连续5分钟超过2%，运维值班回退。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-08",
+      "query": "导出的地址打不开以后，文件是不是立刻就不存在了？",
+      "gold": [
+        {
+          "doc_id": "ops-exports.md",
+          "text_contains": "入口失效与文件删除"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不是；链接24小时失效，临时产物7天后清理。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-09",
+      "query": "服务进程重新起来了，就能把事故记成已恢复吗？",
+      "gold": [
+        {
+          "doc_id": "ops-incidents.md",
+          "text_contains": "进程重新启动只说明启动动作"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能，需健康检查与查询验证。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-10",
+      "query": "暂时演示时不想装数据库，重开程序以前的聊天还在吗？",
+      "gold": [
+        {
+          "doc_id": "ops-storage.md",
+          "text_contains": "服务重启后历史不保留"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "内存会话重启不保留。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-11",
+      "query": "搜出来最靠前的那一条，就一定是提问需要的资料吗？",
+      "gold": [
+        {
+          "doc_id": "knowledge-search.md",
+          "text_contains": "第一名仍可能不相关"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不一定，需要相关性检查和无答案样例。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "paraphrase-12",
+      "query": "同一段回答要靠两份材料支持，只有一份排进前几条能算查全吗？",
+      "gold": [
+        {
+          "doc_id": "knowledge-citations.md",
+          "text_contains": "只找到日期不能算支持完整"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能，分别检查全部证据条件。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-01",
+      "query": "灯塔的验收是五月二十日还是六月十日？请找灯塔自己的排期。",
+      "gold": [
+        {
+          "doc_id": "project-beacon.md",
+          "text_contains": "验收日为六月十日"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "灯塔6月10日；5月20日是阿特拉斯。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-02",
+      "query": "阿特拉斯负责检索条目还是会议行动项表？",
+      "gold": [
+        {
+          "doc_id": "project-atlas.md",
+          "text_contains": "输出行动项表"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "行动项表和引用。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-03",
+      "query": "住宿每晚的上限能直接当作聚餐每人的上限吗？",
+      "gold": [
+        {
+          "doc_id": "team-expense.md",
+          "text_contains": "餐费上限不能用于差旅住宿"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不能，住宿400元/晚，聚餐80元/人。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-04",
+      "query": "七天指的是访客权限期限还是导出链接有效时间？分别查清。",
+      "gold": [
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "最多保留七天"
+        },
+        {
+          "doc_id": "ops-exports.md",
+          "text_contains": "生成后二十四小时失效"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "访客7天，导出链接24小时。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-05",
+      "query": "周日凌晨两点跑的是日报还是索引重建？",
+      "gold": [
+        {
+          "doc_id": "ops-jobs.md",
+          "text_contains": "每周日凌晨两点"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "reindex索引重建；日报每天8点。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-06",
+      "query": "报销的审核通过状态是否已经表示转账到账？",
+      "gold": [
+        {
+          "doc_id": "team-expense.md",
+          "text_contains": "只有付款完成状态"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "没有；只有付款完成表示已付出，也不承诺到账时间。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-07",
+      "query": "归档草稿的三十天规则可以套给已验收交付吗？",
+      "gold": [
+        {
+          "doc_id": "project-archive.md",
+          "text_contains": "已验收交付保留一百八十天"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不能，交付180天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-08",
+      "query": "参加例会和获得工作区编辑权限是不是同一回事？",
+      "gold": [
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "不能因为参加过项目例会"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不是，另走工作区授权。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-09",
+      "query": "一百八十天的评测报告保留期，能当作检索日志期限吗？",
+      "gold": [
+        {
+          "doc_id": "knowledge-retention.md",
+          "text_contains": "检索日志保留十四天"
+        },
+        {
+          "doc_id": "knowledge-retention.md",
+          "text_contains": "评测报告与对应语料版本摘要"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不能，日志14天，发布报告180天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-10",
+      "query": "单个导出失败但检索可用，事故归为一级还是二级？",
+      "gold": [
+        {
+          "doc_id": "ops-incidents.md",
+          "text_contains": "属于二级"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "二级。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-11",
+      "query": "共享后端连接失败转成内存后，是否仍然跨进程共享？",
+      "gold": [
+        {
+          "doc_id": "ops-storage.md",
+          "text_contains": "不能把本地内存称作仍然共享"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不能，需明确降级方式。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "distractor-12",
+      "query": "更改版本名但沿用旧摘要，可以证明知识内容没变吗？",
+      "gold": [
+        {
+          "doc_id": "knowledge-versions.md",
+          "text_contains": "不能仅凭名称相同"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "distractor",
+      "answerable": true,
+      "reference_answer": "不能，名称与实际内容摘要用途不同。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-01",
+      "query": "阿特拉斯何时验收，正式发布还需要哪两个角色确认？",
+      "gold": [
+        {
+          "doc_id": "project-atlas.md",
+          "text_contains": "验收日为五月二十日"
+        },
+        {
+          "doc_id": "project-releases.md",
+          "text_contains": "项目评审和运维值班双重确认"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "5月20日；项目评审和运维值班确认。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-02",
+      "query": "灯塔何时冻结，发布报告需要记录哪些版本依据？",
+      "gold": [
+        {
+          "doc_id": "project-beacon.md",
+          "text_contains": "六月三日"
+        },
+        {
+          "doc_id": "knowledge-versions.md",
+          "text_contains": "文档内容摘要和查询集摘要"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "6月3日冻结；语料和查询摘要及版本。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-03",
+      "query": "会议整理中的缺日期规则与例会行动项分配规则如何衔接？",
+      "gold": [
+        {
+          "doc_id": "project-atlas.md",
+          "text_contains": "日期未出现时保留待定"
+        },
+        {
+          "doc_id": "team-meetings.md",
+          "text_contains": "无法确定截止日期的行动项标为待定"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "保持待定并在排期讨论补齐，不能猜日期。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-04",
+      "query": "休假交接的代理人和离组撤权的管理员分别做什么？",
+      "gold": [
+        {
+          "doc_id": "team-leave.md",
+          "text_contains": "代理人通过清单确认接手"
+        },
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "一个工作日内撤销"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "代理人接清单任务；管理员一个工作日内撤权。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-05",
+      "query": "导出转为长期归档，需要哪些文件，以及归档后如何修订？",
+      "gold": [
+        {
+          "doc_id": "ops-exports.md",
+          "text_contains": "summary.csv"
+        },
+        {
+          "doc_id": "project-archive.md",
+          "text_contains": "修订需要新建版本"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "表格和引用文件齐全，归档只读，修订另建版本。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-06",
+      "query": "发布回退的触发阈值和事故恢复的验证条件分别是什么？",
+      "gold": [
+        {
+          "doc_id": "project-releases.md",
+          "text_contains": "连续五分钟超过百分之二"
+        },
+        {
+          "doc_id": "ops-incidents.md",
+          "text_contains": "连续十分钟成功健康检查"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "5分钟错误率>2%回退；10分钟健康检查与公开查询验证恢复。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-07",
+      "query": "索引何时自动重建，删掉文档后还需要验证什么？",
+      "gold": [
+        {
+          "doc_id": "ops-jobs.md",
+          "text_contains": "每周日凌晨两点"
+        },
+        {
+          "doc_id": "knowledge-retention.md",
+          "text_contains": "验证旧片段不再被新查询返回"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "周日2点；验证重建后旧片段不再返回。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-08",
+      "query": "临时演示的内存会话与项目交付归档，重启和留存规则有什么不同？",
+      "gold": [
+        {
+          "doc_id": "ops-storage.md",
+          "text_contains": "服务重启后历史不保留"
+        },
+        {
+          "doc_id": "project-archive.md",
+          "text_contains": "已验收交付保留一百八十天"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "内存重启丢历史；交付归档保留180天。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-09",
+      "query": "灯塔验收为何检查无答案查询，搜索模块对这类问题应该如何处理？",
+      "gold": [
+        {
+          "doc_id": "project-beacon.md",
+          "text_contains": "有答案查询和无答案查询"
+        },
+        {
+          "doc_id": "knowledge-search.md",
+          "text_contains": "说明资料不足并给出可补充的文档类型"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "检查误返回；说明资料不足和可补文档。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-10",
+      "query": "访客评审归档材料时，目录范围和权限期限分别受什么规则约束？",
+      "gold": [
+        {
+          "doc_id": "project-archive.md",
+          "text_contains": "访问期限沿用访客规则"
+        },
+        {
+          "doc_id": "team-access.md",
+          "text_contains": "允许查看的目录需要在申请中逐项列出"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "指定目录，只读最多7天，沿用访客流程。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-11",
+      "query": "多文档证据评分如何避免一个标注命中掩盖另一个失效？",
+      "gold": [
+        {
+          "doc_id": "knowledge-citations.md",
+          "text_contains": "评分记录每个条件是否命中"
+        },
+        {
+          "doc_id": "knowledge-versions.md",
+          "text_contains": "任何一个条件失效都拒绝发布"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "逐条件验证存在，逐条件记录召回和缺失。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "multi_evidence-12",
+      "query": "相似项目名称容易串引用，证据引用和版本标注各怎样区分？",
+      "gold": [
+        {
+          "doc_id": "knowledge-citations.md",
+          "text_contains": "按精确文档标识区分"
+        },
+        {
+          "doc_id": "knowledge-versions.md",
+          "text_contains": "精确文档和证据锚点"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "精确文档标识、适用范围与证据锚点；保留版本摘要。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-01",
+      "query": "青禾休假期间的工资扣减公式是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料只含申请交接，没有薪资规则。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-02",
+      "query": "国际差旅商务舱审批标准是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有国际差旅标准或交通等级。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-03",
+      "query": "下个月周三例会的视频会议链接是哪一个？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有会议链接。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-04",
+      "query": "管理员的真实邮箱和登录密码是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料不含真实账户或凭据。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-05",
+      "query": "阿特拉斯正式发布具体几点开始？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "只提供冻结与验收日期，没有发布时间。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-06",
+      "query": "灯塔项目采购了哪个商业向量数据库、价格多少？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有采购厂商和价格。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-07",
+      "query": "样本服务所有季度的生产错误率是多少？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "只有虚构回退阈值，没有历史错误率数据。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-08",
+      "query": "项目归档的法定税务保留期是多少年？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有法定保留期。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-09",
+      "query": "模型客户端失败后自动重试几次？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "任务重试规则不适用于模型，未给出客户端配置。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-10",
+      "query": "导出的最大文件容量是多少 MB？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有文件大小上限。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-11",
+      "query": "共享会话服务真实部署的连接地址是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料不包含地址。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    },
+    {
+      "id": "unanswerable-12",
+      "query": "知识助手采用的预训练 embedding 模型名称是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "仅描述字词特征，没有预训练模型。",
+      "note": "人工编写的虚构青禾协作组样本；不作为真实组织制度或生产建议。"
+    }
+  ]
+}

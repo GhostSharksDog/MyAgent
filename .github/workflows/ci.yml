@@ -47,6 +47,10 @@ jobs:
         run: python -m pytest services/api/tests -q --junitxml=backend-tests.xml
       - name: Public RAG sample evaluation
         run: python scripts/eval_rag.py --compare --sample --json-out data/rag-eval.json
+      - name: Validate general public RAG evidence
+        run: python scripts/eval_rag.py --validate --dataset general
+      - name: General public RAG evaluation
+        run: python scripts/eval_rag.py --compare --dataset general --json-out data/rag-general-eval.json
       - name: Agent evaluation with synthetic model and real orchestration
         run: python scripts/eval_agent.py --offline
       - name: Install frontend
@@ -68,6 +72,7 @@ jobs:
           path: |
             backend-tests.xml
             data/rag-eval.json
+            data/rag-general-eval.json
             data/agent-eval/report.json
             data/agent-eval/report.md
             data/agent-eval/records.json

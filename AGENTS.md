@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1058 后端通过 + 1 live 跳过、159 前端通过**；任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-06 **1103 后端通过 + 1 live 跳过、159 前端通过**；通用检索见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
@@ -27,6 +27,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
 - Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近
 - `scripts/eval_agent.py` 默认离线：30 个通用公开任务 × 三模式，合成 LLM 驱动真实内核和只读工具。90 轮通过是框架验收，不是模型成功率；可离线重新评分已有 RunBundle
 - RAG NDCG 已按全语料相关块校正，报告标记 `ndcg-corpus-v2`；历史 top-k 命中数分母的数字不能与新版本直接比较
+- 通用RAG基准：`eval_rag.py --compare --dataset general`，16份虚构文档/60查询，manifest逐文件校验；严格离线、不读配置。48正例与12无答案分开统计，完整证据率和非空返回率不能冒充模型正确率；原始报告在 `docs/evidence/rag-general-v1`
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -262,6 +263,7 @@ apps/web/src/
 本轮证据入口：`docs/05-reliability-evidence.md`。普通 pytest 默认跳过 live；
 只有 `pytest -m live` 或 `--run-live` 才联网。不要为“全绿”消耗真实模型额度。
 公开 RAG 复测用 `scripts/eval_rag.py --compare --sample`，不读私人 notes 或额外语料。
+通用公开基准用 `--dataset general`，旧14查询与新60查询分数不能直接比较。闸门对照只改本轮评测，不改服务配置。
 真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
 并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
 旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。

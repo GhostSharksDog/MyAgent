@@ -21,6 +21,7 @@ Python 3.12 / FastAPI + React 19 / TypeScript 全栈项目，面向 AI 应用与
 | 服务工程 | 内存/Redis 队列、trace id、指标、熔断、限流、已有 api/rag/worker/Redis Compose 拆分 |
 | 可复现性 | Windows CI、Python 运行时 lock、pnpm lock、默认离线测试、公开样本评测、Edge 冒烟 |
 | 任务评测 | 30 个通用公开任务、三模式统一评分；合成模型驱动真实内核与工具，保存原始事件、目标检查、覆盖率及已知用量；真实模型成绩尚未采集 |
+| 通用检索基准 | 16份虚构公开文档、60查询，分别检查召回、多处证据和无答案非空返回；旧14查询基准保留 |
 
 SQLite 已落地；PostgreSQL/pgvector、生产阈值标定、TLS 与 Redis 鉴权属于后续工作。
 本轮没有扩展部署；历史路线图中的构想不算作当前实现。
@@ -103,6 +104,7 @@ ReAct 可传 session_id/history；Plan/Supervisor 即使传入也按独立任务
 & .venv\Scripts\python.exe -X utf8 -m pytest services/api/tests -q
 & .venv\Scripts\python.exe -X utf8 scripts/lock_deps.py --check
 & .venv\Scripts\python.exe -X utf8 scripts/eval_rag.py --compare --sample
+& .venv\Scripts\python.exe -X utf8 scripts/eval_rag.py --compare --dataset general --json-out data/rag-general.json
 & .venv\Scripts\python.exe -X utf8 scripts/eval_agent.py --offline
 Set-Location apps/web
 pnpm test
@@ -138,6 +140,12 @@ TF-IDF Recall@5 **0.821**，混合 RRF **0.869**，特征重排 MRR **0.685**。
 不读取 `.env` 或私人语料，无联网执行入口；真实模型成绩待新额度。用法、记录格式和限制见 [任务评测记录](docs/07-agent-evaluation.md)。
 评测补强后的最终门禁：**1058 后端通过 + 1 live 跳过、159 前端通过**，格式、lint、lock、类型与构建通过。
 
+随后增加[通用 RAG 基准](docs/08-general-rag-benchmark.md)：16份虚构文档、60查询，默认参数生成48块。
+混合+重排在48条有答案查询上的Recall@5为0.917、完整证据率0.875，多处证据只找齐8/12；
+12条无答案查询都返回了片段。提高门槛明显损伤正例召回，因此没有修改服务默认配置。
+这些是本地检索指标，不是模型答案正确率或拒答率；与旧基准不能直接比较。
+最新门禁：**1103 后端通过 + 1 live 跳过、159 前端通过**；参数、失败与原始JSON已留档。
+
 GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线检查与前端构建。
 远端 CI 首跑需用户推送后确认；当前只报告本地检查。
 
@@ -146,6 +154,7 @@ GitHub Actions 使用 Windows、Python 3.12、Node 24、pnpm 10，完成离线�
 - [可靠性证据与未验证项](docs/05-reliability-evidence.md)
 - [界面设计、验收与演示截图](docs/06-ui-design.md)
 - [通用任务评测、运行记录与指标校正](docs/07-agent-evaluation.md)
+- [通用 RAG 基准与失败分析](docs/08-general-rag-benchmark.md)
 - [架构、设计决策与历史修复](docs/01-architecture.md)（第 8/10 节为当前补充）
 - [交接说明](AGENTS.md)
 - [项目一页纸](docs/04-career/01-onepager.md)
