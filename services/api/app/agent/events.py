@@ -70,6 +70,18 @@ class AgentEvent(BaseModel):
     # 结束时的累计统计
     usage: Usage | None = None
     steps_used: int = 0
+
+    # 本轮的工具调用摘要（技术债 T07），仅 DONE 携带。
+    # 它是**下一轮**历史里那一行"我查过什么"的来源，同时让调用方
+    # （HTTP 层）能把它随会话一起持久化 —— 否则模型每轮都会重复查一遍。
+    tool_summary: str = ""
+    # 这一轮是否因为超出上下文预算而裁掉过消息（技术债 T09）。
+    # 与 `truncated` 同样的理由：裁剪意味着模型看到的比实际产生的少，
+    # 不体现在事件流里，"它怎么忘了刚才说的"就无从解释。
+    context_trimmed: bool = False
+    # 发出去之前那次预算检查算出的上下文规模（token，估算值）。
+    context_tokens: int = 0
+
     # 终止原因：finished | max_steps | loop_detected | error
     # 仅 DONE 事件携带。单独一个字段而不是靠"有没有 ERROR 事件"推断：
     # "步数耗尽"和"死循环"是**可预期的预算终止**，而"模型调用失败"是故障。

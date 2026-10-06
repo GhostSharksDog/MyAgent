@@ -58,8 +58,10 @@ class Session(BaseModel):
     total_tokens: int = 0
     meta: dict[str, Any] = Field(default_factory=dict)
 
-    def append_turn(self, user: str, assistant: str, *, tokens: int = 0) -> None:
-        self.turns.append(Turn(user=user, assistant=assistant))
+    def append_turn(
+        self, user: str, assistant: str, *, tokens: int = 0, tool_summary: str = ""
+    ) -> None:
+        self.turns.append(Turn(user=user, assistant=assistant, tool_summary=tool_summary))
         self.updated_at = time.time()
         self.total_tokens += tokens
         if not self.title:

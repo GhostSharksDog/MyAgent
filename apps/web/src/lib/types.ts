@@ -119,6 +119,18 @@ export interface AgentEvent {
   duration_ms?: number
   /** 工具观察结果是否被截断 —— 意味着模型看到的不是完整内容。 */
   truncated?: boolean
+  /**
+   * 本轮因为**超出上下文预算**而丢弃过消息（只随 done 事件下发）。
+   *
+   * 与 `truncated` 同样的道理：裁剪意味着模型看到的比实际产生的少。
+   * 不显示出来，用户遇到"它怎么忘了刚才说的"就毫无线索 ——
+   * 而这类怀疑会直接落到"这个 Agent 不可靠"上。
+   */
+  context_trimmed?: boolean
+  /** 发出去之前那次预算检查算出的上下文规模（token，估算值）。 */
+  context_tokens?: number
+  /** 本轮调用过哪些工具的一行摘要（供后续轮次参考，也便于界面展示）。 */
+  tool_summary?: string
   usage?: Usage
   steps_used?: number
   stopped_reason?: StoppedReason | (string & {})
@@ -281,6 +293,15 @@ export interface AssistantTurnState {
   plan: PlanPayload | null
   /** 被派发过的专家（多 Agent）。按派发顺序排列。 */
   delegations: DelegationView[]
+  /**
+   * 这一轮是否因为超出上下文预算而丢弃过消息（技术债 T09）。
+   *
+   * 显示它的理由与 `truncated` 相同：**模型看到的比实际产生的少**，
+   * 而这件事不显示出来，"它怎么忘了刚才说的"就变成了一个猜谜游戏。
+   */
+  contextTrimmed: boolean
+  /** 发出前的上下文规模（token，估算值）。0 表示没算过（预算未启用）。 */
+  contextTokens: number
 }
 
 /** 对话区的一条消息。 */

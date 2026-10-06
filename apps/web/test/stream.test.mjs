@@ -201,6 +201,21 @@ test('未知事件类型被忽略，不会破坏已有状态', () => {
   assert.deepEqual(after, before)
 })
 
+test('done 携带的上下文裁剪标记会进入状态（技术债 T09）', () => {
+  // 这个标记是"它怎么忘了刚才说的"唯一的解释来源，所以必须真的被记下来 ——
+  // 后端算了、前端丢了，等于没做。
+  const trimmed = reduce([
+    { type: 'final', content: '答案' },
+    { type: 'done', stopped_reason: 'finished', context_trimmed: true, context_tokens: 32000 },
+  ])
+  assert.equal(trimmed.contextTrimmed, true)
+  assert.equal(trimmed.contextTokens, 32000)
+
+  const normal = reduce([{ type: 'done', stopped_reason: 'finished' }])
+  assert.equal(normal.contextTrimmed, false, '没裁剪过就不该显示那个标记')
+  assert.equal(normal.contextTokens, 0)
+})
+
 test('字段缺失的宽容性：只有 type 的事件也不该崩', () => {
   const turn = reduce([{ type: 'step' }, { type: 'token' }, { type: 'done' }])
   assert.equal(turn.steps.length, 1)

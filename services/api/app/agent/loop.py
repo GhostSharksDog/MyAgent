@@ -33,13 +33,15 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 
+from app.agent.context import ContextBudget, TrimReport, summarize_tools
 from app.agent.events import AgentEvent, AgentRunResult, EventType
 from app.agent.memory import ConversationMemory, LongTermMemory
 from app.agent.prompts import build_system_prompt
 from app.core.config import AgentSettings
 from app.llm.client import LLMClient, StreamAccumulator
+from app.llm.tokens import record_prompt_estimate, tokenizer_name
 from app.llm.types import ChatMessage, ToolCall, Usage
 from app.tools.base import ToolRegistry, ToolResult
 
@@ -115,6 +117,20 @@ class Agent:
         self._memory = memory
         self._long_term = long_term
 
+        # ---------- 上下文预算（技术债 T09） ----------
+        # `protect_prefix=1` 保护系统提示；长期记忆紧随其后，也一并保护 ——
+        # 裁掉"关于用户的稳定事实"比裁掉一轮旧对话损失更大（前者跨会话复用）。
+        self._context_budget = ContextBudget(
+            settings.context_token_budget,
+            protect_prefix=2 if long_term is not None else 1,
+        )
+        if self._context_budget.enabled:
+            logger.info(
+                "上下文预算：%d token（估算器 %s），超出时从最早的对话轮次开始丢弃",
+                settings.context_token_budget,
+                tokenizer_name(),
+            )
+
     # ============================================================
     # 主入口 A：流式（给 UI 用）
     # ============================================================
@@ -174,11 +190,24 @@ class Agent:
             # 没被包住的 await"。有它，那种改动最坏是"多花一步"，
             # 而不是"彻底失去时间上限"。
             if deadline is not None and loop.time() >= deadline:
-                for event in self._budget_exhausted(step, total_usage, budget):
+                # 这是**本步开始之前**的护栏：此刻还没算过本步的上下文裁剪，
+                # 所以 trim 传 None。传上一轮遗留的值会报出一个与本次终止
+                # 无关的裁剪结论 —— 那比不报更糟。
+                for event in self._budget_exhausted(
+                    step, total_usage, budget, tool_trace=tool_trace, trim=None
+                ):
                     yield event
                 return
 
             yield AgentEvent(type=EventType.STEP, step=step)
+
+            # ---------- 0. 上下文预算（技术债 T09） ----------
+            # 放在**每一步的模型调用之前**，而不是只在开头做一次：
+            # 上下文是在循环里长大的（每一步都可能追加几千字的工具观察），
+            # 只在开头检查等于没检查 —— 增长全发生在后面。
+            #
+            # 未启用（budget=0）时 `fit()` 会立刻返回，只多一次 token 计数。
+            messages, trim = self._context_budget.fit(messages)
 
             # ---------- 1. 调用模型（流式） ----------
             accumulator = StreamAccumulator()
@@ -203,7 +232,9 @@ class Agent:
                 # "模型调用失败"，于是终止原因变成 error —— 而"预算用完"
                 # 是可预期的运行结果，不是故障。把它算进错误率会让监控失真。
                 logger.warning("第 %d 步超出单轮总时长预算（%.1fs）", step, budget)
-                for event in self._budget_exhausted(step, total_usage, budget):
+                for event in self._budget_exhausted(
+                    step, total_usage, budget, tool_trace=tool_trace, trim=trim
+                ):
                     yield event
                 return
             except Exception as exc:
@@ -214,11 +245,33 @@ class Agent:
                     usage=total_usage,
                     step=step,
                     error=str(exc),
+                    tool_trace=tool_trace,
+                    trim=trim,
                 ):
                     yield event
                 return
 
             total_usage = total_usage + accumulator.usage
+            # 【估算器的精度：测量而不是声称】
+            # 模型回来的 `prompt_tokens` 是**权威值**，而我们知道自己发了多少
+            # 估算 token（本步开头的 fit() 算过，存在 trim.after_tokens 里）。
+            # 每次调用都记一对数字，/api/metrics 里两个累加计数器一除，
+            # 就是估算器在**真实流量**上的整体偏差倍数。
+            #
+            # 为什么不写死"误差 < 10%"这种话：那种数字没有依据，换一个模型族
+            # 或换一种输入分布就不成立。让它成为可观测的指标，偏了能看见。
+            if accumulator.usage.prompt_tokens:
+                ratio = record_prompt_estimate(
+                    trim.after_tokens or 0, accumulator.usage.prompt_tokens
+                )
+                if ratio is not None:
+                    logger.debug(
+                        "第 %d 步：上下文估算 %d token，实际 %d token（%.2f×）",
+                        step,
+                        trim.after_tokens,
+                        accumulator.usage.prompt_tokens,
+                        ratio,
+                    )
             assistant_msg = accumulator.build_message()
             messages.append(
                 assistant_msg
@@ -236,8 +289,14 @@ class Agent:
                 # 只把**成功的最终回答**写入短期记忆。
                 # 被预算掐断或死循环中止的轮次不写：它们不是有效上下文，
                 # 写进去只会让后续对话基于半成品推理。
+                #
+                # 工具摘要跟着一起写（技术债 T07）：下一轮的历史里会出现
+                # 一行"我查过什么"，这样模型不会把同一个工具再查一遍 ——
+                # 这是"禁止 tool 消息入历史"（ADR-006）留下的缺口的补法。
                 if self._memory is not None:
-                    self._memory.add_turn(user_input, answer)
+                    self._memory.add_turn(
+                        user_input, answer, tool_summary=summarize_tools(tool_trace)
+                    )
 
                 yield AgentEvent(type=EventType.FINAL, step=step, content=answer)
                 for event in self._finish(
@@ -245,6 +304,8 @@ class Agent:
                     steps_used=step,
                     usage=total_usage,
                     step=step,
+                    tool_trace=tool_trace,
+                    trim=trim,
                 ):
                     yield event
                 return
@@ -267,6 +328,8 @@ class Agent:
                         usage=total_usage,
                         step=step,
                         error=msg,
+                        tool_trace=tool_trace,
+                        trim=trim,
                     ):
                         yield event
                     return
@@ -319,7 +382,9 @@ class Agent:
             # 光有单工具超时是不够的（3 个各 30s 的工具就是 90s）
             results = await self._run_with_budget(pending, deadline, loop, step)
             if results is None:
-                for event in self._budget_exhausted(step, total_usage, budget):
+                for event in self._budget_exhausted(
+                    step, total_usage, budget, tool_trace=tool_trace, trim=trim
+                ):
                     yield event
                 return
 
@@ -332,6 +397,10 @@ class Agent:
                         "args": call.arguments,
                         "ok": result.ok,
                         "duration_ms": result.duration_ms,
+                        # 观察结果的**字符数**：工具摘要里的"约 1.2k 字"靠它。
+                        # 传字符而不是 token：摘要是给模型看的一句话，
+                        # 字符规模已经足够表达"这次查回来多少东西"。
+                        "chars": len(result.content or ""),
                     }
                 )
 
@@ -366,6 +435,8 @@ class Agent:
             steps_used=self._s.max_steps,
             usage=total_usage,
             error=msg,
+            tool_trace=tool_trace,
+            trim=trim,
         ):
             yield event
         return
@@ -464,8 +535,20 @@ class Agent:
             logger.warning("第 %d 步的工具执行超出单轮总时长预算", step)
             return None
 
-    def _budget_exhausted(self, step: int, usage: Usage, budget: float) -> list[AgentEvent]:
-        """预算用尽时的终结事件：说明"用完了多少、做到第几步、怎么放宽"。"""
+    def _budget_exhausted(
+        self,
+        step: int,
+        usage: Usage,
+        budget: float,
+        *,
+        tool_trace: Sequence[Mapping[str, object]] | None = None,
+        trim: TrimReport | None = None,
+    ) -> list[AgentEvent]:
+        """预算用尽时的终结事件：说明"用完了多少、做到第几步、怎么放宽"。
+
+        也带上工具摘要与裁剪报告：超时的轮次里，"它当时在查什么"恰恰是最有用
+        的信息（否则用户只看到"超时了"，不知道卡在哪一步）。
+        """
         msg = (
             f"已达单轮总时长预算（{budget:.0f} 秒），在第 {step} 步中止。"
             f"这通常意味着某一步的外部调用（模型或工具）耗时远超预期，"
@@ -473,7 +556,13 @@ class Agent:
             f"如确有必要，请在配置里调大 AGENT_RUN_TIMEOUT（0 表示不限制）。"
         )
         return self._finish(
-            stopped_reason="timeout", steps_used=step, usage=usage, step=step, error=msg
+            stopped_reason="timeout",
+            steps_used=step,
+            usage=usage,
+            step=step,
+            error=msg,
+            tool_trace=tool_trace,
+            trim=trim,
         )
 
     # ============================================================
@@ -487,6 +576,8 @@ class Agent:
         usage: Usage,
         step: int = 0,
         error: str | None = None,
+        tool_trace: Sequence[Mapping[str, object]] | None = None,
+        trim: TrimReport | None = None,
     ) -> list[AgentEvent]:
         """一个轮次的**终结事件序列**：可选的 error + 必定有的 done。
 
@@ -499,6 +590,11 @@ class Agent:
 
         现在所有出口都必须经过这里，`done` 的存在成了结构性事实而不是纪律。
         对应的回归测试见 test_agent_loop.py 的"终态不变量"。
+
+        【为什么工具摘要与裁剪报告也从这里带上】
+        它们是"这一轮实际发生了什么"的一部分，而每个出口都该说清楚 ——
+        尤其是被预算掐断或出错的那几个出口：那几轮的摘要恰恰最有用
+        （比如"reindex 调了三次都失败"）。
         """
         events: list[AgentEvent] = []
         if error:
@@ -510,6 +606,9 @@ class Agent:
                 steps_used=steps_used,
                 usage=usage,
                 stopped_reason=stopped_reason,
+                tool_summary=summarize_tools(tool_trace or []),
+                context_trimmed=bool(trim and trim.trimmed),
+                context_tokens=trim.after_tokens if trim else 0,
             )
         )
         return events

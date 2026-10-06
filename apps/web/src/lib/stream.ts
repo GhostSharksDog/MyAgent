@@ -68,6 +68,8 @@ export function emptyTurn(phase: TurnPhase = 'connecting'): AssistantTurnState {
     phase,
     plan: null,
     delegations: [],
+    contextTrimmed: false,
+    contextTokens: 0,
   }
 }
 
@@ -205,6 +207,12 @@ export function applyEvent(turn: AssistantTurnState, event: AgentEvent): Assista
         usage: event.usage ?? turn.usage,
         stepsUsed: typeof event.steps_used === 'number' ? event.steps_used : turn.stepsUsed,
         stoppedReason: reason,
+        // 上下文被裁剪过就记下来，由 RunSummary 显示成一行提示。
+        // 这是"它怎么忘了刚才说的"唯一的解释来源 —— 不显示的话，
+        // 用户只能把它归因成"这个 Agent 记性不好"。
+        contextTrimmed: event.context_trimmed === true,
+        contextTokens:
+          typeof event.context_tokens === 'number' ? event.context_tokens : turn.contextTokens,
         // 只有真的出错才进 error 相；预算终止进 done 相，由 UI 用警告色区分
         phase: failed ? 'error' : 'done',
       }

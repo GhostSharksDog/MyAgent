@@ -56,17 +56,27 @@ class SessionStore(ABC):
     async def delete(self, session_id: str) -> bool: ...
 
     async def append_turn(
-        self, session_id: str, user: str, assistant: str, *, tokens: int = 0
+        self,
+        session_id: str,
+        user: str,
+        assistant: str,
+        *,
+        tokens: int = 0,
+        tool_summary: str = "",
     ) -> Session | None:
         """追加一轮对话。会话不存在时返回 None（而不是自动创建）。
 
         刻意不自动创建：那会把"客户端传了错误的 session_id"这种 bug
         变成"悄悄多出一个会话"，问题被掩盖而不是暴露。
+
+        `tool_summary` 是"本轮调用过哪些工具"的一行摘要（技术债 T07）：
+        它随轮次一起持久化，下一轮组装历史时出现在助手那条消息的末尾，
+        让模型知道自己查过什么，不必重复调用。
         """
         session = await self.get(session_id)
         if session is None:
             return None
-        session.append_turn(user, assistant, tokens=tokens)
+        session.append_turn(user, assistant, tokens=tokens, tool_summary=tool_summary)
         await self.save(session)
         return session
 

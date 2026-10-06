@@ -1,4 +1,4 @@
-# Legacy · 求职/招聘 AI Agent
+﻿# Legacy · 求职/招聘 AI Agent
 
 > 一个从零手写内核的全栈 Agent 项目：不依赖 LangChain 等框架的"黑盒"，
 > 把 **ReAct 循环、Tool Use、Planning、Memory、RAG** 逐层拆开实现，
@@ -237,7 +237,7 @@ curl http://127.0.0.1:8000/api/tasks/<task_id>
 | **P7** | 可用性收尾：设置改成独立圆角窗口（左栏分类）、**多供应商模型管理**（可存多个、一键切换且立即生效）、`docker compose` 部署真的跑通 | ✅ 完成 |
 | **P8** | 可靠性与可复现：`SESSION_BACKEND=sql`（SQLite 持久化，顺带修掉并发追加丢轮次）、后端依赖锁定（别人能复现同一份指标） | ✅ 完成 |
 
-**879 个后端测试 + 90 个前端测试**，全部通过（`.\scripts\dev.ps1 check`）。
+**904 个后端测试 + 91 个前端测试**，全部通过（`.\scripts\dev.ps1 check`）。
 
 每个阶段的取舍与代价都写在 [`docs/01-architecture.md`](docs/01-architecture.md)：
 包括**已知技术债清单**（哪些还没做、为什么还没做、影响是什么），

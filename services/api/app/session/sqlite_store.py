@@ -111,11 +111,43 @@ def _define_tables() -> tuple[Any, Any]:
         Column("seq", Integer, nullable=False),
         Column("user", Text, nullable=False),
         Column("assistant", Text, nullable=False),
+        # 本轮的工具调用摘要（技术债 T07）。默认空串而不是 NULL：
+        # "没调用过工具"与"这列没有值"是两件事，空串让读取端不必处理 None。
+        Column("tool_summary", Text, nullable=False, server_default=""),
     )
     return sessions, turns
 
 
 SESSIONS, TURNS = _define_tables()
+
+
+def _missing_columns(sync_conn: Any) -> list[str]:
+    """用 `PRAGMA table_info` 核对 `sessions` / `turns` 两表的列是否齐全。
+
+    只对 SQLite 有意义（别的方言有各自的信息模式），所以调用方要保证
+    传进来的是 SQLite 连接 —— 现在唯一的调用点在 `_ensure_ready`，
+    而它只在 SQLite 上才会走到这里（见 `_apply_sqlite_pragmas` 的方言判断）。
+
+    返回形如 `["turns.tool_summary"]` 的清单；空清单表示结构没问题。
+    """
+    from sqlalchemy import text
+
+    expected = {
+        "sessions": {column.name for column in SESSIONS.columns},
+        "turns": {column.name for column in TURNS.columns},
+    }
+    missing: list[str] = []
+    for table, columns in expected.items():
+        # PRAGMA 的参数不能走绑定变量（它是语法的一部分），所以用 f-string 拼表名；
+        # 表名来自代码里的常量而不是用户输入，没有注入面。
+        rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        if not rows:
+            # 表不存在：create_all 刚建过，说明它连建都没建起来
+            missing.append(f"{table}（整张表）")
+            continue
+        present = {row[1] for row in rows}
+        missing.extend(f"{table}.{name}" for name in sorted(columns - present))
+    return missing
 
 
 def _apply_sqlite_pragmas(engine: AsyncEngine) -> None:
@@ -210,16 +242,35 @@ class SqlSessionStore(SessionStore):
         return cls(engine, ttl_seconds=ttl_seconds)
 
     async def _ensure_ready(self) -> None:
-        """建表（只做一次）。
+        """建表（只做一次）+ **核对列是否齐全**。
 
         惰性而不是放在 `__init__` 里：`__init__` 不能是异步的，
         而在构造函数里 `asyncio.run(...)` 会在已有事件循环中直接报错 ——
         这是"同步构造函数里想干异步的事"的经典坑。
+
+        【为什么要核对列 —— "没有迁移工具"这个取舍的代价】
+        `create_all` **只建不存在的表**：它对已存在的表什么都不做，
+        所以给 `turns` 加一列（比如 T07 的 `tool_summary`）时，
+        老库不会有这一列 —— 而错误要到第一次读写才炸出来：
+
+            sqlite3.OperationalError: no such column: tool_summary
+
+        那句话出现在某个用户请求里，看起来像业务 bug。所以这里在启动时
+        主动比一次列名，缺了就抛一条**能照做**的信息（删掉库文件重建），
+        这正是"要么明确报错，要么别加列"的取舍该有的样子。
         """
         if self._ready:
             return
         async with self._engine.begin() as conn:
             await conn.run_sync(lambda sync_conn: SESSIONS.metadata.create_all(sync_conn))
+            missing = await conn.run_sync(_missing_columns)
+        if missing:
+            raise RuntimeError(
+                f"{self.backend} 会话库的表结构与当前代码不一致，缺少列：{'、'.join(missing)}。"
+                f"本实现**没有迁移工具**（见 app/session/sqlite_store.py 的说明）："
+                f"会话历史可以丢弃，所以最简单的修法是删掉数据库文件后重启。"
+                f"当前文件：{self._engine.url.database}"
+            )
         self._ready = True
 
     async def ensure_ready(self) -> None:
@@ -279,7 +330,7 @@ class SqlSessionStore(SessionStore):
                 return None
             turn_rows = (
                 await conn.execute(
-                    select(TURNS.c.user, TURNS.c.assistant)
+                    select(TURNS.c.user, TURNS.c.assistant, TURNS.c.tool_summary)
                     .where(TURNS.c.session_id == session_id)
                     .order_by(TURNS.c.seq)
                 )
@@ -292,7 +343,7 @@ class SqlSessionStore(SessionStore):
             updated_at=row["updated_at"],
             total_tokens=row["total_tokens"],
             meta=dict(row["meta"] or {}),
-            turns=[Turn(user=u, assistant=a) for u, a in turn_rows],
+            turns=[Turn(user=u, assistant=a, tool_summary=s or "") for u, a, s in turn_rows],
         )
 
     async def save(self, session: Session) -> None:
@@ -332,13 +383,20 @@ class SqlSessionStore(SessionStore):
                             "seq": index,
                             "user": turn.user,
                             "assistant": turn.assistant,
+                            "tool_summary": turn.tool_summary,
                         }
                         for index, turn in enumerate(session.turns)
                     ],
                 )
 
     async def append_turn(
-        self, session_id: str, user: str, assistant: str, *, tokens: int = 0
+        self,
+        session_id: str,
+        user: str,
+        assistant: str,
+        *,
+        tokens: int = 0,
+        tool_summary: str = "",
     ) -> Session | None:
         """追加一轮：**INSERT 一条 + UPDATE 计数**，不做读-改-写。
 
@@ -374,7 +432,11 @@ class SqlSessionStore(SessionStore):
             ).scalar_one()
             await conn.execute(
                 insert(TURNS).values(
-                    session_id=session_id, seq=int(count), user=user, assistant=assistant
+                    session_id=session_id,
+                    seq=int(count),
+                    user=user,
+                    assistant=assistant,
+                    tool_summary=tool_summary,
                 )
             )
             await conn.execute(

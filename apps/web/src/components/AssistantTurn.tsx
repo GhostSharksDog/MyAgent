@@ -21,7 +21,7 @@ import { formatCompact, formatNumber } from '../lib/format'
 import type { AssistantTurnState, ChatItem } from '../lib/types'
 import type { ReactNode } from 'react'
 import { DelegationPanel } from './DelegationPanel'
-import { IconAlert, IconCoins, IconInfo, IconLayers } from './Icons'
+import { IconAlert, IconCoins, IconInfo, IconLayers, IconScissors } from './Icons'
 import { Markdown } from './Markdown'
 import { PlanPanel } from './PlanPanel'
 import { ThinkingTimeline } from './ThinkingTimeline'
@@ -119,6 +119,23 @@ function RunSummary({
         />
         <span>{stop.text}</span>
       </span>
+      {/* 上下文被裁剪过必须显示出来。
+          它是"它怎么忘了刚才说的"唯一的解释来源 —— 不显示的话，
+          用户只能把这个现象归因成"这个 Agent 记性不好"。 */}
+      {state.contextTrimmed ? (
+        <span
+          className="runmeta__item"
+          style={{ color: 'var(--warn)' }}
+          title={
+            '本轮上下文超过预算，最早的对话轮次已被丢弃' +
+            (state.contextTokens ? `（裁剪后约 ${state.contextTokens} token）` : '') +
+            '。可在设置里调大 AGENT_CONTEXT_TOKEN_BUDGET。'
+          }
+        >
+          <IconScissors size={11} />
+          <span>上下文已裁剪</span>
+        </span>
+      ) : null}
     </div>
   )
 }

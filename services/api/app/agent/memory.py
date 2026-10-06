@@ -44,6 +44,17 @@ class Turn(BaseModel):
     user: str
     assistant: str
     ts: float = Field(default_factory=time.time)
+    # 本轮调用过哪些工具（技术债 T07）。空 = 没调用过工具。
+    #
+    # 【为什么是一行字符串而不是结构化对象】
+    # 它唯一的用途就是渲染成**一行**放进下一轮的历史（见 abuild_context）。
+    # 存成对象只是把渲染逻辑推到别处，还要为它维护一套序列化；
+    # 而会话 JSON 是持久化的，旧数据必须能直接读 —— 加一个带默认值的
+    # 字符串字段是最小改动。
+    #
+    # 内容形如："（本轮我调用过：search_knowledge×2（约 3.1k 字）、read_file）"。
+    # 由 `app/agent/context.summarize_tools` 生成（那个函数是纯的，好测）。
+    tool_summary: str = ""
 
 
 class ConversationMemory:
@@ -99,8 +110,8 @@ class ConversationMemory:
 
     # ---------- 写入 ----------
 
-    def add_turn(self, user: str, assistant: str) -> None:
-        self._turns.append(Turn(user=user, assistant=assistant))
+    def add_turn(self, user: str, assistant: str, *, tool_summary: str = "") -> None:
+        self._turns.append(Turn(user=user, assistant=assistant, tool_summary=tool_summary))
 
     @classmethod
     def from_turns(
@@ -166,7 +177,20 @@ class ConversationMemory:
         # `abuild_context` 只负责把剩下的全部渲染出来。
         for turn in self._turns:
             messages.append(ChatMessage.user(turn.user))
-            messages.append(ChatMessage.assistant(turn.assistant))
+            # 【工具摘要挂在哪 —— 技术债 T07 的关键一步】
+            # 它被追加到**助手那条消息的末尾**，而不是单独发一条 system 消息。
+            #
+            # 为什么不单独发 system：OpenAI 兼容端点普遍接受"system 只能在最前"，
+            # 在对话中间插 system 消息是最容易踩兼容性坑的写法 ——
+            # 而这个项目的模型接入是通用的，不能赌某一家宽容。
+            #
+            # 为什么用第一人称、放在括号里：它读起来像助手自己的一条记录，
+            # 而不是一段外来指令。外来指令式的措辞（"不要重复调用工具"）
+            # 有被模型在回答里复述的风险。
+            content = turn.assistant
+            if turn.tool_summary:
+                content = f"{content}\n\n{turn.tool_summary}"
+            messages.append(ChatMessage.assistant(content))
 
         return messages
 

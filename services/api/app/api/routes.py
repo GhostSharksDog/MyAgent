@@ -143,7 +143,12 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session
 
 
 async def _persist(
-    store: SessionStore, session: Session | None, user: str, assistant: str, tokens: int
+    store: SessionStore,
+    session: Session | None,
+    user: str,
+    assistant: str,
+    tokens: int,
+    tool_summary: str = "",
 ) -> None:
     """把一轮成功对话写回会话。
 
@@ -151,10 +156,15 @@ async def _persist(
     不是有效上下文，写进会话会让后续对话基于半成品推理。
     这与 Agent 内部写短期记忆的判据保持一致（同一条规则只在一处定义，
     但两处都要遵守；此处若漏掉，会话历史里就会出现半成品答案）。
+
+    `tool_summary` 是同一条判据下的新成员（技术债 T07）：它只在成功轮次里
+    才有意义 —— 半成品轮次的"查过什么"不足以让下一轮省掉一次调用。
     """
     if session is None:
         return
-    updated = await store.append_turn(session.id, user, assistant, tokens=tokens)
+    updated = await store.append_turn(
+        session.id, user, assistant, tokens=tokens, tool_summary=tool_summary
+    )
     if updated is None:
         # 会话在流式过程中被删除或过期。不该影响已经返回给用户的结果，
         # 但必须记日志 —— 否则这就是一次静默的数据丢失。
@@ -388,6 +398,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         final_answer = ""
         total_tokens = 0
+        tool_summary = ""
 
         # 【离线回放：只换数据源，不换任何下游逻辑】
         # 下面的 `async for` 循环体完全不变 —— 同一套事件序列化、同一套指标采集、
@@ -406,8 +417,13 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                 # 不能等流结束再重跑一遍 —— 那会重复调用模型与工具。
                 if event.type is EventType.FINAL:
                     final_answer = event.content
-                elif event.type is EventType.DONE and event.usage:
-                    total_tokens = event.usage.total_tokens
+                elif event.type is EventType.DONE:
+                    if event.usage:
+                        total_tokens = event.usage.total_tokens
+                    # 工具摘要随 DONE 一起下发（技术债 T07）：
+                    # 持久化它之后，下一轮的历史里才会有"我查过什么"那一行。
+                    # 从事件里取而不是重新算一遍 —— Agent 内部才知道完整的调用轨迹。
+                    tool_summary = event.tool_summary
 
                 # 指标采集放在**消费端**而不是 Agent 内核里：
                 # 内核有 CLI / HTTP / 测试等多种调用方式，让它直接打点会把
@@ -431,6 +447,8 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
         # 持久化放在 `async for` 之外：即使流中途出错，只要已经产出了完整答案
         # 就应当保存（异常分支没有 return，控制流会走到这里）。
         if final_answer:
-            await _persist(store, session, payload.message, final_answer, total_tokens)
+            await _persist(
+                store, session, payload.message, final_answer, total_tokens, tool_summary
+            )
 
     return EventSourceResponse(event_generator(), ping=15)
