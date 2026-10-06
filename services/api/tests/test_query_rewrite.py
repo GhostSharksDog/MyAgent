@@ -339,15 +339,10 @@ class TestRetrieverIntegration:
         assert hits, "改写失败不应导致检索无结果"
         assert r.stats()["rewriter_stats"]["failures"] >= 1
 
-    async def test_rewrites_change_the_ranking(self) -> None:
-        """改写必须真的改变召回结果 —— 否则"启用"与"没启用"无从区分。
+    async def test_rewrites_expand_matching_candidates(self) -> None:
+        """改写应引入原查询未匹配的候选；禁用改写是同一语料上的对照。
 
-        断言方式刻意选的是**排序变化**而不是"top-k 集合变化"：
-        语料只有 4 块，k 稍微取大一点两个集合就必然相同，
-        那样的断言会变成"永远为真"的空测试。
-
-        这条测试的价值在于：它会在"改写器没被执行（静默降级）"时失败，
-        而那正是本次开发中反复出现的失败模式。
+        零匹配不再凑满 k 条，改写前后集合大小可以不同，不能要求一致。
         """
         query = "我有什么技术"
         full = 10  # 取到全部块
@@ -362,7 +357,5 @@ class TestRetrieverIntegration:
         rewritten = await r.aretrieve(query, k=full)
         rewritten_order = [h.chunk.id for h in rewritten]
 
-        assert len(rewritten_order) == len(base_order), "候选集合大小应一致"
-        assert rewritten_order != base_order, (
-            f"启用改写后排序完全没变 —— 说明改写没有生效（base={base_order}）"
-        )
+        assert base_order, "标题中的技能应被原查询召回"
+        assert set(base_order) < set(rewritten_order), "改写应增加真实匹配，不能只凑零分块"

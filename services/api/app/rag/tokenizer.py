@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import re
 
+TOKENIZER_VERSION = "cjk-boundary-v2"
+
 # 中日韩统一表意文字（含扩展 A 区常用部分）
 _CJK = r"\u4e00-\u9fff\u3400-\u4dbf"
 
@@ -58,7 +60,13 @@ def tokenize(text: str) -> list[str]:
         tokens.extend("".join(cjk_run[i : i + 2]) for i in range(len(cjk_run) - 1))  # 双字
         cjk_run.clear()
 
+    previous_end = 0
     for match in _TOKEN_PATTERN.finditer(text):
+        # finditer 会跳过标点与空白；它们也是连续汉字段的边界。
+        # 不清空就会把「验收，发布」错误生成为不存在的「收发」双字。
+        if match.start() != previous_end:
+            flush_cjk()
+        previous_end = match.end()
         piece = match.group()
         if len(piece) == 1 and ("\u4e00" <= piece <= "\u9fff" or "\u3400" <= piece <= "\u4dbf"):
             cjk_run.append(piece)

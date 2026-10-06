@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from app.rag.chunker import Chunk
 from app.rag.embedder import Embedder
+from app.rag.ranking import positive_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class VectorStore:
         if not chunks:
             return 0
 
-        vectors = self._embedder.encode([c.text for c in chunks])
+        vectors = self._embedder.encode([c.index_text for c in chunks])
         self._matrix = vectors if self._matrix is None else np.vstack([self._matrix, vectors])
         self._chunks.extend(chunks)
 
@@ -78,7 +79,7 @@ class VectorStore:
         if not chunks:
             logger.warning("语料为空，向量库已置空")
             return 0
-        self._embedder.fit([c.text for c in chunks])
+        self._embedder.fit([c.index_text for c in chunks])
         return self.add(chunks)
 
     # ---------- 检索 ----------
@@ -102,7 +103,7 @@ class VectorStore:
             min_score: 相似度下限。低于它直接丢弃，宁可不召回也不要塞噪声。
                        检索到的无关内容比没检索到更糟：模型会拿它硬编答案。
         """
-        if self._matrix is None or not self._chunks:
+        if self._matrix is None or not self._chunks or k <= 0 or not query.strip():
             return []
 
         qvec = self._embedder.encode_query(query)
@@ -114,18 +115,15 @@ class VectorStore:
             mask = np.array([str(c.doc_type) in allowed for c in self._chunks])
             scores = np.where(mask, scores, -np.inf)
 
-        # argpartition 先做 O(n) 的部分排序取 top-k，再对这 k 个排序。
-        # 直接全排序是 O(n log n)，在百万级语料上是明显浪费。
-        k = min(k, len(self._chunks))
-        top_idx = np.argpartition(-scores, k - 1)[:k]
-        top_idx = top_idx[np.argsort(-scores[top_idx])]
+        # 无匹配时不能靠零分凑满结果；同分的候选与截断均按语料顺序稳定处理。
+        top_idx = positive_top_k(scores, k)
 
         hits: list[SearchHit] = []
-        for rank, idx in enumerate(top_idx):
+        for idx in top_idx:
             score = float(scores[idx])
             if score < min_score or not np.isfinite(score):
                 continue
-            hits.append(SearchHit(chunk=self._chunks[int(idx)], score=score, rank=rank))
+            hits.append(SearchHit(chunk=self._chunks[int(idx)], score=score, rank=len(hits)))
         return hits
 
     # ---------- 自省 ----------

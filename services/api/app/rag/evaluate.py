@@ -38,7 +38,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.rag.chunker import Chunk
-from app.rag.retriever import Retriever
+from app.rag.retriever import RetrievalTrace, Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,9 @@ class QueryResult(BaseModel):
     complete_evidence: bool = False
     abstained: bool = False
     missing_gold: list[dict[str, Any]] = Field(default_factory=list)
+    candidate_count: int | None = None
+    gated_count: int | None = None
+    evidence_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EvalReport(BaseModel):
@@ -219,8 +222,10 @@ class EvalReport(BaseModel):
     metric_version: str = "ndcg-corpus-v2"
     eval_set_sha256: str = ""
     corpus_sha256: str = ""
+    index_text_sha256: str = ""
     parameters: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
+    retrieval_policy: dict[str, str] = Field(default_factory=dict)
     # 管线配置必须随报告一起留档：否则过几天看到一份 JSON 报告，
     # 根本不知道它是哪套配置跑出来的，消融对比也就无从谈起。
     mode: str = ""
@@ -257,6 +262,7 @@ async def evaluate(
     *,
     k: int = 5,
     min_score: float = 0.0,
+    diagnostics: bool = False,
 ) -> EvalReport:
     """跑一遍完整评测。
 
@@ -274,9 +280,13 @@ async def evaluate(
     failures: list[dict[str, Any]] = []
 
     for item in eval_set.queries:
+        trace = RetrievalTrace() if diagnostics else None
         # 旧调用形式保持兼容；只有显式开启闸门时传参数。
         hits = await retriever.aretrieve(
-            item.query, k=k, **({"min_score": min_score} if min_score else {})
+            item.query,
+            k=k,
+            **({"min_score": min_score} if min_score else {}),
+            **({"trace": trace} if trace is not None else {}),
         )
         ranked = [h.chunk for h in hits]
 
@@ -292,6 +302,7 @@ async def evaluate(
             if not any(c.matches(chunk) for chunk in ranked)
         ]
         coverage = (len(item.gold) - len(missing_gold)) / len(item.gold) if item.gold else 0.0
+        evidence_diagnostics = _diagnose_evidence(item.gold, corpus, trace) if trace else []
 
         results.append(
             QueryResult(
@@ -311,6 +322,9 @@ async def evaluate(
                 complete_evidence=bool(item.gold) and not missing_gold,
                 abstained=not hits,
                 missing_gold=missing_gold,
+                candidate_count=len(trace.candidate_ids) if trace else None,
+                gated_count=len(trace.gated_ids) if trace else None,
+                evidence_diagnostics=evidence_diagnostics,
             )
         )
 
@@ -333,6 +347,7 @@ async def evaluate(
                     "actually_retrieved": [f"{h.chunk.citation} ({h.score:.3f})" for h in hits],
                     "note": item.note,
                     "missing_gold": missing_gold,
+                    "evidence_diagnostics": evidence_diagnostics,
                 }
             )
 
@@ -365,7 +380,17 @@ async def evaluate(
         eval_set=eval_set.name,
         eval_set_sha256=fingerprint(eval_set.model_dump()),
         corpus_sha256=fingerprint([c.model_dump() for c in corpus]),
-        parameters={"k": k, "min_score": min_score},
+        index_text_sha256=fingerprint([c.index_text for c in corpus]),
+        parameters={
+            "k": k,
+            "min_score": min_score,
+            **({"diagnostics": True} if diagnostics else {}),
+        },
+        retrieval_policy={
+            key: str(stats[key])
+            for key in ("ranking_version", "tokenizer_version", "index_text_policy")
+            if key in stats
+        },
         retriever=str(stats.get("embedder", "unknown")),
         mode=str(stats.get("mode", "")),
         reranker=str(stats.get("reranker", "none")),
@@ -378,6 +403,39 @@ async def evaluate(
         per_query=results,
         failures=failures,
     )
+
+
+def _diagnose_evidence(
+    gold: list[GoldCondition], corpus: list[Chunk], trace: RetrievalTrace
+) -> list[dict[str, Any]]:
+    """按每项证据的实际轨迹归因；一个条件可匹配多个块，任一返回即命中。"""
+    out: list[dict[str, Any]] = []
+    for condition in gold:
+        relevant = {chunk.id for chunk in corpus if condition.matches(chunk)}
+        stage = (
+            "returned"
+            if relevant.intersection(trace.returned_ids)
+            else "outside_top_k"
+            if relevant.intersection(trace.gated_ids)
+            else "filtered_by_gate"
+            if relevant.intersection(trace.candidate_ids)
+            else "not_recalled"
+            if relevant
+            else "invalid_gold"
+        )
+        out.append(
+            {
+                "condition": condition.model_dump(exclude_none=True),
+                "stage": stage,
+                "candidate_rank": next(
+                    (i for i, key in enumerate(trace.candidate_ids, 1) if key in relevant), None
+                ),
+                "returned_rank": next(
+                    (i for i, key in enumerate(trace.returned_ids, 1) if key in relevant), None
+                ),
+            }
+        )
+    return out
 
 
 def _aggregate(results: list[QueryResult]) -> dict[str, float]:

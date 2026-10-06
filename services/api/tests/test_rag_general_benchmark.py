@@ -282,10 +282,17 @@ def test_general_cli_runs_without_configuration_private_data_or_network(
     )
     assert all("PRIVATE SENTINEL" not in c.text for c in retriever.chunks)
     output = tmp_path / "new/report.json"
-    assert module["main"](["--compare", "--dataset", "general", "--json-out", str(output)]) == 0
+    assert (
+        module["main"](
+            ["--compare", "--dataset", "general", "--diagnostics", "--json-out", str(output)]
+        )
+        == 0
+    )
     reports = json.loads(output.read_text(encoding="utf-8"))
     assert len(reports) == 5
     assert all(len(r["per_query"]) == 60 and r["parameters"]["min_score"] == 0 for r in reports)
+    assert all(r["parameters"]["diagnostics"] is True for r in reports)
+    assert all(q["candidate_count"] is not None for r in reports for q in r["per_query"])
     assert all(
         r["metrics"]["count"] == 48 and r["abstention_metrics"]["count"] == 12 for r in reports
     )

@@ -120,8 +120,9 @@ class TestToolContract:
 class TestRetrieval:
     async def test_returns_snippets_with_citations(self) -> None:
         tool = KnowledgeSearchTool(backend=_backend())
-        result = await tool.run(SearchKnowledgeParams(query="消息队列"))
+        result = await tool.run(SearchKnowledgeParams(query="Kafka"))
         assert result.ok
+        assert "Kafka" in result.content  # 夹具只写了 Kafka，没有“消息队列”词项
         # 出处标注是"回答可验证"的前提，必须存在
         assert "出处" in result.content
         assert "[1]" in result.content
@@ -149,32 +150,30 @@ class TestRetrieval:
         assert result.ok
         assert "[2]" not in result.content  # 只要 1 条，不该出现第 2 条编号
 
-    async def test_no_match_gives_actionable_hint(self) -> None:
+    @pytest.mark.parametrize("min_score", [0.0, 0.3])
+    async def test_no_match_gives_actionable_hint(self, min_score: float) -> None:
         """查不到时要告诉模型**怎么调整**，而不是简单说"无结果"。
 
-        前提是开启相关性闸门：RRF 只提供相对排名，不设闸门时混合检索
-        永远会凑满 k 条，哪怕语料里毫无相关内容。
+        没有任何词项匹配时，闸门关闭也应返回空；弱关联则靠显式闸门过滤。
         """
         from app.core.config import RagSettings
 
-        settings = get_settings().model_copy(update={"rag": RagSettings(min_score=0.3)})
+        settings = get_settings().model_copy(update={"rag": RagSettings(min_score=min_score)})
         tool = KnowledgeSearchTool(settings=settings, backend=_backend())
         result = await tool.run(
-            SearchKnowledgeParams(query="外星语言量子纠缠拓扑绝缘体", scope="resume")
+            SearchKnowledgeParams(
+                query="外星语言量子纠缠拓扑绝缘体" if min_score else "zxqvzxqv", scope="resume"
+            )
         )
         assert not result.ok
         assert "没有检索到" in result.content
         assert "scope" in result.content  # 给出下一步动作
 
-    async def test_without_gate_rank_based_modes_always_return_noise(self) -> None:
-        """没有闸门时混合检索会返回不相关片段 —— 这是 RRF 的固有性质。
-
-        这个用例把这个事实固定下来：它不是 bug，是必须被上层知晓的语义。
-        因此工具层**必须**考虑是否开启闸门，而不是假设"没结果"会自然发生。
-        """
+    async def test_without_gate_weak_overlap_can_return_content(self) -> None:
+        """单字等弱关联仍可能有正分；零分过滤不能判定资料足以回答。"""
         tool = KnowledgeSearchTool(backend=_backend())
         result = await tool.run(SearchKnowledgeParams(query="外星语言量子纠缠拓扑绝缘体"))
-        assert result.ok  # 无闸门 → 总会有"结果"
+        assert result.ok  # “量”等单字与夹具匹配，正分不代表有答案
         assert result.content  # 但内容其实无关
 
     async def test_gate_does_not_drop_real_matches(self) -> None:

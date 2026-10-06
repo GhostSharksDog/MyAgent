@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -34,9 +35,11 @@ from app.rag.corpus import build_corpus
 from app.rag.embedder import Embedder, TfidfEmbedder
 from app.rag.fusion import reciprocal_rank_fusion
 from app.rag.loaders import DocType, LoadedDocument
+from app.rag.ranking import RANKING_VERSION, positive_top_k
 from app.rag.rerank import Reranker
 from app.rag.rewrite import QueryRewriter
 from app.rag.store import SearchHit, VectorStore
+from app.rag.tokenizer import TOKENIZER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,20 @@ class RetrievalMode(StrEnum):
     DENSE = "dense"  # 纯向量（语义相似度）
     SPARSE = "sparse"  # 纯 BM25（词元匹配）
     HYBRID = "hybrid"  # 两路 RRF 融合
+
+
+@dataclass
+class RetrievalTrace:
+    """调用方显式持有的本次检索轨迹，只含块 ID；不保存在共享检索器中。"""
+
+    candidate_ids: list[str] = field(default_factory=list)
+    gated_ids: list[str] = field(default_factory=list)
+    returned_ids: list[str] = field(default_factory=list)
+
+    def reset(self) -> None:
+        self.candidate_ids.clear()
+        self.gated_ids.clear()
+        self.returned_ids.clear()
 
 
 class Retriever:
@@ -95,7 +112,7 @@ class Retriever:
 
         self._bm25 = BM25(k1=bm25_k1, b=bm25_b)
         if chunks:
-            self._bm25.fit([c.text for c in chunks])
+            self._bm25.fit([c.index_text for c in chunks])
 
         self._index: dict[str, Chunk] = {c.id: c for c in chunks}
 
@@ -161,11 +178,7 @@ class Retriever:
             mask = np.array([str(c.doc_type) in allowed for c in self._chunks])
             scores = np.where(mask, scores, -np.inf)
 
-        k = min(k, len(self._chunks))
-        top = np.argpartition(-scores, k - 1)[:k]
-        top = top[np.argsort(-scores[top])]
-
-        return [self._chunks[int(i)].id for i in top if np.isfinite(scores[int(i)])]
+        return [self._chunks[int(i)].id for i in positive_top_k(scores, k)]
 
     # ---------- 对外查询 ----------
 
@@ -177,6 +190,7 @@ class Retriever:
         doc_types: list[DocType | str] | None = None,
         min_score: float = 0.0,
         recall_k: int | None = None,
+        trace: RetrievalTrace | None = None,
     ) -> list[SearchHit]:
         """检索。
 
@@ -188,9 +202,14 @@ class Retriever:
                 拿不到足够候选，recall 会被候选数直接截断。
             min_score: **相关性闸门**（余弦相似度下限），对全部检索模式生效。
                 RRF 与 BM25 只提供相对排名，没有"都不相关"这个概念；
-                不设闸门时混合检索永远凑满 k 条，即使全是噪声。
+                各路始终排除零匹配候选；不设闸门时仍可能返回只有弱关联的片段。
                 默认 0（关闭）；生产建议开启，阈值需要在评测集上标定。
+            trace: 可选的本次召回、过滤和返回轨迹；不增加检索或模型调用。
         """
+        if trace is not None:
+            trace.reset()
+        if k <= 0 or not query.strip():
+            return []
         normalized = [str(t) for t in doc_types] if doc_types else None
         rk = (
             recall_k or self._fixed_recall_k or max(k * self._recall_multiplier, self._min_recall_k)
@@ -207,6 +226,8 @@ class Retriever:
             hits = self._single_query_hits(query, rk, normalized)
         else:
             hits = self._fuse_queries(queries, rk, normalized)
+        if trace is not None:
+            trace.candidate_ids = [h.chunk.id for h in hits]
 
         # ---------- 相关性闸门 ----------
         # 【为什么闸门永远只用原查询，而不用改写】
@@ -219,12 +240,17 @@ class Retriever:
         if min_score > 0 and hits:
             gate = self._dense_score_map(query, normalized)
             hits = [h for h in hits if gate.get(h.chunk.id, 0.0) >= min_score]
+        if trace is not None:
+            trace.gated_ids = [h.chunk.id for h in hits]
 
         if self._reranker is not None and hits:
             # 同理：重排也是用原查询对候选打分
-            return await self._reranker.rerank(query, hits, k)
-
-        return _renumber(hits[:k])
+            result = await self._reranker.rerank(query, hits, k)
+        else:
+            result = _renumber(hits[:k])
+        if trace is not None:
+            trace.returned_ids = [h.chunk.id for h in result]
+        return result
 
     async def _rewrite(self, query: str) -> list[str]:
         """产出用于召回的查询列表（原查询恒在第一位）。"""
@@ -270,9 +296,10 @@ class Retriever:
             # 原查询（i=0）拿满权重，改写真按 rewrite_weight 打折
             query_weight = 1.0 if i == 0 else self._rewrite_weight
 
-            dense = self._dense_hits(q, recall_k, doc_types)
-            rankings.append([h.chunk.id for h in dense])
-            weights.append(query_weight * path_weights[0])
+            if self._mode is not RetrievalMode.SPARSE:
+                dense = self._dense_hits(q, recall_k, doc_types)
+                rankings.append([h.chunk.id for h in dense])
+                weights.append(query_weight * path_weights[0])
 
             if self._mode is not RetrievalMode.DENSE:
                 rankings.append(self._sparse_ids(q, recall_k, doc_types))
@@ -367,6 +394,9 @@ class Retriever:
         s["reranker"] = self._reranker.name if self._reranker else "none"
         s["rrf_weights"] = self._rrf_weights
         s["recall_k_policy"] = f"max(k*{self._recall_multiplier}, {self._min_recall_k})"
+        s["ranking_version"] = RANKING_VERSION
+        s["tokenizer_version"] = TOKENIZER_VERSION
+        s["index_text_policy"] = "section-and-body-v1"
         s["bm25"] = {"k1": self._bm25.k1, "b": self._bm25.b, "vocab": self._bm25.vocab_size}
         s["rewriter"] = self._rewriter.name if self._rewriter else "none"
         # Query 改写的运行统计必须暴露出来。

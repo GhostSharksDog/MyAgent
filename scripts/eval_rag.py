@@ -148,7 +148,11 @@ async def cmd_run(
 ) -> EvalReport:
     retriever = build_retriever(args)
     report = await evaluate(
-        retriever, eval_set, k=args.k, min_score=getattr(args, "min_score", 0.0)
+        retriever,
+        eval_set,
+        k=args.k,
+        min_score=getattr(args, "min_score", 0.0),
+        diagnostics=getattr(args, "diagnostics", False),
     )
     report.parameters.update(
         {
@@ -241,6 +245,8 @@ async def cmd_run(
             print(f"\n  查询: {f['query']}  [{f['difficulty']}]")
             print(f"  期望: {f['gold_conditions']}")
             print(f"  实取: {f['actually_retrieved']}")
+            if f.get("evidence_diagnostics"):
+                print(f"  证据阶段: {f['evidence_diagnostics']}")
             if f.get("note"):
                 print(f"  备注: {f['note']}")
 
@@ -549,8 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         "--recall-k",
         type=int,
         default=None,
-        help="召回阶段的候选数。默认 max(k*4, 20)；语料比它小时两路都会返回全量，"
-        "融合会退化成‘用更噪的信号重排’",
+        help="每路每个查询的候选数，默认 max(k*4, 20)；只保留正分匹配，融合取去重并集",
     )
     parser.add_argument(
         "--rrf-weights",
@@ -559,6 +564,11 @@ def main(argv: list[str] | None = None) -> int:
         help="两路 RRF 权重，格式 '向量,BM25'（如 '1.0,0.3'）。默认等权",
     )
     parser.add_argument("--json-out", type=Path, default=None, help="把报告写成 JSON")
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="逐项记录证据在召回、闸门与最终 top-k 中的去向；不增加模型调用",
+    )
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--sample",

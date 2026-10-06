@@ -62,6 +62,15 @@ class Chunk(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
     @property
+    def index_text(self) -> str:
+        """正文与完整章节名一起索引；保留原正文、块 ID 与引用不变。
+
+        section 切分把标题放入元数据。仅索引正文会让只出现在标题里的
+        查询无匹配，重排阶段也无法找回已漏召回的块。
+        """
+        return f"{self.section}\n{self.text}" if self.section else self.text
+
+    @property
     def citation(self) -> str:
         """人类可读的引用标识，用于最终回答里的出处标注。
 

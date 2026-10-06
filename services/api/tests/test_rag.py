@@ -913,15 +913,15 @@ class TestRetrieverPipeline:
 
     async def test_doc_type_filter(self) -> None:
         r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
-        hits = await r.aretrieve("技术", k=5, doc_types=[DocType.JD])
+        hits = await r.aretrieve("向量数据库", k=5, doc_types=[DocType.JD])
         assert hits
         assert all(str(h.chunk.doc_type) == "jd" for h in hits)
 
     async def test_recall_k_wider_than_k(self) -> None:
         """召回必须比最终结果宽 —— 重排只能重排它拿到的东西。"""
         r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
-        wide = await r.aretrieve("技术", k=1, recall_k=10)
-        narrow = await r.aretrieve("技术", k=1, recall_k=1)
+        wide = await r.aretrieve("Kafka", k=1, recall_k=10)
+        narrow = await r.aretrieve("Kafka", k=1, recall_k=1)
         assert len(wide) <= 1 and len(narrow) <= 1  # 最终都只返回 1 条
 
     async def test_context_assembly_has_citations(self) -> None:
@@ -932,7 +932,7 @@ class TestRetrieverPipeline:
 
     async def test_context_respects_char_budget(self) -> None:
         r = Retriever.from_documents(self._docs(), mode=RetrievalMode.HYBRID)
-        ctx = await r.aretrieve_context("技术", k=5, max_chars=100)
+        ctx = await r.aretrieve_context("Kafka", k=5, max_chars=100)
         assert len(ctx) <= 400  # 至少第一块会被保留，但不会无限增长
 
     async def test_empty_corpus(self) -> None:
