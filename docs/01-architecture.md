@@ -1,5 +1,9 @@
 # Legacy 架构设计
 
+> **2026-10-06 状态校正**：第 1–7 节保留 P1 与逐步演进的历史记录，不能据其中的“正在落地”判断当前能力。
+> 当前以 README、第 8 节、第 10 节和 [可靠性证据](05-reliability-evidence.md) 为准。
+> 本轮已统一三种编排的 deadline、用量、取消与配置继承，加入 CI；生产阈值与部署收尾仍未标定。
+
 > 本文档描述 **P1 阶段已经落地的真实架构**（不是设想），并给出到 P4 的演进依据。
 > 所有引用的文件与行号都可在仓库中直接打开核对。
 >
@@ -978,7 +982,7 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 |---|---|---|
 | T01 | 一个回合里的多个工具调用**串行** `await`，延迟线性叠加（3×T） | `asyncio.gather` + `Semaphore`（新增 `AGENT_TOOL_CONCURRENCY`，默认 4）。并发必须同时守住三件事：**结果仍按模型给出的顺序回灌**（不是完成顺序）、**失败隔离**（`_execute_one` 把异常就地收敛成"这一条失败" —— 并发后 gather 的异常会取消同批，失败范围会被放大）、**有上限**。另加 `Tool.serial`：有副作用的工具会让整个回合退回串行，因为混合策略需要调度保证，而这个循环给不出。测试用**时序**断言（3×0.25s：串行 vs 并发），并配一条 `tool_concurrency=1` 的对照 —— 两条合起来才证明机制在起作用 |
 | T03 + T14 | **没有鉴权** + **CORS 放行任意 localhost 端口**。在这之前"安全边界"只有一句"只监听 127.0.0.1" —— 那是**部署约束**，改一个环境变量就能绕过去，而界面上不会有任何提示 | 两件事一起做，因为它们本质是一体的（"谁能调用"与"谁能在浏览器里调用"）：<br>· `SECURITY_API_KEY`（空 = 不启用，本地零配置）→ 中间件校验 `/api/*`、`/metrics`、`/docs`，两种头都收（`X-API-Key` / `Authorization: Bearer`），用 `hmac.compare_digest` 常数时间比较；`/healthz` 与静态资源**故意**不保护（探针拿不到密钥，硬要就会逼人把密钥写进探活配置）<br>· **非回环地址 + 无密钥 → 拒绝启动**，异常信息里写清三条出路（这正是"让危险组合起不来"而不是"打条 WARNING"）<br>· CORS 按配置决定：显式白名单 > 回环开发正则 > 非回环时**不放行任何来源**<br>· 前端：密钥存 localStorage（不进 URL/Cookie，只走请求头），设置面板可填，`/healthz` 新增 `auth_required` 让界面在 401 之前就能提示"去填密钥"<br>· 两个"只有跑起来才会发现"的点：**中间件顺序**（Starlette 的 `add_middleware` 是 insert(0)，后添加的在外层 —— 所以要先加鉴权再加 CORS，否则 401 上没有 CORS 头，浏览器读不到那句提示）；**回环 + 有密钥时启动日志说反了**（"未启用鉴权"） |
-| T15 | **没有请求级整体超时预算**：最坏单请求 ≈ `12 × (120s + 30s) ≈ 30 分钟` | 加了 `AGENT_RUN_TIMEOUT`（单轮总时长预算）。**每一跳都被"剩余预算"包住**（`asyncio.timeout(remaining)` 套住模型流式调用与工具批次），所以预算是**整轮累计**的而不是每步各给一份；用单调时钟 `loop.time()` 算 deadline（挂钟会被 NTP 校时影响，那类 bug 几乎无法复现）。到预算时以 `stopped_reason="timeout"` 收尾 —— **`asyncio.TimeoutError` 是 `Exception` 的子类，捕获顺序写反就会变成 `error`**，而"时间到了"是可预期的运行结果，混进错误率会让监控失真。默认 `0`（不限制）：合理的预算取决于部署形态，猜一个值会把"本来就慢但正常"的请求掐断 |
+| T15 | **没有请求级整体超时预算**：最坏单请求 ≈ `12 × (120s + 30s) ≈ 30 分钟` | 加了 `AGENT_RUN_TIMEOUT`，本轮进一步统一为三种编排共享的 `RunContext`：`loop.time()` 生成绝对 deadline，`asyncio.timeout_at(deadline)` 覆盖规划、路由、执行、工具等待与汇总；子任务继承同一预算。预算终止以 `stopped_reason="timeout"` 收尾并保留已有结论，取消与等待子任务后结束。同步副作用线程需等待完成，清理可能超过 deadline。默认仍为 `0`（不限制），生产值需要按真实链路 P95 标定 |
 | T21 | **依赖没有锁定**<br>别人 clone 后装出来的版本可能与本机不同，而对这个项目尤其要紧：`scikit-learn` / `numpy` 的小版本差异足以让**检索指标漂移**，指标却是这份项目的主要证据 | `scripts/lock_deps.py`（纯标准库，**不引入 pip-tools/uv**）+ `services/api/requirements.lock`（34 个包 = 直接 14 + 传递 20）。几个刻意的决定：<br>· lock 的定位写进头部 —— "在某个具体环境上求得的**已知可用解**"，不是"最新版本清单"；<br>· marker 用 **`ast` 白名单求值**而不是 `eval`（依赖清单里的表达式来自第三方元数据，不该有执行能力），遇到不支持的写法**报错退出而不是猜**；<br>· `--check` 模式供 CI 用：不一致时打印逐包差异并退 1；<br>· **对拍**：另写一份基于 `packaging`（另一套 marker 实现）的解析器重算闭包，34/34 包与版本完全一致；<br>· `docker/Dockerfile` 改为 `pip install -r requirements.lock`，并保留一步构建期覆盖度校验 —— 把"加了依赖忘了重新生成 lock、镜像照样构建成功、直到运行期 `ModuleNotFoundError`"变成**构建期失败**；<br>· 实测挖出一个真坑：pip 读 requirements 文件在找不到 BOM/coding 声明时会退回**系统 locale**（本机 cp936），于是"头部写了中文注释"会让 `pip install -r` 直接 `UnicodeDecodeError` 失败。所以 lock 第一行是 `# -*- coding: utf-8 -*-`，并有测试钉住它。<br>**已知边界**：lock 是在 Windows / CPython 3.12.3 上求出的（`uvloop` 这类平台 marker 为假的包不在其中），换平台 `--check` 会报差异并打印说明；脚本也不校验"已装版本是否满足 pyproject 的 `>=` 下界" |
 | T23 | **承诺了一个不存在的能力**：全项目七处对外文案写着"Agent 可以**读写**工作区内的文件"，而写工具从来没实现过 —— `build_file_tools()` 只返回 `list_dir / read_file / glob / grep`。用户问"为什么我的 agent 还不能写文件"才暴露出来 | 补上 `write_file` + `edit_file`，并让它们**默认不加载**（`AGENT_FILE_WRITE_ENABLED=false`）：<br>· **为什么默认关**：写文件不可撤销 —— 没有版本控制时改错就是真的改错了。读错顶多多花 token。所以它必须由用户显式开启（设置界面里有开关，与 memory / 限流 / 语料路径同一条纪律）；<br>· **默认不覆盖**：目标已存在就失败，并要求显式传 `overwrite=true`。这条闸门把"我想新建"与"我要改掉它"分成两个动作 —— 否则用户第一次用就会丢东西；<br>· **`edit_file` 要求原文逐字符匹配且唯一匹配**：匹配不到就让它回去读原文（"凭记忆写出来的片段几乎一定对不上"），匹配到多处就报出次数并拒绝猜测（随便挑一处替换是最坏的形态：文件改了、工具报成功、改的地方不对）；<br>· **两个都声明 `serial=True`**：有副作用的工具必须串行，否则两个协程交错写同一文件的结果不可复现（`base.Tool.serial` 的说明就是为这类工具写的）；<br>· **提示词跟着工具表一起变**：没开启写权限时，提示词里引用 `write_file` 的规则行会被既有机制裁掉 —— 不能让提示词承诺一个做不到的能力，那会诱导模型"假装写好了"；<br>· 顺带修掉一个**假开关**：错误信息写着"请设置 `AGENT_FILE_ALLOW_SECRETS=true`"，而代码判断的是 `profile == "jobhunt"` —— 那个键当时根本不存在。现在它是真的配置项，而且**不再搭在 profile 上**（profile 会在设置界面里被顺手切换，"允许读私钥"该是独立的一次显式决定） |
 | T22 | **部署是纸面上的**：`docker compose up` 从未跑通 | 真跑了一次，**一次就暴露四个只有"真跑"才会出现的问题**，全都是静默或致命的：<br>① `depends_on` 里写成 `redis: *depends-on-redis`，别名展开后多套了一层 → compose 直接拒绝解析（`additional properties 'redis' not allowed`）；<br>② `RUN pip install $(python - <<'PY' … PY\n)` 这种 heredoc 嵌在命令替换里的写法，Dockerfile 解析器不接受（`unknown instruction: )`）；<br>③ **`PROJECT_ROOT = parents[4]` 把仓库的目录深度写进了代码** → 镜像里代码只有三层，导入期直接 `IndexError`，rag / worker 无限重启。改成按标记推断，并且**规则要分两遍走**（`services/api` 自己就长得像镜像的 `/app`，同一层里依次判断会让源码树命中错的那层 → `.env` 找错地方 → 只有一句"未配置 LLM_API_KEY"）；<br>④ 前端产物没进镜像，而 `mount_frontend` 允许它缺失 → 容器 healthy、接口 200、**界面 404**。改成加 node 构建阶段 + `WEB_DIST` 显式指定；<br>顺带把 `APP_HOST` 与启动命令的 `--host` 钉成一对（不一致时访问控制检查会说反话），并让 CORS 来源与"是否要求密钥"在编排层也表达出来。证据：`scripts/verify_compose.py` 四个容器全 healthy、三个 backend 分别是 redis/redis/remote、界面可访问、无密钥 401 / 带密钥 200、**任务由独立 worker 容器消费**（api 里 `task_workers_in_api=false`，且 worker 日志里能查到该 task_id） |
@@ -995,12 +999,25 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 | T11 | 流式错误事件的 data 不是合法 JSON（手工 f-string + `exc!r`），前端 `JSON.parse` 会抛异常、错误提示直接丢失 | 改为 `AgentEvent(...).to_sse()` |
 | T20 | clone 后 demo 跑不通：`read_resume` 读 `data/resume.md`，而 `data/` 被 gitignore | 回退到可提交的 `seed/resume.sample.md`，并在观察结果里**明确说明"当前为示例简历"** —— 让模型知道自己看的是示例 |
 
+本轮追加修复（2026-10-06）：
+
+| 事项 | 文档与实际行为的差异 | 修复与证据 |
+|---|---|---|
+| W01 | 宣称三种模式共享护栏，实际 Plan 重领子任务配置/时间，Supervisor token 阈值未用 | 单轮 RunContext + 完整配置复制；规划/路由/执行/汇总延迟与预算反例 |
+| W02 | 停止后后台专家继续运行，serial 只在单个循环内生效 | 关闭生成器、cancel + gather、共享注册表锁；真实 ASGI disconnect、只读并发对照组 |
+| W03 | 失败子任务消耗漏记，零 Usage 看起来像完整免费，部分轮次进入成功历史 | 模型边界账本与 usage_complete；重试未知标记；HTTP/SSE × 两种模式历史回归 |
+| W04 | --sample 仍是空语料，默认 pytest 发真实模型请求，无 CI | 显式公共 seed、默认 live skip、Windows CI；真实验证脚本先离线验证参数与额度 |
+| W05 | README/求职材料仍称求职专用、生产级架构，已修债务仍列为不足 | 重写通用定位与证据出处；标记历史路线图，生产标定/部署收尾保留为未来工作 |
+
 ### 8.3 一页答辩版
+
+> T02/T21（SQLite 与 lock）、T09/T07（token 裁剪与工具摘要）已解决，不再列作待做。
+> 三种编排可靠性修复见第 10 节；生产标定与部署收尾仍待真实环境。
 
 **问"你这个项目有什么不足"时，按这个顺序讲**：
 
-1. **T02 + T21（持久化与 lock 文件）** —— 前者是功能完整性；后者决定"别人能不能复现你的结果"，而这对本项目尤其要紧：RAG 指标会被依赖小版本影响。
-2. **T09 + T07（token 计数与 tool 消息入历史）** —— 两个都指向同一件事：上下文目前靠**字符数**和"丢过程"来控制，而不是靠真正的预算。
+1. **评价集规模** —— 公开 RAG 集只有 14 条查询；需要扩充任务与失败场景，不能把小样本消融当生产质量保证。
+2. **成本与互斥的边界** —— token 按已返回 Usage 在调用边界检查，在途可超额；互斥限于单进程共享注册表。同步写入取消时需等待线程完成，不回滚。
 3. **T15 的标定** —— 机制已经在了（`AGENT_RUN_TIMEOUT`），但默认是"不限制"。要开放给别人用，得先量出自己的 P95，再把预算设在明显高于它的位置。
 4. **部署的收尾** —— `docker compose up` 已经跑通（T22），但 Redis 还没有密码、也没有 TLS 终结；真对外提供服务时这两件要补上。
 
@@ -1061,7 +1078,7 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 | 内核在哪？ | `services/api/app/agent/loop.py` 的 `Agent.run_stream()`（:121），非流式是它的归约（:427） |
 | 工具怎么被"看懂"？ | Pydantic 模型 → `model_json_schema()`（`tools/base.py:106`）→ 放进请求体 `tools` 字段 |
 | 工具失败会怎样？ | 变成 `ToolResult.failure` → `as_observation()` 的中文错误文本 → 回灌给模型让它自己改（`base.py:67`） |
-| 循环怎么停？ | 模型不返回 `tool_calls`（正常）/ `max_steps` 耗尽 / 连续 `loop_guard` 次调用指纹相同 / 总时长预算耗尽（`timeout`）/ 异常。**所有出口都经过 `_finish()`**，`done` 必然发出 |
+| 循环怎么停？ | 无 tool_calls / max_steps / loop_guard / timeout / token_budget / error；原内核出口与 runtime.guarded_stream 共同提供权威 done，连接正常时每轮一次。断开后先取消并等待清理 |
 | 多个工具能不能一起跑？ | 能：同一步内的调用并发执行（`AGENT_TOOL_CONCURRENCY`，默认 4），结果**按模型给的顺序**回灌；声明了 `Tool.serial` 的工具会让整段退回串行 |
 | 流式下怎么拿到工具参数？ | 按 `index` 聚合分片，`arguments` 字符串累加后统一 `json.loads`（`client.py:342` 的 `StreamAccumulator`） |
 | `role=tool` 凭什么配对？ | `tool_call_id`，且 `assistant(tool_calls)` 必须先入列（`loop.py:188`、`:306`） |
@@ -1069,5 +1086,60 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 | 谁能调用这个服务？ | 默认只能本机（只监听回环）。设 `SECURITY_API_KEY` 后所有 `/api` 请求要带密钥；**以非回环地址启动且无密钥会直接拒绝启动**（T03） |
 | 怎么让同事也能用？ | 设 `SECURITY_API_KEY=<随机串>` 再改 `APP_HOST`，然后在界面的「设置 → 访问控制」里填密钥；跨域还要配 `SECURITY_CORS_ALLOW_ORIGINS`（T14） |
 | 最大的风险是什么？ | 已经没有"无鉴权暴露"这条路了（那条组合起不来）；剩下的是 **T02 无持久化**（重启丢索引）与 **T21 无 lock 文件**（别人复现不出你的指标） |
-| 最该先修的？ | T02+T21（持久化与 lock）→ T09+T07（上下文预算）→ T15 的标定 |
+| 后续最需要数据的？ | 扩充公开评价集、标定真实模型 P95/限流阈值、按部署环境完成 TLS 与 Redis 鉴权 |
 | 为什么不用 LangChain？ | 见 ADR-001。一句话："为了能当场讲清 `tool_calls` 的分片与配对，我手写了协议层。" |
+
+## 10. 2026-10-06：三种编排的可靠性统一
+
+现有 API 字段与事件类型保持兼容；内部 run/run_stream 增加可选 run_context。
+当前实现与测量见 [可靠性证据](05-reliability-evidence.md)，历史段落不作为最新验收。
+
+### ADR-011 一轮只领取一次运行预算
+
+`agent/runtime.py` 的 RunContext 保存绝对 deadline、已返回 Usage、完整标记、
+工具轨迹与上下文裁剪报告。顶层运行创建实例，子任务继承；复用 Agent 不复用运行预算。
+时间来自事件循环单调时钟，规划、重规划、路由、子 Agent、工具等待、汇总均在同一 deadline 内。
+
+ContextVar 只在驱动生成器的一次 await 和关闭期间绑定，yield 前还原；
+否则顺序请求、并发请求或不同任务关闭生成器时会混用/错误 reset 上下文。
+RunLLM 无实例级运行状态；调用前检查预算、裁剪消息，返回时更新账本。
+流式累计 Usage 快照只记增量。规划与失败子任务先前返回的用量不会被失败结果清零。
+
+Plan 子任务以 `settings.model_copy(update={"max_steps": ...})` 继承完整配置。
+规划/专家结论作为可裁剪的独立消息；公共 system 规则按已注册工具过滤。
+General 专家与 jobhunt 专家分别加载。ReAct 保留多轮，Plan/Multi 本轮不使用会话历史。
+
+### ADR-012 清理是请求生命周期的一部分
+
+Supervisor 的专家任务在 finally 内取消并 gather；外层关闭每层事件生成器，
+ReAct 用 aclosing 持有模型流，SSE 用 aclosing 持有 Agent 流。
+CancelledError 继续传播；预算退出先清理，再给仍连接的客户端发送部分结果、错误原因与一次 done。
+HTTP/SSE 只有 finished 才保存成功会话历史。
+
+ToolRegistry 的共享 asyncio.Lock 覆盖所有 serial=True 工具，因此 write/edit 等不同工具
+在同一注册表中也互斥。拿到锁后再次检查共享预算，避免排队期间其他专家耗尽预算后继续写。
+只读调用不拿该锁；单轮含副作用的工具批次仍按模型顺序执行。
+
+同步线程无法安全强杀：副作用使用 shield，取消时等线程完成再释放锁。
+因此请求清理可超过 deadline；已有写入不回滚。互斥不覆盖多个注册表或多个进程。
+
+### ADR-013 终态与成本不凭猜测
+
+stopped_reason 新增 token_budget，三种模式统一 timeout。
+阈值由 AGENT_PLAN_MAX_TOTAL_TOKENS（60000）/ AGENT_MULTI_MAX_TOTAL_TOKENS（80000）配置，
+0 不限制；设置保存后下一轮使用新配置，在途上下文不被修改。
+达到阈值后不再启动后续模型/工具调用，尤其不再付费调用汇总。
+
+usage_complete 同时出现在响应与 done。缺字段、被取消、请求失败或重试前消耗未知时为 false。
+Usage 只是已知下界，在途调用可以超过阈值；RAG 可选改写/重排模型消耗未并入此对话账本。
+所有零值都需要与完整标记一起解释，不能作为“没花钱”的依据。
+
+### 可复现入口与 CI
+
+默认 pytest 跳过 live，-m live / --run-live 显式启用。
+eval_rag.py --sample 固定公共 seed，关闭 notes/额外路径，不依赖私人语料。
+Windows CI 进行只读格式、lint、后端离线、公开 RAG、前端测试/类型/构建检查；远端首跑待推送。
+
+受限验证使用当前 DeepSeek、临时公开目录，累计 26 次请求尝试，单次输出上限 512、重试 0。
+另将旧门禁失败预检最多 4 次尝试保守计入额度，本轮按最多 30 次占用；详见证据文档。
+三种正常任务、预算、超时与实际专家取消已验证；生产 P95、限流阈值、部署收尾仍待标定。

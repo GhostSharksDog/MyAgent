@@ -16,12 +16,14 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
 
 - 后端 `services/api`（Python 3.12 + FastAPI），前端 `apps/web`（React 19 + TS + Vite）
 - 场景：**通用助手**（`AGENT_PROFILE=general` 是默认）。求职能力是**可选技能包**
-  （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的 P6 行、
+  （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：**940 后端 + 91 前端**，全部通过
+- 测试：2026-10-06 **995 后端通过 + 1 live 跳过、96 前端通过**；证据见 `docs/05-reliability-evidence.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
-- 没有 CI（`.github/` 不存在），门禁靠本地 `scripts/dev.ps1 check`
+- 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
+- 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
+- Plan/Supervisor 本轮不使用会话历史；HTTP/SSE 只持久化 `finished`。缺 Usage 时 `usage_complete=false`
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -38,10 +40,10 @@ git log --oneline -8                # 最近的改动（提交信息写得很长
 # 1) 工作区干净吗（应该有输出=有改动；无输出=干净）
 git status --short
 
-# 2) 后端能不能跑（期望：940 passed）
+# 2) 后端能不能跑（默认离线，1 个 live skipped；最新通过数见证据文档）
 & .venv\Scripts\python.exe -m pytest services\api\tests -o addopts="" -q --no-header
 
-# 3) 前端测试与类型（期望：91 pass / 无类型错误）
+# 3) 前端测试与类型（期望：96 pass / 无类型错误）
 cd apps\web; pnpm test; pnpm run typecheck; cd ..\..
 ```
 
@@ -107,7 +109,7 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 
 | 脚本 | 前提 | 它证明什么 |
 |---|---|---|
-| `python scripts\smoke_ui.py` | 服务在 8000 跑着；本机有 Edge | **界面真的渲染**（开 Edge + CDP，点开设置读 DOM）。前端那 91 个测试全是纯函数，不知道组件能不能渲染 |
+| `python scripts\smoke_ui.py [--reliability]` | 服务在 8000 跑着；本机有 Edge | **界面真的渲染**（Edge + CDP）；可靠性扩展用合成 SSE 验证模式、预算与停止。前端 96 个测试不验证组件渲染 |
 | `python scripts\verify_models.py` | 服务在跑 | 多模型流程端到端（会临时改 `.env`，**结束时自动还原**） |
 | `python scripts\verify_compose.py` | `docker compose up -d` 之后 | 四个容器、三个 backend、界面、鉴权、**跨进程任务**。它会先在容器内探一次 `/healthz`，核对"我打到的到底是不是那个容器" |
 | `python scripts\bench_session_store.py [--memory]` | 无 | 会话后端延迟分布。`sqlite_store.py` 里的性能结论就是这个脚本量的 |
@@ -249,6 +251,20 @@ apps/web/src/
 ---
 
 ## 10. 已知未做（不是"忘了"，是"要等数据或环境"）
+
+本轮证据入口：`docs/05-reliability-evidence.md`。普通 pytest 默认跳过 live；
+只有 `pytest -m live` 或 `--run-live` 才联网。不要为“全绿”消耗真实模型额度。
+公开 RAG 复测用 `scripts/eval_rag.py --compare --sample`，不读私人 notes 或额外语料。
+真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
+并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
+旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。
+真实模型的重规划/失败/裁剪/竞争写入尚未付费验证，已有离线回归；远端 CI 首跑待推送。
+
+新增预算：`AGENT_PLAN_MAX_TOTAL_TOKENS=60000`、`AGENT_MULTI_MAX_TOTAL_TOKENS=80000`，
+0 表示关闭。在设置界面保存后下一轮生效，在途上下文保持自己的配置。
+已在途调用可超额，缺失 Usage 不得当成零成本；可选 RAG 改写/重排用量不属于当前对话账本。
+工具共享互斥限于同进程同注册表；线程副作用取消时等待完成，因此清理可能超时，不回滚写入。
+界面回归：`smoke_ui.py --reliability`（浏览器内合成 SSE，不会调用模型）。
 
 | 事项 | 为什么还没做 |
 |---|---|
