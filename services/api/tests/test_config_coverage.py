@@ -235,13 +235,14 @@ _IMPORT_NAME = {
 }
 
 
-def _declared_distributions() -> set[str]:
-    """依赖清单里声明的**发布名**（含可选 extras），统一成下划线形式。"""
+def _declared_distributions(*, extras: tuple[str, ...] | None = None) -> set[str]:
+    """发布名统一成下划线；None 检查全部声明，指定 extras 检查对应安装集合。"""
     data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
     project = data.get("project", {})
     raw: list[str] = list(project.get("dependencies", []))
-    for group in project.get("optional-dependencies", {}).values():
-        raw.extend(group)
+    optional = project.get("optional-dependencies", {})
+    for name in optional if extras is None else extras:
+        raw.extend(optional[name])
 
     names: set[str] = set()
     for spec in raw:
@@ -310,18 +311,38 @@ class TestDependencyDeclaration:
         )
 
     def test_declared_requirements_are_all_installed(self) -> None:
-        """反过来：清单里声明的包必须真的装着。
+        """运行测试所需的核心与 dev 依赖必须真的装着。
 
         【为什么这条同样重要】
-        "清单里有、环境里没装"意味着开发环境与清单已经分叉 ——
-        跑测试时会以一个看似无关的 ImportError 暴露出来。
+        formats/tokens 等 extras 是可选能力；CI 只装 [dev]，不能要求它们存在。
+        声明覆盖仍检查所有 extras，安装覆盖只检查核心与开发依赖。
         """
         missing = [
             dist
-            for dist in sorted(_declared_distributions())
+            for dist in sorted(_declared_distributions(extras=("dev",)))
             if not _is_installed(_import_name(dist))
         ]
         assert not missing, f"依赖清单里有但环境里没装：{missing}"
+
+    def test_optional_formats_and_tokens_can_be_absent(self, monkeypatch) -> None:
+        optional = {"pypdf", "docx", "tiktoken"}
+        monkeypatch.setattr(
+            sys.modules[__name__],
+            "_is_installed",
+            lambda name: name not in optional,
+        )
+        assert {"pypdf", "python_docx", "tiktoken"} <= _declared_distributions()
+        self.test_declared_requirements_are_all_installed()
+
+    @pytest.mark.parametrize("missing", ["fastapi", "pytest"])
+    def test_missing_core_or_dev_dependency_still_fails(self, monkeypatch, missing) -> None:
+        monkeypatch.setattr(
+            sys.modules[__name__],
+            "_is_installed",
+            lambda name: name != missing,
+        )
+        with pytest.raises(AssertionError, match=missing):
+            self.test_declared_requirements_are_all_installed()
 
 
 def test_mypy_and_ruff_are_declared_as_dev_dependencies() -> None:

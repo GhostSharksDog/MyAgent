@@ -486,12 +486,17 @@ async def test_source_constructor_error_still_expires_broker(workspace):
     assert not list(workspace.iterdir())
 
 
+@pytest.mark.parametrize("external_write_permission", [None, "false", "true"])
 def test_approval_settings_save_into_temp_env_refreshes_tools_and_preserves_lock(
-    workspace, tmp_path, monkeypatch
+    workspace, tmp_path, monkeypatch, external_write_permission
 ):
     from app.api import settings as settings_api
     from fastapi.testclient import TestClient
 
+    if external_write_permission is None:
+        monkeypatch.delenv("AGENT_FILE_WRITE_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_FILE_WRITE_ENABLED", external_write_permission)
     original = get_settings()
     disabled = original.agent.model_copy(update={"file_write_enabled": False})
     temporary_env = tmp_path / "settings.env"
@@ -499,6 +504,14 @@ def test_approval_settings_save_into_temp_env_refreshes_tools_and_preserves_lock
     monkeypatch.setattr(settings_api, "_apply", lambda: None)
 
     def fresh_settings():
+        # 此用例验证临时文件读取，不验证 OS 环境变量（优先级高于 .env）。
+        # CI 的只读默认值不能覆盖本用例刚写入的显式权限。
+        for name in (
+            "AGENT_FILE_WRITE_ENABLED",
+            "AGENT_FILE_APPROVAL_REQUIRED",
+            "AGENT_FILE_APPROVAL_TIMEOUT",
+        ):
+            monkeypatch.delenv(name, raising=False)
         agent = AgentSettings(_env_file=temporary_env, workspace_root=str(workspace))
         return original.model_copy(update={"agent": agent})
 
