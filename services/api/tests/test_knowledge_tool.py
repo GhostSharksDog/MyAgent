@@ -102,8 +102,11 @@ class TestToolContract:
     def test_description_states_when_not_to_use(self) -> None:
         """描述必须包含"什么时候不该用"，否则模型会拿它去做算术题。"""
         desc = KnowledgeSearchTool().description
-        assert "calculator" in desc  # 指向更合适的工具
-        assert "search_jobs" in desc  # 说明与结构化检索的分工
+        assert "用户显式配置" in desc
+        assert "不一定足以回答" in desc
+        assert "区分已知与缺失" in desc
+        assert "calculator" not in desc  # 注册不依赖其它工具存在
+        assert "search_jobs" not in desc
 
     def test_scope_enum_constrained(self) -> None:
         props = SearchKnowledgeParams.model_json_schema()["properties"]

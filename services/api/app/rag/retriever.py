@@ -44,6 +44,27 @@ from app.rag.tokenizer import TOKENIZER_VERSION
 logger = logging.getLogger(__name__)
 
 
+def assemble_context(
+    hits: list[SearchHit], *, max_chars: int = 4000
+) -> tuple[str, list[SearchHit]]:
+    """返回实际可见上下文和对应片段，供运行时与离线引用核验共用。
+
+    保留原预算语义：按完整块计数（不含分隔符），首块允许超限，后续块
+    超限即停止。核验必须使用这份选择结果，不能拿被裁掉的 hit 当证据。
+    """
+    blocks: list[str] = []
+    visible: list[SearchHit] = []
+    used = 0
+    for i, hit in enumerate(hits, 1):
+        block = f"[{i}] 出处：{hit.chunk.citation}\n{hit.chunk.text}"
+        if used + len(block) > max_chars and blocks:
+            break
+        blocks.append(block)
+        visible.append(hit)
+        used += len(block)
+    return "\n\n---\n\n".join(blocks), visible
+
+
 class RetrievalMode(StrEnum):
     """检索模式。用于消融实验：不做对照就说不清每一路贡献了多少。"""
 
@@ -370,16 +391,7 @@ class Retriever:
         if not hits:
             return ""
 
-        blocks: list[str] = []
-        used = 0
-        for i, hit in enumerate(hits, 1):
-            block = f"[{i}] 出处：{hit.chunk.citation}\n{hit.chunk.text}"
-            if used + len(block) > max_chars and blocks:
-                break
-            blocks.append(block)
-            used += len(block)
-
-        return "\n\n---\n\n".join(blocks)
+        return assemble_context(hits, max_chars=max_chars)[0]
 
     # ---------- 自省 ----------
 

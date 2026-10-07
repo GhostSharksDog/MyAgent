@@ -1,0 +1,978 @@
+{
+  "origin": "controlled_fixture_only",
+  "model_requests": 0,
+  "checks": [
+    {
+      "name": "受控夹具不产生真实语义正确率",
+      "passed": true
+    },
+    {
+      "name": "夹具审核无结构错误",
+      "passed": true
+    },
+    {
+      "name": "缺答保留总分母",
+      "passed": true
+    },
+    {
+      "name": "伪造编号不能通过引用检查",
+      "passed": true
+    },
+    {
+      "name": "改答案后旧审核失效",
+      "passed": true
+    },
+    {
+      "name": "捏造引文使审核无效",
+      "passed": true
+    },
+    {
+      "name": "检索到证据不等于引用完整",
+      "passed": true
+    },
+    {
+      "name": "拒答声明和有效出处不能证明答案正确",
+      "passed": true
+    }
+  ],
+  "audit": {
+    "version": "rag-answer-audit-v1",
+    "bundle_id": "b514cee690d0c21a9a3a1052f76ffc660fcdb8dca7683f5e32c6f7c69126df6b",
+    "dataset": "legacy-holdout-rag-v1",
+    "records_sha256": "7e080e23d5337ee8f305eda1243ddb49444c29da3a4c1276fc5482232a6bde75",
+    "provenance": {
+      "dataset_id": "legacy-holdout-rag",
+      "version": 1,
+      "description": "同一AI作者原创虚构折光资料社材料；在首次留出集排序实验前公开冻结，非独立作者人标或真实用户任务，未读取私人数据或联网。",
+      "manifest_sha256": "c6aa786e4bcbcd10df18edb53c66fb2c8ec08296557accf5b1c3b254ac451077",
+      "documents": [
+        {
+          "file": "documents/gear-lending.md",
+          "domain": "workshop",
+          "sha256": "9cf8526ebffab93dc106a324e61b47c86db43bb3da152f577c5b6ca5b2e198c2"
+        },
+        {
+          "file": "documents/gear-service.md",
+          "domain": "workshop",
+          "sha256": "5db610c5a436ea6eb7cf2cf4dd387c7e5e7a29ab4e0f3ad403b1bcf21d0a4cdb"
+        },
+        {
+          "file": "documents/studio-booking.md",
+          "domain": "workshop",
+          "sha256": "ab45b606734c766e0fb0c33bdeea07959cd8cc2521a27164460de04b66d291b1"
+        },
+        {
+          "file": "documents/field-walks.md",
+          "domain": "field",
+          "sha256": "8d6cb85a09843e2b375ab047f63ac856ee7363ff7790f985ad79817a715183ef"
+        },
+        {
+          "file": "documents/sensor-survey.md",
+          "domain": "field",
+          "sha256": "feae5f55922d4ad99ca4479655f0e9e2d67ef0f4f190b928eb2c0f6b8ab9905e"
+        },
+        {
+          "file": "documents/map-editing.md",
+          "domain": "field",
+          "sha256": "716db1a25c544180f618cc8c53c7eaccaa26d5fc3ca4b2dd087cb2f436d8d526"
+        },
+        {
+          "file": "documents/print-proof.md",
+          "domain": "publishing",
+          "sha256": "cc1ac5d8e289c24691f20fee8e49a3f59be7eac49bd62dd8a06e8b61e9839d86"
+        },
+        {
+          "file": "documents/edition-packaging.md",
+          "domain": "publishing",
+          "sha256": "89bbec660f3aba3c8687a54b102fc0a6e879db72ac1ed9b040449400af9814eb"
+        },
+        {
+          "file": "documents/parcel-handover.md",
+          "domain": "publishing",
+          "sha256": "4b2f81ff9a669e7ae3de879ecf8330b6bd9291ab0b6454ed3eefc820e1e4bdae"
+        },
+        {
+          "file": "documents/exhibit-install.md",
+          "domain": "exhibition",
+          "sha256": "cb2c4fe16f3c4cac82b24d35cc70ecd3bc16afd026d4291ae8741224ac9b1eee"
+        },
+        {
+          "file": "documents/exhibit-media.md",
+          "domain": "exhibition",
+          "sha256": "78c39b0946313481d40bf091d0fd23f7a2f000265e87ebd17c47dd0ed5770b5c"
+        },
+        {
+          "file": "documents/archive-access.md",
+          "domain": "exhibition",
+          "sha256": "fbd9991d8c49918d86dd160817fc4fd0f6c8fe71eb7e797a2a53550d4a2faddc"
+        }
+      ],
+      "source": "holdout-public",
+      "freeze_sha256": "9c1407c126b6a3113b242dca2cc49b45569341acbd4da37ba353a36dd360fc58",
+      "frozen_at": "2026-10-07T03:33:56+00:00",
+      "authorship": "same-ai-author",
+      "limitation": "Public synthetic holdout authored and labelled by the same AI author. Not independent human labels or real user tasks. Self-declared freeze timestamp; digests ensure consistency, not trusted timestamping.",
+      "development_dataset": "legacy-general-rag-v1",
+      "split_checks": [
+        "document_names",
+        "normalized_document_text",
+        "normalized_queries"
+      ]
+    },
+    "parameters": {
+      "dataset": "holdout",
+      "mode": "hybrid",
+      "reranker": "lexical",
+      "reranker_name": "lexical",
+      "strategy": "section",
+      "size": 500,
+      "overlap": 80,
+      "min_size": 120,
+      "rrf_k": 60,
+      "recall_k": 20,
+      "reranker_parameters": {
+        "implementation": "lexical-original",
+        "weights": [
+          1.0,
+          0.6,
+          0.4
+        ]
+      },
+      "k": 5,
+      "max_chars": 4000,
+      "min_score": 0.0
+    },
+    "limitations": [
+      "自动指标只核验 [n] 出处、精确引文与 gold 证据覆盖，不证明答案语义正确或引用忠实。",
+      "人工正确性与拒答指标只统计 complete 人工审核；未知、缺答和夹具另列，不能外推整体质量。",
+      "仅支持一个问题一次检索上下文；多次搜索重用 [1] 的对话需要另行绑定出处。",
+      "导出 context 是本评测的完整输入，不代表真实 Agent 经工具头尾截断和上下文裁剪后的 messages。",
+      "origin 与人工审核身份来自填写者声明，脚本不认证审核者；complete 是整答已审核的声明。"
+    ],
+    "counts": {
+      "expected": 32,
+      "records": 32,
+      "missing_records": 0,
+      "empty_answers": 0,
+      "positive": 24,
+      "negative": 8,
+      "controlled_fixture_records": 32,
+      "model_declared_records": 0,
+      "human_authored_records": 0,
+      "human_review_complete": 0,
+      "human_correctness_known": 0,
+      "human_correctness_unknown": 32,
+      "review_errors": 0,
+      "citation_mentions": 31,
+      "invalid_citation_mentions": 0
+    },
+    "structural_metrics": {
+      "answer_completion_rate": 1.0,
+      "citation_validity": 1.0,
+      "complete_cited_evidence_rate": 0.9583333333333334,
+      "mean_cited_evidence_coverage": 0.9791666666666666,
+      "positive_declared_abstention_rate": 0.0,
+      "negative_declared_abstention_rate": 1.0
+    },
+    "human_metrics": {
+      "review_coverage": 0.0,
+      "accuracy_on_reviewed": null,
+      "negative_abstention_on_reviewed": null,
+      "positive_abstention_on_reviewed": null,
+      "accuracy_by_answer_origin": {
+        "model": {
+          "reviewed_count": 0,
+          "accuracy": null
+        },
+        "human": {
+          "reviewed_count": 0,
+          "accuracy": null
+        }
+      }
+    },
+    "per_query": [
+      {
+        "id": "holdout-direct-01",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-02",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-03",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-04",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-05",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-06",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-07",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-direct-08",
+        "answerable": true,
+        "category": "direct",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-01",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-02",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-03",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          3
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-04",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-05",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-06",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-07",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-paraphrase-08",
+        "answerable": true,
+        "category": "paraphrase",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-01",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1,
+          2
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-02",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          2,
+          3
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-03",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 1,
+        "valid_citation_mentions": 1,
+        "visible_evidence_coverage": 0.5,
+        "cited_evidence_coverage": 0.5,
+        "complete_cited_evidence": false,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-04",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1,
+          2
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-05",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1,
+          2
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-06",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          2,
+          5
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-07",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1,
+          4
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-multi-08",
+        "answerable": true,
+        "category": "multi_evidence",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [
+          1,
+          2
+        ],
+        "invalid_citations": [],
+        "citation_mentions": 2,
+        "valid_citation_mentions": 2,
+        "visible_evidence_coverage": 1.0,
+        "cited_evidence_coverage": 1.0,
+        "complete_cited_evidence": true,
+        "declared_abstention": false,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": [
+          "supported",
+          "supported"
+        ]
+      },
+      {
+        "id": "holdout-unanswerable-01",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-02",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-03",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-04",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-05",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-06",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-07",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      },
+      {
+        "id": "holdout-unanswerable-08",
+        "answerable": false,
+        "category": "unanswerable",
+        "record_present": true,
+        "answer_present": true,
+        "origin": "controlled_fixture",
+        "citations": [],
+        "invalid_citations": [],
+        "citation_mentions": 0,
+        "valid_citation_mentions": 0,
+        "visible_evidence_coverage": null,
+        "cited_evidence_coverage": null,
+        "complete_cited_evidence": null,
+        "declared_abstention": true,
+        "review_errors": [],
+        "human_review_complete": false,
+        "reviewed_correct": null,
+        "reviewed_abstention": null,
+        "claim_verdicts": []
+      }
+    ]
+  }
+}

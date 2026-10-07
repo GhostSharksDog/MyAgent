@@ -50,6 +50,8 @@ Plan 展示计划快照、步骤结论；Supervisor 展示资料分析员、方�
 
 运行公开消融：`eval_rag.py --compare --dataset general --diagnostics`。
 展示60查询、k5，默认混合+重排正例Recall=.917、完整证据率=.875，多证据仍8/12；打开 `multi_evidence-01` 的缺失项，说明它已在召回并集第7位，但未进入最终top-5。`candidate_rank` 是重排前位置。无答案非空返回12/12不等于模型幻觉率，见 [最新复测](../10-rag-retrieval.md)。
+
+也可展示 [排序/留出对照](../12-rag-answer-quality.md)：k5开发集8→9/12、留出7→8/8，但k4及旧集有退化，因此没有直接换默认。运行 `eval_rag_answers.py --self-test --dataset holdout`，说明“有效编号也能配错误结论”的反例，以及无真实人工审核时语义正确率为null。不要把8项自检说成8个模型任务成功。
 展示离线测试和 Windows CI 配置；远端首跑尚待用户推送时应如实标明。
 可运行 `eval_agent.py --offline`，打开 Markdown 报告和一个失败反例，说明它驱动实际三种编排和工具，
 但模型输出是合成 fixture，90 轮通过证明执行／评分链路，不是模型任务成功率。NDCG 校正与记录格式见任务评测文档。

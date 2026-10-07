@@ -40,9 +40,9 @@ jobs:
       - name: Verify runtime lock
         run: python scripts/lock_deps.py --check
       - name: Check format without modifying files
-        run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py --check
+        run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py --check
       - name: Lint
-        run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py
+        run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py
       - name: Backend offline tests
         run: python -m pytest services/api/tests -q --junitxml=backend-tests.xml
       - name: Public RAG sample evaluation
@@ -51,6 +51,20 @@ jobs:
         run: python scripts/eval_rag.py --validate --dataset general
       - name: General public RAG evaluation
         run: python scripts/eval_rag.py --compare --dataset general --diagnostics --json-out data/rag-general-eval.json
+      - name: Validate frozen synthetic holdout
+        run: python scripts/eval_rag.py --validate --dataset holdout
+      - name: Fixed ranking ablations on public datasets
+        run: |
+          python scripts/eval_rag_ranking.py --dataset general --json-out data/rag-ranking/general.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/eval_rag_ranking.py --dataset legacy --json-out data/rag-ranking/legacy.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/eval_rag_ranking.py --dataset holdout --json-out data/rag-ranking/holdout.json
+      - name: Answer audit with controlled counterexamples only
+        run: |
+          python scripts/eval_rag_answers.py --self-test --dataset general --json-out data/rag-answer-quality/general-self-test.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/eval_rag_answers.py --self-test --dataset holdout --json-out data/rag-answer-quality/holdout-self-test.json
       - name: Agent evaluation with synthetic model and real orchestration
         run: python scripts/eval_agent.py --offline
       - name: Install frontend
@@ -73,6 +87,11 @@ jobs:
             backend-tests.xml
             data/rag-eval.json
             data/rag-general-eval.json
+            data/rag-ranking/general.json
+            data/rag-ranking/legacy.json
+            data/rag-ranking/holdout.json
+            data/rag-answer-quality/general-self-test.json
+            data/rag-answer-quality/holdout-self-test.json
             data/agent-eval/report.json
             data/agent-eval/report.md
             data/agent-eval/records.json

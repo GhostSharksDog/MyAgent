@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-06 **1232 后端通过 + 1 live 跳过、203 前端通过**；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-07 **1361 后端通过 + 1 live 跳过、203 前端通过**；最新排序/答案证据见 `docs/12-rag-answer-quality.md`；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
@@ -30,6 +30,8 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
 - RAG NDCG 已按全语料相关块校正，报告标记 `ndcg-corpus-v2`；历史 top-k 命中数分母的数字不能与新版本直接比较
 - 通用RAG基准：`eval_rag.py --compare --dataset general`，16份虚构文档/60查询，manifest逐文件校验；严格离线、不读配置。48正例与12无答案分开统计，完整证据率和非空返回率不能冒充模型正确率；原始报告在 `docs/evidence/rag-general-v1`
 - 检索已索引完整章节名并排除零分补位；同分按语料顺序稳定截断；SPARSE 改写只用 BM25。`--diagnostics` 逐项记录证据阶段，不增加调用，轨迹必须每次独立持有。新旧报告在 `docs/evidence/rag-retrieval-v1`，默认带重排组合分数不变，部分消融退化如实留档
+- 新增冻结合成留出12文档/32查询（与开发集无精确交集，但同一AI作者、不是独立人标真实集）。coverage排序只作离线实验；k5局部改善、k4/旧集退化，默认不变。五固定方案报告在 `docs/evidence/rag-quality-v1`
+- `eval_rag_answers.py` 只有export/score/self-test，不联网；bundle内query_id透露类别，只向生成者发送generation_messages。自动检查引用/精确quote/gold覆盖，语义支持与真实拒答只来自显式complete人工审核；未审/缺答/夹具分开，未知为null。review绑定query_id/bundle_id/答案摘要，不能跨题复用
 
 版本与提交状态每次都会变，**自己在仓库里查**：
 
@@ -122,6 +124,8 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 | `python scripts\loadtest.py` | 服务在跑 | 并发压测（P50/P95/P99、QPS） |
 | `python scripts\eval_rag.py` | 无 | RAG 消融评测（指标是简历上的数字，别随手改语料/参数后不重跑） |
 | `python scripts\eval_agent.py --offline` | 无 | 30 个通用任务的合成模型／真实内核链路验收；`--records` 只评分已有记录。没有联网执行入口，不读取用户配置；报告在 `data/agent-eval` |
+| `python scripts\eval_rag_ranking.py --dataset holdout` | 无 | 冻结策略在公开合成留出上比较五方案×k4/k5；已看过本版结果，不能再调参后当首次留出实验 |
+| `python scripts\eval_rag_answers.py --self-test --dataset holdout` | 无 | 受控反例检验答案核验链路，不能当模型正确率；真实已有答案用export/score，接口见docs/12 |
 
 ---
 
@@ -144,6 +148,7 @@ services/api/app/
     library.py       模型清单（data/models.json）
   rag/               loaders / chunker / embedder(BM25+TF-IDF) / retriever / store
                      backend.py（本地或远程两种后端）/ service
+                     coverage.py（离线排序实验）holdout.py（冻结校验）answer_audit.py（单次检索核验）
   session/           store.py(ABC+内存+Redis) sqlite_store.py factory.py models.py
   runs/              history.py（运行摘要白名单投影、有界内存、显式单机 SQLite）
   tasks/             queue / redis_queue / handlers / factory
@@ -275,7 +280,8 @@ HTTP/SSE 运行摘要已接通，入口见 `docs/09-run-history.md`。默认 `RU
 公开 RAG 复测用 `scripts/eval_rag.py --compare --sample`，不读私人 notes 或额外语料。
 通用公开基准用 `--dataset general`，旧14查询与新60查询分数不能直接比较。闸门对照只改本轮评测，不改服务配置。
 证据阶段用 `--diagnostics`；candidate_rank 是融合后、重排前的位置。每路 recall_k 不等于并集总宽度。当前14查询的纯RRF Recall=.798、MRR=.702、NDCG=.710；旧 .869/.657/.692 属于修复前基线，不能写成当前值。
-通用集默认组合的4条多证据遗漏和2条改述遗漏均为 outside_top_k；多证据仍8/12找齐，无答案仍12/12返回片段。下一步排序实验须保留正例与负例对照，不凭这次零分过滤宣称解决拒答或幻觉。
+通用集默认组合的4条多证据遗漏和2条改述遗漏均为 outside_top_k；多证据仍8/12找齐，无答案仍12/12返回片段。后续coverage实验在k5改善到9/12，但k4/旧集退化，不能替换默认；留出k5为8/8、k4仍6/8，见docs/12。不要把排序或受控核验写成真实语义正确率。
+留出freeze摘要由loader固定；样本/标签/README冻结后不回改，新版本须显式创建并记录此前选择。现有留出结果已经公开，不再是未见测试。答案bundle共用检索context组装，但不覆盖Agent工具8000字符头尾截断或最终messages裁剪；多次检索编号重用也不属于该单次核验。来源/审核身份是填写者声明，不认证真人；完整性声明仍需人工诚实检查。
 真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
 并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
 旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。
