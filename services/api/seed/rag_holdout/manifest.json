@@ -1,0 +1,68 @@
+{
+  "dataset_id": "legacy-holdout-rag",
+  "version": 1,
+  "provenance": "同一AI作者原创虚构折光资料社材料；在首次留出集排序实验前公开冻结，非独立作者人标或真实用户任务，未读取私人数据或联网。",
+  "documents": [
+    {
+      "file": "documents/gear-lending.md",
+      "domain": "workshop",
+      "sha256": "9cf8526ebffab93dc106a324e61b47c86db43bb3da152f577c5b6ca5b2e198c2"
+    },
+    {
+      "file": "documents/gear-service.md",
+      "domain": "workshop",
+      "sha256": "5db610c5a436ea6eb7cf2cf4dd387c7e5e7a29ab4e0f3ad403b1bcf21d0a4cdb"
+    },
+    {
+      "file": "documents/studio-booking.md",
+      "domain": "workshop",
+      "sha256": "ab45b606734c766e0fb0c33bdeea07959cd8cc2521a27164460de04b66d291b1"
+    },
+    {
+      "file": "documents/field-walks.md",
+      "domain": "field",
+      "sha256": "8d6cb85a09843e2b375ab047f63ac856ee7363ff7790f985ad79817a715183ef"
+    },
+    {
+      "file": "documents/sensor-survey.md",
+      "domain": "field",
+      "sha256": "feae5f55922d4ad99ca4479655f0e9e2d67ef0f4f190b928eb2c0f6b8ab9905e"
+    },
+    {
+      "file": "documents/map-editing.md",
+      "domain": "field",
+      "sha256": "716db1a25c544180f618cc8c53c7eaccaa26d5fc3ca4b2dd087cb2f436d8d526"
+    },
+    {
+      "file": "documents/print-proof.md",
+      "domain": "publishing",
+      "sha256": "cc1ac5d8e289c24691f20fee8e49a3f59be7eac49bd62dd8a06e8b61e9839d86"
+    },
+    {
+      "file": "documents/edition-packaging.md",
+      "domain": "publishing",
+      "sha256": "89bbec660f3aba3c8687a54b102fc0a6e879db72ac1ed9b040449400af9814eb"
+    },
+    {
+      "file": "documents/parcel-handover.md",
+      "domain": "publishing",
+      "sha256": "4b2f81ff9a669e7ae3de879ecf8330b6bd9291ab0b6454ed3eefc820e1e4bdae"
+    },
+    {
+      "file": "documents/exhibit-install.md",
+      "domain": "exhibition",
+      "sha256": "cb2c4fe16f3c4cac82b24d35cc70ecd3bc16afd026d4291ae8741224ac9b1eee"
+    },
+    {
+      "file": "documents/exhibit-media.md",
+      "domain": "exhibition",
+      "sha256": "78c39b0946313481d40bf091d0fd23f7a2f000265e87ebd17c47dd0ed5770b5c"
+    },
+    {
+      "file": "documents/archive-access.md",
+      "domain": "exhibition",
+      "sha256": "fbd9991d8c49918d86dd160817fc4fd0f6c8fe71eb7e797a2a53550d4a2faddc"
+    }
+  ],
+  "eval_set_sha256": "23bce21064d547a4c4b4815154bc2aacb2bd66c67741111e45fd574d5fe7eb52"
+}

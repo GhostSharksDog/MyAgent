@@ -1,0 +1,446 @@
+{
+  "name": "legacy-holdout-rag-v1",
+  "description": "12份原创虚构折光资料社文档，32条同一AI作者查询；24有答案、8无答案。公开冻结合成留出集，非独立人标真实测试。",
+  "queries": [
+    {
+      "id": "holdout-direct-01",
+      "query": "折光便携投影机一次最长能借几个自然日？",
+      "gold": [
+        {
+          "doc_id": "gear-lending.md",
+          "text_contains": "最长借期为五个自然日"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "最长五个自然日，周末也计入。"
+    },
+    {
+      "id": "holdout-direct-02",
+      "query": "雾窗室预约需要提前几天提交？按什么日历单位算？",
+      "gold": [
+        {
+          "doc_id": "studio-booking.md",
+          "text_contains": "预约应提前四个自然日提交"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "提前四个自然日。"
+    },
+    {
+      "id": "holdout-direct-03",
+      "query": "纸桥观察步行几点集合，集合标记是什么？",
+      "gold": [
+        {
+          "doc_id": "field-walks.md",
+          "text_contains": "周六八点四十分集合，集合标记为北侧木牌"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "周六8:40，北侧木牌。"
+    },
+    {
+      "id": "holdout-direct-04",
+      "query": "纸桥光斑指数按多少秒的间隔登记读数？",
+      "gold": [
+        {
+          "doc_id": "sensor-survey.md",
+          "text_contains": "每隔四十五秒登记一次读数"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "每隔45秒，读数与采样时刻成对保存。"
+    },
+    {
+      "id": "holdout-direct-05",
+      "query": "纸桥展示地图使用几米网格，是否展示原始坐标？",
+      "gold": [
+        {
+          "doc_id": "map-editing.md",
+          "text_contains": "记录点位置归入二十米网格，不展示逐点原始坐标"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "20米网格，不展示逐点原始坐标。"
+    },
+    {
+      "id": "holdout-direct-06",
+      "query": "霁光第六期什么时候停止接收本期文字修改？",
+      "gold": [
+        {
+          "doc_id": "print-proof.md",
+          "text_contains": "周一十二点停止接收本期文字修改"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "周一12:00，此后新增内容登记到下一期。"
+    },
+    {
+      "id": "holdout-direct-07",
+      "query": "砂舟驿接收霁光纸质材料包的安排时间是什么？",
+      "gold": [
+        {
+          "doc_id": "parcel-handover.md",
+          "text_contains": "周二十六点三十分接收霁光纸质材料包"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "周二16:30。"
+    },
+    {
+      "id": "holdout-direct-08",
+      "query": "回声窗屏幕片段循环多长，是否带音轨？",
+      "gold": [
+        {
+          "doc_id": "exhibit-media.md",
+          "text_contains": "循环长度为九十秒，不带音轨"
+        }
+      ],
+      "difficulty": "easy",
+      "category": "direct",
+      "answerable": true,
+      "reference_answer": "循环90秒，不带音轨。"
+    },
+    {
+      "id": "holdout-paraphrase-01",
+      "query": "投影机到期后还想用一阵，可以申请几次延长，最晚什么时候开口？",
+      "gold": [
+        {
+          "doc_id": "gear-lending.md",
+          "text_contains": "最多续借一次，续借申请要在原到期日的前一天"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "最多续借一次，在原到期日的前一天提出；管理员同意后才算成功。"
+    },
+    {
+      "id": "holdout-paraphrase-02",
+      "query": "PRJ-17 已经换了供电线，能跳过试图样直接再借出去吗？",
+      "gold": [
+        {
+          "doc_id": "gear-service.md",
+          "text_contains": "维修后仍须重新完成灰阶图和彩条图复核"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能，维修后仍要重新完成灰阶图和彩条图复核。"
+    },
+    {
+      "id": "holdout-paraphrase-03",
+      "query": "上一场在雾窗室结束后，下一场能立刻开始，还是得留出收拾空档？",
+      "gold": [
+        {
+          "doc_id": "studio-booking.md",
+          "text_contains": "两个活动之间预留三十分钟"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "留30分钟整理空档，不计入任何一场活动。"
+    },
+    {
+      "id": "holdout-paraphrase-04",
+      "query": "纸桥步行那天下雨，改做什么？还能把讨论里的内容算成当天新采到的样本吗？",
+      "gold": [
+        {
+          "doc_id": "field-walks.md",
+          "text_contains": "改为室内图样讨论，不继续沿原步行线路收集新样本"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "改为室内图样讨论，不采新样本，讨论描述不能补成当天实测。"
+    },
+    {
+      "id": "holdout-paraphrase-05",
+      "query": "光斑表相邻两个数字相差超过八点，应删掉大的那个还是留下来注明问题？",
+      "gold": [
+        {
+          "doc_id": "sensor-survey.md",
+          "text_contains": "保留原始读数并标注待复核"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "保留原始读数，标注待复核，不删除较大的数。"
+    },
+    {
+      "id": "holdout-paraphrase-06",
+      "query": "霁光纸样装在一起，怎样避免纸张边缘互相蹭到？",
+      "gold": [
+        {
+          "doc_id": "edition-packaging.md",
+          "text_contains": "两份纸样之间放硬纸隔片"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "两份纸样之间放硬纸隔片。"
+    },
+    {
+      "id": "holdout-paraphrase-07",
+      "query": "回声窗支架看着已经搭好了，留一张全景照片就能在记录里打勾吗？",
+      "gold": [
+        {
+          "doc_id": "exhibit-install.md",
+          "text_contains": "横杆编号、锁点照片和两名复核角色代号"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能，横杆编号、锁点照片和两名复核角色代号要齐全。"
+    },
+    {
+      "id": "holdout-paraphrase-08",
+      "query": "打开折光原扫描后发现一个错字，能把扫描原件直接改掉吗？",
+      "gold": [
+        {
+          "doc_id": "archive-access.md",
+          "text_contains": "改字或改图应提交新的更正说明，不直接覆盖原扫描"
+        }
+      ],
+      "difficulty": "normal",
+      "category": "paraphrase",
+      "answerable": true,
+      "reference_answer": "不能，原扫描只读；提交新的更正说明。"
+    },
+    {
+      "id": "holdout-multi-01",
+      "query": "借折光便携投影机：最长归还期限和每次出借前的画面复核分别要求什么？",
+      "gold": [
+        {
+          "doc_id": "gear-lending.md",
+          "text_contains": "最长借期为五个自然日"
+        },
+        {
+          "doc_id": "gear-service.md",
+          "text_contains": "每次出借前都显示灰阶图和彩条图"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "最长五个自然日；每次出借前分别复核灰阶图和彩条图。"
+    },
+    {
+      "id": "holdout-multi-02",
+      "query": "雾窗室活动要取消，而借来的便携投影机想延长使用：房间取消提前多久，续借最多几次？",
+      "gold": [
+        {
+          "doc_id": "studio-booking.md",
+          "text_contains": "开始前十八小时通知管理员"
+        },
+        {
+          "doc_id": "gear-lending.md",
+          "text_contains": "最多续借一次"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "房间取消提前18小时通知；便携投影机最多续借一次，房间取消不自动撤销物件借用。"
+    },
+    {
+      "id": "holdout-multi-03",
+      "query": "纸桥光斑指数跳变超过八点时如何保存数据，展示地图又怎样处理记录点位置？",
+      "gold": [
+        {
+          "doc_id": "sensor-survey.md",
+          "text_contains": "保留原始读数并标注待复核"
+        },
+        {
+          "doc_id": "map-editing.md",
+          "text_contains": "记录点位置归入二十米网格"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "保留原始读数并标注待复核；展示位置归入20米网格，不展示原始坐标。"
+    },
+    {
+      "id": "holdout-multi-04",
+      "query": "纸桥步行下雨改做什么；若原采样表缺了一段时间的读数，能用附近数值补成实测吗？",
+      "gold": [
+        {
+          "doc_id": "field-walks.md",
+          "text_contains": "改为室内图样讨论"
+        },
+        {
+          "doc_id": "sensor-survey.md",
+          "text_contains": "不能根据相邻两个读数补出实测值"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "改为室内图样讨论；缺失时刻留空，不能用相邻读数补成实测。"
+    },
+    {
+      "id": "holdout-multi-05",
+      "query": "霁光第六期的文字修改截止和砂舟驿材料包交接安排各在什么时候？",
+      "gold": [
+        {
+          "doc_id": "print-proof.md",
+          "text_contains": "周一十二点停止接收本期文字修改"
+        },
+        {
+          "doc_id": "parcel-handover.md",
+          "text_contains": "周二十六点三十分接收霁光纸质材料包"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "文字修改截止周一12:00；材料包交接周二16:30，两个时间不是同一节点。"
+    },
+    {
+      "id": "holdout-multi-06",
+      "query": "霁光纸样装包用什么隔开，送到砂舟驿后交接联需要哪些角色确认？",
+      "gold": [
+        {
+          "doc_id": "edition-packaging.md",
+          "text_contains": "两份纸样之间放硬纸隔片"
+        },
+        {
+          "doc_id": "parcel-handover.md",
+          "text_contains": "装包角色与接收角色分别确认"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "硬纸隔片；交接联由装包角色和接收角色分别确认。"
+    },
+    {
+      "id": "holdout-multi-07",
+      "query": "回声窗何时开始搭建，屏幕片段的循环长度与声音要求又是什么？",
+      "gold": [
+        {
+          "doc_id": "exhibit-install.md",
+          "text_contains": "周四十四点开始搭建"
+        },
+        {
+          "doc_id": "exhibit-media.md",
+          "text_contains": "循环长度为九十秒，不带音轨"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "周四14:00开始搭建；片段90秒循环，不带音轨。"
+    },
+    {
+      "id": "holdout-multi-08",
+      "query": "回声窗展示结束要交付哪些影像资料，折光归档包的条目清单又必须有哪些字段？",
+      "gold": [
+        {
+          "doc_id": "exhibit-media.md",
+          "text_contains": "片段清单、字幕稿与循环长度说明"
+        },
+        {
+          "doc_id": "archive-access.md",
+          "text_contains": "条目代号、文件名、公开来源说明和核验状态四个字段"
+        }
+      ],
+      "difficulty": "hard",
+      "category": "multi_evidence",
+      "answerable": true,
+      "reference_answer": "交付片段清单、字幕稿和循环长度说明；归档清单列条目代号、文件名、公开来源说明、核验状态。"
+    },
+    {
+      "id": "holdout-unanswerable-01",
+      "query": "借折光便携投影机要交多少元押金？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有押金金额，不能从借期推算。"
+    },
+    {
+      "id": "holdout-unanswerable-02",
+      "query": "雾窗室建筑面积具体是多少平方米？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料仅提供桌位数，未提供建筑面积；不能从桌位数推算。"
+    },
+    {
+      "id": "holdout-unanswerable-03",
+      "query": "纸桥观察北侧木牌所在的真实街道和门牌号是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料仅提供虚构集合标记，没有真实街道或门牌号。"
+    },
+    {
+      "id": "holdout-unanswerable-04",
+      "query": "纸桥光斑指数用的传感器厂家和商业型号是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "光斑指数是虚构演练指标，资料未提供设备厂家或商业型号。"
+    },
+    {
+      "id": "holdout-unanswerable-05",
+      "query": "霁光第六期校样负责人风页的真实姓名和电话号码是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "风页只是虚构角色代号，没有真实姓名或电话。"
+    },
+    {
+      "id": "holdout-unanswerable-06",
+      "query": "砂舟驿寄一包霁光纸样的商业运费是多少？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "砂舟驿只是虚构交接点，资料没有商业运费。"
+    },
+    {
+      "id": "holdout-unanswerable-07",
+      "query": "回声窗屏幕片段许可证具体哪天到期？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料要求权利核对，但没有许可证到期日。"
+    },
+    {
+      "id": "holdout-unanswerable-08",
+      "query": "折光原始扫描档案的备份加密密钥是什么？",
+      "gold": [],
+      "difficulty": "hard",
+      "category": "unanswerable",
+      "answerable": false,
+      "reference_answer": "资料没有任何备份密钥或访问凭据。"
+    }
+  ]
+}

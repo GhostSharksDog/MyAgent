@@ -1,0 +1,29 @@
+{
+  "format": "legacy-public-holdout-freeze-v1",
+  "dataset_id": "legacy-holdout-rag",
+  "version": 1,
+  "frozen_at": "2026-10-07T03:33:56Z",
+  "authorship": "same-ai-author",
+  "before_first_experiment": true,
+  "limitation": "Public synthetic holdout authored and labelled by the same AI author. Not independent human labels or real user tasks. Self-declared freeze timestamp; digests ensure consistency, not trusted timestamping.",
+  "files": {
+    "README.md": "4e413df504a53e11c670c9f9b8119df8928f225b6198bcd0e81538dca5eceb08",
+    "documents/archive-access.md": "fbd9991d8c49918d86dd160817fc4fd0f6c8fe71eb7e797a2a53550d4a2faddc",
+    "documents/edition-packaging.md": "89bbec660f3aba3c8687a54b102fc0a6e879db72ac1ed9b040449400af9814eb",
+    "documents/exhibit-install.md": "cb2c4fe16f3c4cac82b24d35cc70ecd3bc16afd026d4291ae8741224ac9b1eee",
+    "documents/exhibit-media.md": "78c39b0946313481d40bf091d0fd23f7a2f000265e87ebd17c47dd0ed5770b5c",
+    "documents/field-walks.md": "8d6cb85a09843e2b375ab047f63ac856ee7363ff7790f985ad79817a715183ef",
+    "documents/gear-lending.md": "9cf8526ebffab93dc106a324e61b47c86db43bb3da152f577c5b6ca5b2e198c2",
+    "documents/gear-service.md": "5db610c5a436ea6eb7cf2cf4dd387c7e5e7a29ab4e0f3ad403b1bcf21d0a4cdb",
+    "documents/map-editing.md": "716db1a25c544180f618cc8c53c7eaccaa26d5fc3ca4b2dd087cb2f436d8d526",
+    "documents/parcel-handover.md": "4b2f81ff9a669e7ae3de879ecf8330b6bd9291ab0b6454ed3eefc820e1e4bdae",
+    "documents/print-proof.md": "cc1ac5d8e289c24691f20fee8e49a3f59be7eac49bd62dd8a06e8b61e9839d86",
+    "documents/sensor-survey.md": "feae5f55922d4ad99ca4479655f0e9e2d67ef0f4f190b928eb2c0f6b8ab9905e",
+    "documents/studio-booking.md": "ab45b606734c766e0fb0c33bdeea07959cd8cc2521a27164460de04b66d291b1",
+    "eval_set.json": "23bce21064d547a4c4b4815154bc2aacb2bd66c67741111e45fd574d5fe7eb52",
+    "manifest.json": "152713def5132a0fae19540fba1daf323afdcb0073db1afd2f0ea624f09ce918"
+  },
+  "development_dataset": "legacy-general-rag-v1",
+  "development_manifest_sha256": "3d43e2c57ffcb1989801ecc7c55ed07d0b932ff702b5da48a5614a4f15fcf08e",
+  "development_queries_sha256": "253b7aa1a8d217b5126365717b7b432b0fe4ad6baa2a56b6cde1941e57c114f8"
+}
