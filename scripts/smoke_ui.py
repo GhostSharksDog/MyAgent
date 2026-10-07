@@ -556,6 +556,281 @@ def file_approval_checks(cdp: Cdp, directory: Path | None = None) -> None:
     cdp.eval("window.__fixture.restoreApproval()")
 
 
+def terminal_approval_checks(cdp: Cdp, directory: Path | None = None) -> None:
+    """Use only the visual fixture to test terminal permission and mounted cards."""
+    print("\n=== 本机终端确认（全合成 API／SSE／POST，零真实命令）===")
+    cdp.eval(
+        Path(__file__)
+        .with_name("terminal_approval_fixtures.js")
+        .read_text(encoding="utf-8")
+    )
+    original_write = cdp.eval("window.__fixture.settings.agent.file_write_enabled")
+    original_terminal = cdp.eval("window.__fixture.settings.agent.terminal_enabled")
+    card = r"""document.querySelector('.file-approval[data-approval-id="'+window.__fixture.terminalRun.id+'"]')"""
+    terminal_setting = r"""[...document.querySelectorAll('label')].find(l=>l.textContent.includes('允许 Agent 执行本机终端命令'))?.querySelector('input')"""
+    meta_setting = r"""[...document.querySelectorAll('label')].find(l=>l.textContent.includes('显示运行统计'))?.querySelector('input')"""
+    cdp.click("设置")
+    cdp.wait('!!document.querySelector("[role=dialog][aria-label=设置]")')
+    cdp.click("工作区")
+    check(
+        cdp.eval(f"({terminal_setting})?.checked===false"),
+        "终端权限默认关闭，文件权限不会自动开启终端",
+    )
+    check(
+        cdp.eval(
+            "document.querySelector('[aria-label=\"本机终端权限\"]')?.textContent.includes('不构成沙箱')&&"
+            "document.querySelector('[aria-label=\"本机终端权限\"]')?.textContent.includes('敏感文件开关不限制终端')&&"
+            "document.querySelector('[aria-label=\"本机终端权限\"]')?.textContent.includes('此确认不能关闭')"
+        ),
+        "启用前显式说明账户权限、文件权限边界与每次确认",
+    )
+    cdp.eval(f"({terminal_setting})?.click()")
+    before = refresh_snapshot(cdp)
+    check(cdp.click("保存此页"), "显式保存模拟终端权限")
+    check(
+        cdp.wait(
+            "window.__fixture.settings.agent.terminal_enabled===true&&"
+            "document.querySelector('.sidebar')?.textContent.includes('终端已启用 · 每次确认')"
+        ),
+        "保存后侧栏明确展示独立终端权限",
+    )
+    check(
+        cdp.eval("window.__fixture.settings.agent.file_write_enabled")
+        == original_write,
+        "开启终端没有连带开启文件写权限",
+    )
+    assert_configuration_refresh(cdp, before, "终端权限保存")
+    close_settings(cdp)
+    check(cdp.click("查看工具"), "打开已刷新工具清单")
+    check(
+        cdp.wait(
+            "document.querySelector('.drawer')?.textContent.includes('run_terminal')"
+        ),
+        "明确启用后工具清单才包含终端能力",
+    )
+    cdp.click("关闭工具面板", scope="document.querySelector('.drawer')")
+    cdp.click("设置")
+    cdp.click("通用")
+    original_meta = cdp.eval(f"({meta_setting})?.checked")
+    cdp.eval(f"(()=>{{const e={meta_setting};if(e?.checked)e.click();}})()")
+    close_settings(cdp)
+
+    def begin(case: str) -> bool:
+        cdp.eval(f"window.__fixture.case={json.dumps('terminal-' + case)}")
+        send(cdp, "请打印公开合成状态，先展示完整终端命令，等我批准再执行。")
+        ready = cdp.wait(f"({card})?.dataset.status==='pending'")
+        check(ready, f"{case} 收到完整命令确认")
+        if ready:
+            cdp.eval(
+                f"({card}).scrollIntoView({{block:'center'}});"
+                "document.querySelectorAll('button[aria-label=\"收起执行过程\"]').forEach(b=>b.click())"
+            )
+        return ready
+
+    for mode in ("自动推理", "先规划", "多专家"):
+        check(cdp.click(mode), f"终端确认切换 {mode}")
+        if not begin("applied"):
+            continue
+        check(
+            cdp.eval(
+                f"({card}).querySelector('[aria-label=\"完整终端命令\"] pre').textContent===window.__fixture.terminalRun.proposal.command&&"
+                f"({card}).textContent.includes('C:/Legacy/demo')&&({card}).textContent.includes('powershell')&&"
+                f"({card}).textContent.includes('30 秒')"
+            ),
+            f"{mode} 显示命令全文、起始目录、Shell 与实际时限",
+        )
+        check(
+            cdp.eval(
+                f"!!({card}).closest('article.turn')&&!({card}).closest('.execution-process')&&"
+                f"!({card}).closest('article.turn').querySelector('.runmeta')&&({card}).getClientRects().length>0"
+            ),
+            f"{mode} 隐藏统计／收起过程后确认仍可见",
+        )
+        if mode == "自动推理":
+            if directory is not None:
+                for theme, start in (("light", 23), ("dark", 26)):
+                    cdp.eval(
+                        f"document.documentElement.dataset.theme={json.dumps(theme)}"
+                    )
+                    for offset, (width, height) in enumerate(
+                        ((1440, 900), (1024, 768), (390, 844))
+                    ):
+                        cdp.viewport(width, height)
+                        cdp.eval(f"({card}).scrollIntoView({{block:'center'}})")
+                        layout_check(cdp, f"{theme} {width}×{height} 终端确认")
+                        check(
+                            cdp.eval(
+                                f"(()=>{{const r=({card}).getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;}})()"
+                            ),
+                            f"{theme} {width} 终端卡片不越界",
+                        )
+                        cdp.screenshot(
+                            directory, f"{start + offset:02d}-terminal-{theme}-{width}"
+                        )
+                cdp.eval("document.documentElement.dataset.theme='light'")
+                cdp.viewport(1440, 900)
+            cdp.eval(f"({card}).querySelector('[aria-label=\"完整终端命令\"]').focus()")
+            press_key(cdp, "Tab")
+            check(
+                cdp.eval("document.activeElement?.textContent.trim()==='批准执行'"),
+                "Tab 从命令全文进入批准按钮",
+            )
+            press_key(cdp, "Tab")
+            check(
+                cdp.eval("document.activeElement?.textContent.trim()==='拒绝执行'"),
+                "Tab 从批准进入拒绝按钮",
+            )
+        check(cdp.click("批准执行", scope=f"({card})"), f"{mode} 批准当前命令")
+        check(
+            cdp.wait(f"({card})?.dataset.status==='approved'"),
+            f"{mode} 批准后保持等待执行",
+        )
+        check(
+            cdp.eval(
+                f"!({card}).classList.contains('file-approval--ok')&&!({card}).textContent.includes('命令执行完成')"
+            ),
+            f"{mode} HTTP 批准不会误标执行完成",
+        )
+        check(
+            cdp.eval(f"({card}).textContent.includes('已批准 · 等待执行')"),
+            f"{mode} 排队命令不冒充已开始执行",
+        )
+        cdp.eval("window.__fixture.startTerminal()")
+        check(
+            cdp.wait(f"({card}).textContent.includes('已批准 · 正在执行')"),
+            f"{mode} 收到 started 事件后才显示正在执行",
+        )
+        cdp.eval("window.__fixture.releaseTerminal()")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='applied'&&!document.querySelector('.composer__stop')"
+            ),
+            f"{mode} 仅成功执行事件显示完成",
+        )
+
+    check(cdp.click("自动推理"), "后续终态核验恢复自动推理")
+    for case, decision, expected in (
+        ("failed", "approve", "failed"),
+        ("reject", "reject", "rejected"),
+        ("expired", None, "expired"),
+    ):
+        if not begin(case):
+            continue
+        if decision is not None:
+            check(
+                cdp.click(
+                    "批准执行" if decision == "approve" else "拒绝执行",
+                    scope=f"({card})",
+                ),
+                f"{case} 提交命令决定",
+            )
+            check(
+                cdp.wait(
+                    f"({card})?.dataset.status==={json.dumps('approved' if decision == 'approve' else 'rejected')}"
+                ),
+                f"{case} 决定已显示",
+            )
+        if case == "failed":
+            cdp.eval("window.__fixture.startTerminal()")
+        cdp.eval(f"window.__fixture.completeTerminal({json.dumps(expected)})")
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==={json.dumps(expected)}&&!document.querySelector('.composer__stop')"
+            ),
+            f"{case} 保留明确终态",
+        )
+        check(
+            cdp.eval(
+                f"!({card}).classList.contains('file-approval--ok')&&!({card}).querySelector('button:not(:disabled)')"
+            ),
+            f"{case} 不显示成功且不能再次批准",
+        )
+        if case == "failed":
+            check(
+                cdp.eval(
+                    f"({card}).textContent.includes('退出码 3')&&({card}).textContent.includes('副作用不会自动撤销')"
+                ),
+                "非零退出明确提醒失败及可能副作用",
+            )
+
+    for case in ("cancel", "delay"):
+        if not begin(case):
+            continue
+        if case == "delay":
+            cdp.click("批准执行", scope=f"({card})")
+            check(
+                cdp.wait(f"({card})?.dataset.status==='approved'"), "执行中同样允许停止"
+            )
+            cdp.eval("window.__fixture.startTerminal()")
+            check(
+                cdp.wait(f"({card}).textContent.includes('正在执行')"),
+                "已开始命令可取消",
+            )
+        decisions = cdp.eval("window.__fixture.terminalDecisions.length")
+        check(cdp.click("停止生成"), f"{case} 停止本轮")
+        check(
+            cdp.wait("window.__fixture.terminalCancelled===true"),
+            f"{case} 实际取消底层流",
+        )
+        check(
+            cdp.wait(
+                f"({card})?.dataset.status==='cancelled'&&!document.querySelector('.composer__stop')"
+            ),
+            f"{case} 卡片关闭",
+        )
+        check(
+            not cdp.click("批准执行", scope=f"({card})")
+            and cdp.eval("window.__fixture.terminalDecisions.length") == decisions,
+            f"{case} 关闭后不能发出迟到批准",
+        )
+        cdp.eval("window.__fixture.releaseTerminal()")
+        check(
+            cdp.eval(f"({card})?.dataset.status==='cancelled'"),
+            f"{case} 迟到完成不会复活成功",
+        )
+
+    cdp.eval("window.__fixture.case='terminal-malformed'")
+    send(cdp, "公开合成非法命令事件验证")
+    check(
+        cdp.wait(
+            "window.__fixture.terminalRun?.selected==='terminal-malformed'&&!!document.querySelector('.composer__stop')"
+        ),
+        "非法命令事件已送达当前轮",
+    )
+    check(cdp.eval(f"!({card})"), "缺失完整命令不生成可批准卡片")
+    cdp.click("停止生成")
+    check(
+        cdp.wait(
+            "window.__fixture.terminalCancelled===true&&!document.querySelector('.composer__stop')"
+        ),
+        "非法预览仍可取消本轮",
+    )
+    cdp.click("设置")
+    cdp.click("工作区")
+    cdp.eval(
+        f"(()=>{{const e={terminal_setting};if(e&&e.checked!=={json.dumps(original_terminal)})e.click();}})()"
+    )
+    check(cdp.click("保存此页"), "恢复合成终端权限默认值")
+    check(
+        cdp.wait(
+            f"window.__fixture.settings.agent.terminal_enabled==={json.dumps(original_terminal)}"
+        ),
+        "合成终端权限恢复完成",
+    )
+    check(
+        cdp.eval("window.__fixture.settings.agent.file_write_enabled")
+        == original_write,
+        "整个终端核验保留原文件写权限",
+    )
+    close_settings(cdp)
+    if original_meta is True:
+        cdp.click("设置")
+        cdp.click("通用")
+        cdp.eval(f"(()=>{{const e={meta_setting};if(e&&!e.checked)e.click();}})()")
+        close_settings(cdp)
+    cdp.eval("window.__fixture.case='finished';window.__fixture.restoreTerminal()")
+
+
 def reliability_checks(
     cdp: Cdp, *, visual: bool, directory: Path | None = None
 ) -> None:
@@ -610,6 +885,8 @@ def reliability_checks(
         "上下文裁剪仍可见",
     )
     file_approval_checks(cdp, directory)
+    if visual:
+        terminal_approval_checks(cdp, directory)
     cdp.eval("window.__fixture.case='cancel'")
     send(cdp, "公开样本中断验证")
     check(cdp.wait(f"!!{button_expression('停止生成')}"), "生成时停止按钮出现")
