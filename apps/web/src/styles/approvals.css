@@ -20,6 +20,13 @@
 .file-approval__error { margin: var(--space-4) var(--space-5); color: var(--danger); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .file-approval__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: 0 var(--space-5) var(--space-5); }
 .file-approval__actions span { color: var(--text-3); font-size: var(--fs-xs); }
+.command-approval__details { display: grid; gap: var(--space-2); margin: var(--space-4) var(--space-5); font-size: var(--fs-sm); }
+.command-approval__details div { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: var(--space-3); }
+.command-approval__details dt { color: var(--text-3); }
+.command-approval__details dd { margin: 0; overflow-wrap: anywhere; }
+.command-approval__command { max-height: 320px; overflow: auto; margin: var(--space-4) 0; border-block: 1px solid var(--border); background: var(--code-bg); }
+.command-approval__command pre { margin: 0; padding: var(--space-4) var(--space-5); font-family: var(--font-mono); font-size: var(--fs-sm); line-height: var(--lh-loose); white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-approval__warning { margin: var(--space-4) var(--space-5); color: var(--warn); font-size: var(--fs-sm); line-height: var(--lh-loose); }
 @media (max-width: 760px) {
   .file-approval__diff { max-height: 240px; }
   .file-approval__actions .btn { flex: 1; }

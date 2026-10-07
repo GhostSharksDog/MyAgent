@@ -57,7 +57,11 @@ export function executionActivity(state: AssistantTurnState): { text: string; pr
   const runningTool = tools.find((call) => call.status === 'running')
   const running = isTurnRunning(state)
   const pending = state.approvals.filter((item) => item.status === 'pending')
-  if (running && pending.length) return { text: '等待批准文件修改', progress: pending.length + ' 项待确认' }
+  if (running && pending.length) return {
+    text: pending.every((item) => item.kind === 'command') ? '等待批准终端命令'
+      : pending.every((item) => item.kind !== 'command') ? '等待批准文件修改' : '等待批准工具操作',
+    progress: pending.length + ' 项待确认',
+  }
   if (state.plan) {
     const steps = state.plan.steps
     const active = steps.find((step) => step.status === 'running')

@@ -28,7 +28,7 @@ import { ApiError, decideFileApproval, openChatStream } from '../lib/api'
 import { closeApprovals } from '../lib/approvals'
 import { streamAgentEvents } from '../lib/sse'
 import { applyEvent, emptyTurn } from '../lib/stream'
-import type { AgentMode, AssistantTurnState, ChatItem, FileApprovalDecision, SessionTurn } from '../lib/types'
+import type { AgentMode, AssistantTurnState, ChatItem, FileApprovalDecision, FileApprovalView, SessionTurn } from '../lib/types'
 
 function createId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -265,7 +265,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
       active.turn.stoppedReason !== null || ['done', 'error', 'aborted'].includes(active.turn.phase)) return
     const proposal = active.turn.approvals.find((item) => item.id === approvalId)
     if (!active.turn.runId || !proposal || proposal.status !== 'pending' || proposal.busy) return
-    const update = (patch: Partial<typeof proposal>) => {
+    const update = (patch: Partial<Pick<FileApprovalView, 'status' | 'busy' | 'error' | 'message'>>) => {
       const change = (state: AssistantTurnState) => ({ ...state, approvals: state.approvals.map((item) =>
         item.id === approvalId && item.status === 'pending' ? { ...item, ...patch } : item) })
       active.turn = change(active.turn)
@@ -279,8 +279,13 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
       const result = await decideFileApproval(active.turn.runId, approvalId, decision, active.controller.signal)
       if (!isCurrent()) return
       update({ status: result.status, busy: false, error: null,
-        message: result.status === 'approved' ? '已批准，服务正在重新核验文件与权限；收到写入成功事件后才算完成。'
-          : '已拒绝此修改，Agent 将收到拒绝结果。' })
+        message: proposal.kind === 'command'
+          ? result.status === 'approved'
+            ? '已批准，服务将检查权限并等待执行命令；收到开始执行与执行完成事件后更新状态。'
+            : '已拒绝此命令，Agent 将收到拒绝结果。'
+          : result.status === 'approved'
+            ? '已批准，服务正在重新核验文件与权限；收到写入成功事件后才算完成。'
+            : '已拒绝此修改，Agent 将收到拒绝结果。' })
     } catch (error) {
       if (!isCurrent()) return
       update({ busy: false, error: error instanceof Error ? error.message : '确认请求失败，请重试。' })

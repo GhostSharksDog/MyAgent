@@ -214,6 +214,35 @@ test('确认同步锁挡住同帧双击，POST 成功只显示 approved；applie
   assert.equal(calls.length, 1, 'done 后旧确认不能发请求')
 })
 
+test('终端确认复用同步决定锁，批准响应只表示正在执行，取消后关闭并保留副作用提醒', async () => {
+  const request = deferred()
+  const calls = []
+  const { h, streams } = controlledChat((...args) => { calls.push(args); return request.promise })
+  const sending = h.render().send('在公开工作区打印状态', null)
+  await tick()
+  streams[0].push({ type: 'approval_request', approval: { id: 'command-1', kind: 'command',
+    command: 'Write-Output "public"', cwd: 'D:\\public-workspace', shell: 'powershell',
+    timeout_seconds: 30, status: 'pending', message: '公开命令' } })
+  await tick()
+  const chat = h.render()
+  const deciding = chat.decideApproval(chat.activeAssistantId, 'command-1', 'approve')
+  await chat.decideApproval(chat.activeAssistantId, 'command-1', 'approve')
+  assert.equal(calls.length, 1)
+  request.resolve({ status: 'approved' })
+  await deciding
+  const item = h.render().items.at(-1).state.approvals[0]
+  assert.equal(item.kind, 'command')
+  assert.equal(item.status, 'approved')
+  assert.match(item.message, /执行命令/)
+  assert.doesNotMatch(item.message, /核验文件/)
+  h.render().abort()
+  await sending
+  assert.equal(h.render().items.at(-1).state.approvals[0].status, 'cancelled')
+  assert.match(h.render().items.at(-1).state.approvals[0].message, /副作用不会自动撤销/)
+  await h.render().decideApproval(chat.activeAssistantId, 'command-1', 'approve')
+  assert.equal(calls.length, 1)
+})
+
 test('写入 SSE 先于 HTTP 返回时，迟到 approved 不覆盖 applied', async () => {
   const request = deferred()
   const { h, streams } = controlledChat(() => request.promise)

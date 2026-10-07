@@ -25,6 +25,7 @@ export interface SessionSidebarProps {
   workspaceLoading: boolean
   workspaceError: string | null
   workspaceWritable: boolean
+  terminalEnabled: boolean
   fileSidebarOpen: boolean
   folderPicking: boolean
   onOpenFolder: () => void
@@ -36,7 +37,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
   const {
     sessions, backend, activeId, loading, open, modal, onClose, onSelect, onCreate, onDelete,
     onRefresh, onOpenTools, onOpenSettings, status, workspaceRoot, workspaceLoaded,
-    workspaceLoading, workspaceError, workspaceWritable, fileSidebarOpen,
+    workspaceLoading, workspaceError, workspaceWritable, terminalEnabled, fileSidebarOpen,
     folderPicking, onOpenFolder, onCloseFolder, onToggleFileSidebar,
   } = props
   const containerRef = useRef<HTMLElement | null>(null)
@@ -113,6 +114,10 @@ export function SessionSidebar(props: SessionSidebarProps) {
                 </span>
                 <IconChevronRight size={13} />
               </button>
+              {terminalEnabled && <button type="button" className="ws__terminal"
+                onClick={onOpenSettings} title="终端拥有服务账户权限；文件工具权限不限制命令">
+                终端已启用 · 每次确认
+              </button>}
               <details className="ws__menu">
                 <summary>管理工作区</summary>
                 <span className="ws__full" title={workspaceRoot}>{workspaceRoot}</span>

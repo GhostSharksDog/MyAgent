@@ -33,7 +33,7 @@ export function AssistantTurn({ item, showMeta = true, onOpenRun, active = false
           : streaming ? <div className="thinking" role="status">
             <span className="thinking__dots"><span /><span /><span /></span>
             <span>{state.phase === 'connecting' ? '正在连接…' : state.approvals.some((approval) => approval.status === 'pending')
-              ? '请核对下方修改预览并决定是否批准' : view.runningTool ? '正在调用 ' + view.runningTool.name : '正在思考…'}</span>
+              ? '请核对下方操作预览并决定是否批准' : view.runningTool ? '正在调用 ' + view.runningTool.name : '正在思考…'}</span>
           </div> : !state.error && !item.restored ? <p className="muted">本轮没有产出答案，可展开执行过程查看已有内容。</p> : null}
       </div>
       <FileApprovalPanel approvals={state.approvals} active={active && streaming && !!state.runId}

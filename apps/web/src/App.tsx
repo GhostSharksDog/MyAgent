@@ -193,6 +193,7 @@ export default function App() {
           status={status} workspaceRoot={settings.saved?.agent.workspace_root ?? ''}
           workspaceLoaded={settings.saved !== null} workspaceLoading={settings.loading}
           workspaceError={settings.error} workspaceWritable={settings.saved?.agent.file_write_enabled === true}
+          terminalEnabled={settings.saved?.agent.terminal_enabled === true}
           fileSidebarOpen={fileSidebarOpen} folderPicking={folderPicking}
           onOpenFolder={() => void handleOpenFolder()} onCloseFolder={() => void handleCloseFolder()}
           onToggleFileSidebar={toggleFiles} />

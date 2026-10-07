@@ -1,12 +1,26 @@
-import type { FileApproval, FileApprovalStatus, FileApprovalView } from './types'
+import type { Approval, FileApprovalStatus, FileApprovalView } from './types'
 
 const STATUSES: FileApprovalStatus[] = ['pending', 'approved', 'rejected', 'expired', 'cancelled', 'conflict', 'applied', 'failed']
 
 /** 预览来自网络，校验完整结构后才允许显示操作。 */
-export function readApproval(value: unknown): FileApproval | null {
+export function readApproval(value: unknown): Approval | null {
   if (!value || typeof value !== 'object') return null
   const item = value as Record<string, unknown>
-  if (typeof item.id !== 'string' || !item.id || typeof item.path !== 'string' || !item.path ||
+  if (typeof item.id !== 'string' || !item.id.trim() || typeof item.message !== 'string' ||
+    !STATUSES.includes(item.status as FileApprovalStatus)) return null
+  if (item.kind === 'command') {
+    if (typeof item.command !== 'string' || !item.command.trim() || item.command.length > 16000 ||
+      item.command.includes('\0') || typeof item.cwd !== 'string' || !item.cwd.trim() ||
+      item.cwd.includes('\0') || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(item.cwd) ||
+      typeof item.shell !== 'string' || !item.shell.trim() ||
+      (item.started !== undefined && typeof item.started !== 'boolean') ||
+      (item.started === true && item.status === 'pending') ||
+      typeof item.timeout_seconds !== 'number' || !Number.isFinite(item.timeout_seconds) ||
+      item.timeout_seconds <= 0 || item.timeout_seconds > 600) return null
+    return item as unknown as Approval
+  }
+  if (item.kind !== undefined && item.kind !== 'file') return null
+  if (typeof item.path !== 'string' || !item.path ||
     !['create', 'overwrite', 'edit'].includes(String(item.operation)) ||
     typeof item.diff !== 'string' || typeof item.message !== 'string' ||
     !STATUSES.includes(item.status as FileApprovalStatus) ||
@@ -14,25 +28,51 @@ export function readApproval(value: unknown): FileApproval | null {
     !Number.isSafeInteger(item.after_bytes) || (item.after_bytes as number) < 0 ||
     (item.before_format !== undefined && typeof item.before_format !== 'string') ||
     (item.after_format !== undefined && typeof item.after_format !== 'string')) return null
-  return item as unknown as FileApproval
+  return item as unknown as Approval
 }
 
-export function mergeApproval(items: FileApprovalView[], proposal: FileApproval): FileApprovalView[] {
+export function mergeApproval(items: FileApprovalView[], proposal: Approval): FileApprovalView[] {
   const previous = items.find((item) => item.id === proposal.id)
+  // 同一 ID 不能从文件切成命令，也不能在等待中替换将要批准的操作。
+  if (previous && !sameOperation(previous, proposal)) return items
   // 已决状态不能因迟到的 request 或 HTTP 响应退回等待；applied 才是成功。
   if (previous && previous.status !== 'pending' && previous.status !== 'approved') return items
   if (previous?.status === 'approved' && proposal.status === 'pending') return items
   const next = { ...proposal, busy: proposal.status === 'pending' && previous?.busy === true,
     error: proposal.status === 'pending' ? previous?.error ?? null : null }
+  if (next.kind === 'command' && previous?.kind === 'command' && previous.started === true) next.started = true
   return previous ? items.map((item) => item.id === proposal.id ? next : item) : [...items, next]
+}
+
+function sameOperation(before: Approval, after: Approval): boolean {
+  if (before.kind === 'command') return after.kind === 'command' &&
+    before.command === after.command && before.cwd === after.cwd && before.shell === after.shell &&
+    before.timeout_seconds === after.timeout_seconds
+  return after.kind !== 'command' && before.path === after.path && before.operation === after.operation &&
+    before.diff === after.diff && before.before_bytes === after.before_bytes && before.after_bytes === after.after_bytes &&
+    before.before_format === after.before_format && before.after_format === after.after_format
 }
 
 export function closeApprovals(items: FileApprovalView[], message: string): FileApprovalView[] {
   return items.map((item) => item.status === 'pending' || item.status === 'approved'
-    ? { ...item, status: 'cancelled', busy: false, error: null, message } : item)
+    ? { ...item, status: 'cancelled', busy: false, error: null,
+      message: item.kind === 'command'
+        ? '本轮已关闭，不能再批准命令；未收到执行完成事件。已产生的副作用不会自动撤销。' : message } : item)
 }
 
-export function describeApproval(status: FileApprovalStatus): { title: string; tone: 'pending' | 'ok' | 'warn' | 'error' } {
+export function describeApproval(status: FileApprovalStatus, kind: 'file' | 'command' = 'file', started = false): { title: string; tone: 'pending' | 'ok' | 'warn' | 'error' } {
+  if (kind === 'command') {
+    switch (status) {
+      case 'pending': return { title: '等待批准终端命令', tone: 'pending' }
+      case 'approved': return { title: started ? '已批准 · 正在执行' : '已批准 · 等待执行', tone: 'pending' }
+      case 'applied': return { title: '命令执行完成', tone: 'ok' }
+      case 'rejected': return { title: '已拒绝 · 未执行此命令', tone: 'warn' }
+      case 'expired': return { title: '确认已超时 · 未执行此命令', tone: 'warn' }
+      case 'cancelled': return { title: '命令已取消', tone: 'warn' }
+      case 'conflict': return { title: '执行条件已变化 · 需要重新确认', tone: 'warn' }
+      case 'failed': return { title: '命令执行失败', tone: 'error' }
+    }
+  }
   switch (status) {
     case 'pending': return { title: '等待批准文件修改', tone: 'pending' }
     case 'approved': return { title: '已批准 · 正在核验', tone: 'pending' }

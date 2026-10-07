@@ -109,9 +109,10 @@ export interface Usage {
 export type FileApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'conflict' | 'applied' | 'failed'
 export type FileApprovalDecision = 'approve' | 'reject'
 
-/** 完整修改预览仅存在当前轮界面，不写入会话或运行摘要。 */
+/** 完整操作预览仅存在当前轮界面，不写入会话或运行摘要。 */
 export interface FileApproval {
   id: string
+  kind?: 'file'
   path: string
   operation: 'create' | 'overwrite' | 'edit'
   diff: string
@@ -123,7 +124,23 @@ export interface FileApproval {
   message: string
 }
 
-export interface FileApprovalView extends FileApproval {
+/** 每次命令均需独立批准；cwd 是起始目录，并不限制子进程权限。 */
+export interface CommandApproval {
+  id: string
+  kind: 'command'
+  command: string
+  cwd: string
+  shell: string
+  timeout_seconds: number
+  started?: boolean
+  status: FileApprovalStatus
+  message: string
+}
+
+export type Approval = FileApproval | CommandApproval
+
+/** 保留旧名称兼容组件与 Hook；承载文件和终端两种操作。 */
+export type FileApprovalView = Approval & {
   busy: boolean
   error: string | null
 }
@@ -171,7 +188,7 @@ export interface AgentEvent {
   plan?: PlanPayload
   /** 被派发的专家名。delegate / delegate_result 携带。 */
   specialist?: string
-  approval?: FileApproval
+  approval?: Approval
 }
 
 // ============================================================
@@ -392,6 +409,9 @@ export interface AgentSettingsView {
   /** 旧服务缺字段时按默认需确认展示。 */
   file_approval_required?: boolean
   file_approval_timeout?: number
+  terminal_enabled?: boolean
+  terminal_timeout?: number
+  terminal_approval_timeout?: number
   /** 是否允许文件工具碰 `.env` / 私钥这类敏感文件名。默认 false。 */
   file_allow_secrets: boolean
   /** 知识库实际加载了多少文档 —— 改完配置最想知道的就是"生效了没有" */
@@ -432,6 +452,9 @@ export interface SettingsUpdatePayload {
   file_write_enabled?: boolean
   file_approval_required?: boolean
   file_approval_timeout?: number
+  terminal_enabled?: boolean
+  terminal_timeout?: number
+  terminal_approval_timeout?: number
   file_allow_secrets?: boolean
 }
 

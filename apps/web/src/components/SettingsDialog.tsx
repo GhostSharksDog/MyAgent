@@ -32,6 +32,7 @@ import type { ThemePreference } from '../hooks/useTheme'
 import { getAccessKey, setAccessKey } from '../lib/access'
 import { parseTokenBudget } from '../lib/runtime'
 import { parseApprovalTimeout } from '../lib/approvals'
+import { parseTerminalTimeout } from '../lib/terminal'
 import type { SettingsUpdatePayload } from '../lib/types'
 import type { useSettings } from '../hooks/useSettings'
 import { useDialogFocus } from '../hooks/useDialogFocus'
@@ -61,7 +62,7 @@ const NAV: { id: SettingsSection; label: string; icon: ReactNode; note: string }
   { id: 'general', label: '通用', icon: <IconGear size={16} />, note: '外观与交互' },
   { id: 'models', label: '模型', icon: <IconCoins size={16} />, note: '供应商与切换' },
   { id: 'agent', label: 'Agent', icon: <IconLayers size={16} />, note: '能力、预算与知识库' },
-  { id: 'workspace', label: '工作区', icon: <IconFolder size={16} />, note: '文件访问与写权限' },
+  { id: 'workspace', label: '工作区', icon: <IconFolder size={16} />, note: '文件与本机终端权限' },
   { id: 'access', label: '访问控制', icon: <IconAlert size={16} />, note: '本浏览器的访问密钥' },
 ]
 
@@ -94,6 +95,9 @@ export function SettingsDialog({
   const [fileApprovalRequired, setFileApprovalRequired] = useState(true)
   const [fileApprovalTimeout, setFileApprovalTimeout] = useState('300')
   const [allowSecrets, setAllowSecrets] = useState(false)
+  const [terminalEnabled, setTerminalEnabled] = useState(false)
+  const [terminalTimeout, setTerminalTimeout] = useState('30')
+  const [terminalApprovalTimeout, setTerminalApprovalTimeout] = useState('300')
   const [planBudget, setPlanBudget] = useState('60000')
   const [multiBudget, setMultiBudget] = useState('80000')
   const [runHistoryBackend, setRunHistoryBackend] = useState<'memory' | 'sql'>('memory')
@@ -130,6 +134,9 @@ export function SettingsDialog({
     setFileApprovalRequired(saved.agent.file_approval_required ?? true)
     setFileApprovalTimeout(String(saved.agent.file_approval_timeout ?? 300))
     setAllowSecrets(saved.agent.file_allow_secrets)
+    setTerminalEnabled(saved.agent.terminal_enabled === true)
+    setTerminalTimeout(String(saved.agent.terminal_timeout ?? 30))
+    setTerminalApprovalTimeout(String(saved.agent.terminal_approval_timeout ?? 300))
     setPlanBudget(String(saved.agent.plan_max_total_tokens ?? 60000))
     setMultiBudget(String(saved.agent.multi_max_total_tokens ?? 80000))
     setRunHistoryBackend(saved.run_history?.backend ?? 'memory')
@@ -142,7 +149,10 @@ export function SettingsDialog({
     const multi = parseTokenBudget(multiBudget)
     if (section === 'agent' && (plan === null || multi === null)) return
     const approvalTimeout = parseApprovalTimeout(fileApprovalTimeout)
-    if (section === 'workspace' && approvalTimeout === null) return
+    const commandTimeout = parseTerminalTimeout(terminalTimeout, 600)
+    const commandApprovalTimeout = parseTerminalTimeout(terminalApprovalTimeout, 3600)
+    if (section === 'workspace' && (approvalTimeout === null || commandTimeout === null ||
+      commandApprovalTimeout === null || (terminalEnabled && !workspaceRoot.trim()))) return
     // 键名是**后端的字段名**（snake_case）。写错会被后端 extra="forbid" 拒成 422，
     // 而那正是想要的：宁可当场报错，也不要静默地什么都没改。
     const payload: SettingsUpdatePayload = section === 'agent' ? {
@@ -161,6 +171,9 @@ export function SettingsDialog({
       file_approval_required: fileApprovalRequired,
       file_approval_timeout: approvalTimeout ?? 300,
       file_allow_secrets: allowSecrets,
+      terminal_enabled: terminalEnabled,
+      terminal_timeout: commandTimeout ?? 30,
+      terminal_approval_timeout: commandApprovalTimeout ?? 300,
     }
     if (await save(payload)) onUpdated?.()
   }
@@ -333,10 +346,11 @@ export function SettingsDialog({
             )}
 
             {section === 'workspace' && (
+              <>
               <section className="settings__group">
                 <h3 className="settings__legend">文件工作区</h3>
                 <p className="settings__hint settings__hint--block">
-                  Agent 只能访问所选目录<strong>以内</strong>的文件。留空关闭文件功能，默认仅允许读取。
+                  文件工具只能访问所选目录<strong>以内</strong>的文件。留空关闭文件功能，默认仅允许读取。
                 </p>
                 <label className="settings__field">
                   <span className="settings__label">工作区根目录</span>
@@ -408,6 +422,48 @@ export function SettingsDialog({
                   <IconAlert size={14} /> 只授权需要的目录。文件中的恶意指令可能影响模型行为，请留意工具操作。
                 </p>
               </section>
+              <section className="settings__group" aria-label="本机终端权限">
+                <h3 className="settings__legend">本机终端</h3>
+                <p className="settings__alert">
+                  <strong>终端命令以当前服务账户权限执行，可访问任意文件、联网或启动程序。</strong>
+                  工作区只指定起始目录，不构成沙箱。文件写权限与敏感文件开关不限制终端命令；
+                  已产生的副作用不会自动撤销。
+                </p>
+                <label className="settings__field settings__field--check">
+                  <input type="checkbox" checked={terminalEnabled}
+                    onChange={(event) => setTerminalEnabled(event.target.checked)} />
+                  <span>允许 Agent 执行本机终端命令
+                    <span className="settings__hint">默认关闭，需显式设置工作区，并在支持的平台启用。
+                      每条命令都先展示完整命令、目录和时限，由你批准后执行；此确认不能关闭。
+                      仅支持 Web 流式对话，不提供交互式终端。</span>
+                  </span>
+                </label>
+                {terminalEnabled && !workspaceRoot.trim() && <p className="settings__alert" role="alert">
+                  请先填写工作区根目录，作为终端命令的默认起始目录。
+                </p>}
+                <label className="settings__field">
+                  <span className="settings__label">终端执行时限（秒）</span>
+                  <input className="settings__input" type="number" min="1" max="600" step="any"
+                    disabled={!terminalEnabled} value={terminalTimeout}
+                    onChange={(event) => setTerminalTimeout(event.target.value)} />
+                  <span className="settings__hint">默认 30 秒，范围 1–600 秒。超时或停止时取消进程及子进程。</span>
+                </label>
+                {parseTerminalTimeout(terminalTimeout, 600) === null && <p className="settings__alert" role="alert">
+                  终端执行时限须为 1–600 秒的有限数字。
+                </p>}
+                <label className="settings__field">
+                  <span className="settings__label">终端确认等待时限（秒）</span>
+                  <input className="settings__input" type="number" min="1" max="3600" step="any"
+                    disabled={!terminalEnabled} value={terminalApprovalTimeout}
+                    onChange={(event) => setTerminalApprovalTimeout(event.target.value)} />
+                  <span className="settings__hint">默认 300 秒，范围 1–3600 秒。等待与执行都消耗本轮时长预算，
+                    保存后从下一轮开始生效。</span>
+                </label>
+                {parseTerminalTimeout(terminalApprovalTimeout, 3600) === null && <p className="settings__alert" role="alert">
+                  终端确认等待时限须为 1–3600 秒的有限数字。
+                </p>}
+              </section>
+              </>
             )}
 
             {section === 'access' && (
@@ -489,7 +545,10 @@ export function SettingsDialog({
                 className="btn btn--primary"
                 onClick={() => void handleSave()}
                 disabled={saving || loading || !saved ||
-                  (section === 'workspace' && parseApprovalTimeout(fileApprovalTimeout) === null) ||
+                  (section === 'workspace' && (parseApprovalTimeout(fileApprovalTimeout) === null ||
+                    parseTerminalTimeout(terminalTimeout, 600) === null ||
+                    parseTerminalTimeout(terminalApprovalTimeout, 3600) === null ||
+                    (terminalEnabled && !workspaceRoot.trim()))) ||
                   (section === 'agent' && (parseTokenBudget(planBudget) === null || parseTokenBudget(multiBudget) === null))}
               >
                 {saving ? '保存中…' : '保存此页'}
