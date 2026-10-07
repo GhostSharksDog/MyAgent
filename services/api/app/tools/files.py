@@ -543,6 +543,9 @@ class WriteFileTool(FileMutationTool):
             # 生成的是给人看、也常被 git 管理的文本，换行必须**跨平台一致** ——
             # 否则同一段内容在不同机器上产出不同的字节，diff 会整篇变红。
             target.write_text(p.content, encoding="utf-8", newline="\n")
+            from app.agent.operations import record_operation
+
+            record_operation("succeeded", target=_rel(target))
         except OSError as exc:
             return ToolResult.failure(f"写入 {p.path!r} 失败：{exc}")
 
@@ -634,6 +637,9 @@ class EditFileTool(FileMutationTool):
             # 编辑不该顺手改掉整个文件的换行符 —— 那会让 git diff 变成
             # "整篇都变了"，真正的那一处改动被淹没。
             target.write_text(updated, encoding="utf-8", newline="")
+            from app.agent.operations import record_operation
+
+            record_operation("succeeded", target=_rel(target))
         except OSError as exc:
             return ToolResult.failure(f"写入 {p.path!r} 失败：{exc}")
 

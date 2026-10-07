@@ -389,6 +389,27 @@ class SqlSessionStore(SessionStore):
                     ],
                 )
 
+    async def merge_execution_facts(self, session_id: str, facts: list[dict]) -> bool:
+        from app.agent.operations import merge_facts
+
+        await self._ensure_ready()
+        async with self._write_lock, self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    select(SESSIONS.c.meta, SESSIONS.c.updated_at).where(
+                        SESSIONS.c.id == session_id
+                    )
+                )
+            ).first()
+            if row is None or self._expired(row[1]):
+                return False
+            await conn.execute(
+                update(SESSIONS)
+                .where(SESSIONS.c.id == session_id)
+                .values(meta=merge_facts(row[0] or {}, facts), updated_at=time.time())
+            )
+            return True
+
     async def append_turn(
         self,
         session_id: str,

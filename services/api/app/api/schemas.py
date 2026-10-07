@@ -53,6 +53,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     run_id: str | None = None
     record_saved: bool = True
+    session_saved: bool | None = None
     answer: str
     steps_used: int
     usage: Usage

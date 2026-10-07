@@ -52,6 +52,7 @@ class EventType(StrEnum):
 class AgentEvent(BaseModel):
     run_id: str | None = None
     record_saved: bool | None = None
+    session_saved: bool | None = None
     approval: dict[str, Any] | None = None
     """单一事件。字段是各类型的并集，未用到的字段保持默认值。"""
 

@@ -249,6 +249,9 @@ class TerminalTool(Tool):
         broker.update(
             approval_id, "approved", "命令正在执行；停止或超时不回滚已完成的修改。", started=True
         )
+        from app.agent.operations import record_operation
+
+        record_operation("running")
         try:
             result = await run_command(
                 preparation.command,
@@ -270,6 +273,10 @@ class TerminalTool(Tool):
             message = f"命令启动或清理失败：{exc}；请核对运行器与系统权限后重新确认，不自动重试。"
             broker.update(approval_id, "failed", message)
             return ToolResult.failure(message)
+        record_operation(
+            "unknown" if result.timed_out else "succeeded" if result.exit_code == 0 else "failed",
+            exit_code=result.exit_code,
+        )
         # 分别保留 stdout/stderr 的头尾，避免通用裁剪将其中一路完全丢掉。
         stdout, out_cut = _truncate(result.stdout, 3000)
         stderr, err_cut = _truncate(result.stderr, 3000)

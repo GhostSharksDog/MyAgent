@@ -27,7 +27,9 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
+from app.agent.operations import merge_facts
 from app.session.models import Session, SessionSummary, new_session_id
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,9 @@ class SessionStore(ABC):
         await self.save(session)
         return session
 
+    async def merge_execution_facts(self, session_id: str, facts: list[dict]) -> bool:
+        raise NotImplementedError("会话存储未实现执行事实的原子合并")
+
     @property
     @abstractmethod
     def backend(self) -> str: ...
@@ -114,6 +119,22 @@ class InMemorySessionStore(SessionStore):
     @property
     def backend(self) -> str:
         return "memory"
+
+    async def append_turn(self, session_id, user, assistant, *, tokens=0, tool_summary=""):
+        async with self._lock:
+            session = await self.get(session_id)
+            if session is not None:
+                session.append_turn(user, assistant, tokens=tokens, tool_summary=tool_summary)
+            return session
+
+    async def merge_execution_facts(self, session_id: str, facts: list[dict]) -> bool:
+        async with self._lock:
+            session = await self.get(session_id)
+            if session is None:
+                return False
+            session.meta = merge_facts(session.meta, facts)
+            session.updated_at = time.time()
+            return True
 
     async def create(self, *, title: str = "") -> Session:
         session = Session(title=title)
@@ -220,6 +241,42 @@ class RedisSessionStore(SessionStore):
 
     def _key(self, session_id: str) -> str:
         return f"{self.PREFIX}{session_id}"
+
+    async def _update(self, session_id: str, mutate: Callable[[Session], None]) -> Session | None:
+        from redis.exceptions import WatchError
+
+        key = self._key(session_id)
+        for _ in range(100):
+            async with self._redis.pipeline(transaction=True) as pipe:
+                try:
+                    await pipe.watch(key)
+                    raw = await pipe.get(key)
+                    if raw is None:
+                        return None
+                    session = Session.model_validate_json(raw)
+                    mutate(session)
+                    pipe.multi()
+                    pipe.set(key, session.model_dump_json(), ex=self.ttl_seconds)
+                    pipe.zadd(self.INDEX_KEY, {session_id: session.updated_at})
+                    pipe.expire(self.INDEX_KEY, self.ttl_seconds * 2)
+                    await pipe.execute()
+                    return session
+                except WatchError:
+                    continue
+        raise RuntimeError("会话并发更新过多，请稍后重试")
+
+    async def append_turn(self, session_id, user, assistant, *, tokens=0, tool_summary=""):
+        return await self._update(
+            session_id,
+            lambda s: s.append_turn(user, assistant, tokens=tokens, tool_summary=tool_summary),
+        )
+
+    async def merge_execution_facts(self, session_id: str, facts: list[dict]) -> bool:
+        def mutate(session):
+            session.meta = merge_facts(session.meta, facts)
+            session.updated_at = time.time()
+
+        return await self._update(session_id, mutate) is not None
 
     async def create(self, *, title: str = "") -> Session:
         session = Session(title=title)

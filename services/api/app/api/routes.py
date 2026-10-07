@@ -35,6 +35,7 @@ from app.agent.events import AgentEvent, EventType
 from app.agent.loop import Agent
 from app.agent.memory import ConversationMemory
 from app.agent.multi import SupervisorAgent
+from app.agent.operations import render_facts
 from app.agent.planning import PlanAndExecuteAgent
 from app.agent.runtime import RunContext
 from app.api.schemas import (
@@ -51,6 +52,7 @@ from app.llm.tokens import tokenizer_name
 from app.llm.types import ChatMessage
 from app.rag.backend import describe_knowledge_backend
 from app.runs.history import RunHistory, RunRecord, RunRecorder
+from app.session.gate import SessionGate
 from app.session.models import Session
 from app.session.store import SessionStore
 
@@ -163,6 +165,7 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session
             # 不是要丢掉会话历史。
             enable_summary=True,
         )
+        memory.execution_context = render_facts(session.meta)
         agent = Agent(
             request.app.state.llm,
             request.app.state.tools,
@@ -180,7 +183,7 @@ async def _persist(
     assistant: str,
     tokens: int,
     tool_summary: str = "",
-) -> None:
+) -> bool | None:
     """把一轮成功对话写回会话。
 
     只在**成功产出最终答案**时调用 —— 被预算掐断、死循环中止或报错的轮次
@@ -192,7 +195,7 @@ async def _persist(
     才有意义 —— 半成品轮次的"查过什么"不足以让下一轮省掉一次调用。
     """
     if session is None:
-        return
+        return None
     updated = await store.append_turn(
         session.id, user, assistant, tokens=tokens, tool_summary=tool_summary
     )
@@ -200,6 +203,34 @@ async def _persist(
         # 会话在流式过程中被删除或过期。不该影响已经返回给用户的结果，
         # 但必须记日志 —— 否则这就是一次静默的数据丢失。
         logger.warning("会话 %s 在对话过程中消失，本轮结果未能持久化", session.id)
+    return updated is not None
+
+
+async def _save_session(store, session, context, *, user="", answer="", tokens=0, summary=""):
+    if session is None:
+        return None
+    with anyio.CancelScope(shield=True):
+        try:
+            saved = True
+            if context.execution_facts:
+                saved = await store.merge_execution_facts(session.id, context.execution_facts)
+            if answer:
+                saved = (
+                    bool(await _persist(store, session, user, answer, tokens, summary)) and saved
+                )
+            return saved
+        except Exception:
+            logger.exception("会话或执行事实保存失败")
+            return False
+
+
+async def _lease(request, payload):
+    request.state.run_started_at = asyncio.get_running_loop().time()
+    if not hasattr(request.app.state, "session_gate"):
+        request.app.state.session_gate = SessionGate()
+    return await request.app.state.session_gate.acquire(
+        payload.session_id, request.app.state.settings.agent.run_timeout
+    )
 
 
 # ============================================================
@@ -403,6 +434,13 @@ async def _start_run(
         "multi": settings.agent.multi_max_total_tokens,
     }[payload.mode]
     context = RunContext.create(settings.agent, token_limit=limit)
+    if context.deadline is not None:
+        context.deadline = min(
+            context.deadline,
+            getattr(request.state, "run_started_at", asyncio.get_running_loop().time())
+            + settings.agent.run_timeout,
+        )
+    context.run_id = recorder.record.run_id
     context.observer = recorder.observe_runtime
     try:
         await ledger.save(recorder.record)
@@ -447,6 +485,14 @@ def _run_kwargs(agent: Any, context: RunContext) -> dict[str, Any]:
 
 @router.post("/api/chat", response_model=ChatResponse, summary="对话（非流式）")
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+    lease = await _lease(request, payload)
+    try:
+        return await _chat(payload, request)
+    finally:
+        lease.release()
+
+
+async def _chat(payload: ChatRequest, request: Request) -> ChatResponse:
     await _enforce_rate_limit(request, payload)
     agent, session = await _resolve(request, payload)
 
@@ -471,26 +517,29 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 )
             )
     except asyncio.CancelledError:
+        await _save_session(_get_store(request), session, context)
         await _finish_run(ledger, recorder, "cancelled")
         raise
     except Exception:
+        await _save_session(_get_store(request), session, context)
         await _finish_run(ledger, recorder, "error")
         raise
     record_saved = await _finish_run(ledger, recorder)
 
-    if result.answer and result.stopped_reason == "finished":
-        await _persist(
-            _get_store(request),
-            session,
-            payload.message,
-            result.answer,
-            result.usage.total_tokens,
-            result.tool_summary,
-        )
+    session_saved = await _save_session(
+        _get_store(request),
+        session,
+        context,
+        user=payload.message,
+        answer=result.answer if result.stopped_reason == "finished" else "",
+        tokens=result.usage.total_tokens,
+        summary=result.tool_summary,
+    )
 
     return ChatResponse(
         run_id=recorder.record.run_id,
         record_saved=record_saved,
+        session_saved=session_saved,
         answer=result.answer,
         steps_used=result.steps_used,
         usage=result.usage,
@@ -509,6 +558,35 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
 # ============================================================
 @router.post("/api/chat/stream", summary="对话（SSE 流式）")
 async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResponse:
+    lease = await _lease(request, payload)
+    try:
+        response = await _chat_stream(payload, request)
+    except BaseException:
+        lease.release()
+        raise
+    source, background = response.body_iterator, response.background
+
+    async def close():
+        try:
+            if background:
+                await background()
+        finally:
+            lease.release()
+
+    async def stream():
+        try:
+            async with aclosing(source):
+                async for event in source:
+                    yield event
+        finally:
+            lease.release()
+
+    response.body_iterator = stream()
+    response.background = BackgroundTask(close)
+    return response
+
+
+async def _chat_stream(payload: ChatRequest, request: Request) -> EventSourceResponse:
     """流式端点。
 
     用 POST + SSE 而不是 GET：消息内容放在请求体里更自然，也不受 URL 长度限制。
@@ -571,6 +649,15 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                         # 持久化它之后，下一轮的历史里才会有"我查过什么"那一行。
                         # 从事件里取而不是重新算一遍 —— Agent 内部才知道完整的调用轨迹。
                         tool_summary = event.tool_summary
+                        event.session_saved = await _save_session(
+                            store,
+                            session,
+                            context,
+                            user=payload.message,
+                            answer=final_answer if stopped_reason == "finished" else "",
+                            tokens=total_tokens,
+                            summary=tool_summary,
+                        )
                         event.record_saved = await _finish_run(ledger, recorder)
 
                     # 指标采集放在**消费端**而不是 Agent 内核里：
@@ -591,6 +678,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                     run_id=recorder.record.run_id,
                 )
                 done.record_saved = await _finish_run(ledger, recorder, "error")
+                done.session_saved = await _save_session(store, session, context)
                 saw_done = True
                 yield AgentEvent(
                     type=EventType.ERROR,
@@ -617,6 +705,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
             ).to_sse()
             if not saw_done:
                 saved = await _finish_run(ledger, recorder, "error")
+                session_saved = await _save_session(store, session, context)
                 saw_done = True
                 yield AgentEvent(
                     type=EventType.DONE,
@@ -624,20 +713,16 @@ async def chat_stream(payload: ChatRequest, request: Request) -> EventSourceResp
                     usage_complete=False,
                     run_id=recorder.record.run_id,
                     record_saved=saved,
+                    session_saved=session_saved,
                 ).to_sse()
         finally:
             broker.close()
             brokers.pop(recorder.record.run_id, None)
             context.approvals = None
+            if not saw_done:
+                await _save_session(store, session, context)
             if recorder.record.finished_at is None:
                 await _finish_run(ledger, recorder, "cancelled")
-
-        # 持久化放在 `async for` 之外：即使流中途出错，只要已经产出了完整答案
-        # 就应当保存（异常分支没有 return，控制流会走到这里）。
-        if final_answer and stopped_reason == "finished":
-            await _persist(
-                store, session, payload.message, final_answer, total_tokens, tool_summary
-            )
 
     return EventSourceResponse(
         event_generator(),

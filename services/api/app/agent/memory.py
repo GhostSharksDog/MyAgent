@@ -57,6 +57,9 @@ class Turn(BaseModel):
     # 由 `app/agent/context.summarize_tools` 生成（那个函数是纯的，好测）。
     tool_summary: str = ""
 
+    def render_assistant(self) -> str:
+        return self.assistant + (f"\n\n{self.tool_summary}" if self.tool_summary else "")
+
 
 class ConversationMemory:
     """短期记忆：滑动窗口 + 摘要压缩。
@@ -76,11 +79,11 @@ class ConversationMemory:
     """
 
     SUMMARY_PROMPT = """\
-请把以下求职咨询对话压缩成一段简明的背景摘要，供后续对话参考。
+请把以下通用任务对话压缩成一段简明的背景摘要，供后续对话参考。
 
 保留：
-- 用户的求职目标、意向岗位、意向城市、时间安排
-- 简历中的关键事实（技能、经历、学历）
+- 用户的目标、约束、时间安排与关键事实
+- 实际调用过的工具、已确认结果、失败与尚未完成的事项，不得把尝试写成成功
 - 已经给出的结论性建议（尤其是用户认可或否决过的）
 - 用户明确表达的偏好与限制
 
@@ -108,6 +111,7 @@ class ConversationMemory:
 
         self._turns: list[Turn] = []
         self._summary: str = ""
+        self.execution_context: str = ""
 
     # ---------- 写入 ----------
 
@@ -161,6 +165,8 @@ class ConversationMemory:
         await self._maybe_compress()
 
         messages: list[ChatMessage] = []
+        if self.execution_context:
+            messages.append(ChatMessage.system(self.execution_context))
 
         if self._summary:
             # 用 system 角色承载摘要：它在语义上是"背景设定"而不是某一轮对话。
@@ -188,9 +194,7 @@ class ConversationMemory:
             # 为什么用第一人称、放在括号里：它读起来像助手自己的一条记录，
             # 而不是一段外来指令。外来指令式的措辞（"不要重复调用工具"）
             # 有被模型在回答里复述的风险。
-            content = turn.assistant
-            if turn.tool_summary:
-                content = f"{content}\n\n{turn.tool_summary}"
+            content = turn.render_assistant()
             messages.append(ChatMessage.assistant(content))
 
         return messages
@@ -218,7 +222,7 @@ class ConversationMemory:
             )
             return
 
-        rendered = "\n".join(f"用户：{t.user}\n助手：{t.assistant}" for t in overflow)
+        rendered = "\n".join(f"用户：{t.user}\n助手：{t.render_assistant()}" for t in overflow)
         prompt = self.SUMMARY_PROMPT
         if self._summary:
             prompt += (

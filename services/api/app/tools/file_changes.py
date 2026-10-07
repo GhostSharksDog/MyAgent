@@ -171,6 +171,9 @@ async def prepare_change(tool: Tool, call: ToolCall) -> FileChange | ToolResult 
     try:
         change = build_change(tool, call, broker)
         path = _rel(change.target)
+        from app.agent.operations import record_operation
+
+        record_operation("succeeded", target=path)
         approval_id, approved = await broker.request(
             {
                 "path": path,

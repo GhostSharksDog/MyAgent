@@ -141,6 +141,9 @@ class Tool(ABC):
           - `run` 是同步函数 → `asyncio.to_thread` 执行，
             既不阻塞事件循环，`asyncio.wait_for` 的超时也才能真正生效
         """
+        from app.agent.operations import record_operation
+
+        record_operation("running")
         if inspect.iscoroutinefunction(self.run):
             return await self.run(params)
         return await self._invoke_sync(self.run, params)
@@ -332,6 +335,25 @@ class ToolRegistry:
     async def execute(self, call: ToolCall) -> ToolResult:
         """按名字分发执行。未知工具名也要优雅处理——
         模型偶尔会"幻觉"出一个不存在的工具名，这不该让整个会话崩溃。"""
+        from app.agent.operations import track_operation
+        from app.agent.runtime import current_run_context
+
+        if (context := current_run_context()) is None:
+            return await self._execute(call)
+        with track_operation(context, call.name) as fact:
+            try:
+                result = await self._execute(call)
+                if fact["status"] not in {"succeeded", "unknown"}:
+                    if result.ok:
+                        fact["status"] = "succeeded"
+                    elif fact["status"] == "running":
+                        fact["status"] = "failed"
+                return result
+            finally:
+                if fact["status"] == "running":
+                    fact["status"] = "unknown"
+
+    async def _execute(self, call: ToolCall) -> ToolResult:
         tool = self._tools.get(call.name)
         if tool is None:
             available = "、".join(self.names()) or "（无）"
