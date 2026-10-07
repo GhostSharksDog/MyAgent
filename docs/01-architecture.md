@@ -1027,6 +1027,24 @@ Windows 上用 ctypes 直接驱动 COM 的 `IFileOpenDialog`（也就是资源�
 
 本机终端（2026-10-07）：独立开关默认关闭，每条命令强制确认，沿用请求级 broker 和共享副作用锁。批准后再核验权限/目录身份/参数，不能跨请求或重复执行；文件与命令拒绝封锁本轮后续副作用。进程使用最小基础环境、两路有界排空，Windows 挂起后绑定 Job 再恢复，取消或退出等待普通子孙清理。真实回归抓到 PowerShell 缺 PATHEXT 静默跳过程序、设置白名单遗漏、浮点耗时不能转 ToolResult、失败 observation 丢 stderr 等接入问题。自由命令不是沙箱，现有文件权限不限制命令；边界与证据见 [本机终端](13-local-terminal.md)。
 
+CI 打包修复（2026-10-07）：远端首次安装在 setuptools 的 editable 元数据阶段失败，
+`Multiple top-level packages discovered in a flat-layout: ['app', 'seed']`。
+项目没有显式打包规则，公开样本目录 seed 被默认命名空间扫描当成另一顶层包；
+本地 pytest 从源码运行，不经过此步骤，因此先前门禁漏了干净环境的安装检查。
+现已声明 setuptools 构建后端，包发现仅包含 `app`、`app.*`，仍保留其内部命名空间，
+避免漏掉没有 `__init__.py` 的 `app.rag_service`。seed 数据仍保留在仓库中供评测读取，
+不作为 Python 包发布；没有改变运行时依赖，重新生成 lock 后仍为原来的34个包。
+[setuptools 包发现规则](https://setuptools.pypa.io/en/latest/userguide/package_discovery.html)
+解释了 flat-layout 的多顶层包限制和命名空间扫描。
+
+本机先复现相同错误，再验证 CI 原安装命令加 `--dry-run` 的完整依赖解析成功；
+临时空虚拟环境中以 `--no-deps` 真实构建、安装 `./services/api[dev]`，
+使用 `python -I` 确认12个子包（含 rag_service）均可发现、seed 不可导入。
+普通 wheel 实际构建成功，逐项比较压缩包内容与全部87个 `app/**/*.py`，
+没有漏源码，也没有 seed/tests。基线与修复后均1458后端通过、1 live跳过、
+211前端通过；类型、只读格式、lint与lock校验通过。未调用模型、未改用户 `.env`
+或现有 `.venv`；完整远端 CI 仍需推送本次修复后重跑，不能用本地结果代替。
+
 ### 8.3 一页答辩版
 
 > T02/T21（SQLite 与 lock）、T09/T07（token 裁剪与工具摘要）已解决，不再列作待做。
@@ -1156,7 +1174,7 @@ Usage 只是已知下界，在途调用可以超过阈值；RAG 可选改写/重
 
 默认 pytest 跳过 live，-m live / --run-live 显式启用。
 eval_rag.py --sample 固定公共 seed，关闭 notes/额外路径，不依赖私人语料。
-Windows CI 进行只读格式、lint、后端离线、公开 RAG、前端测试/类型/构建检查；远端首跑待推送。
+Windows CI 进行只读格式、lint、后端离线、公开 RAG、前端测试/类型/构建检查；远端首跑的打包安装问题已本地修复，完整远端重跑待推送。
 
 受限验证使用当前 DeepSeek、临时公开目录，累计 26 次请求尝试，单次输出上限 512、重试 0。
 另将旧门禁失败预检最多 4 次尝试保守计入额度，本轮按最多 30 次占用；详见证据文档。

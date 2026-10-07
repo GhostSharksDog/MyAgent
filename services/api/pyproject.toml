@@ -1,3 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# seed 是公开评测数据。只发布 app 与其子包，避免干净环境的 editable
+# 安装因 flat-layout 检出 app、seed 两个顶层包而失败。rag_service 没有
+# __init__.py，仍需保留 app 内部的命名空间包发现，不能一并排除。
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app", "app.*"]
+namespaces = true
+
 [project]
 name = "legacy-api"
 version = "0.1.0"

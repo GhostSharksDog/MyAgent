@@ -21,7 +21,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   里 `profile` 字段的注释
 - 测试：2026-10-07 **1458 后端通过 + 1 live 跳过、211 前端通过**；最新终端与 411 项 Edge 证据见 `docs/13-local-terminal.md`；排序/答案证据见 `docs/12-rag-answer-quality.md`；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
-- 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑待用户推送确认
+- 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑暴露 editable 安装误识别 seed 为包，已限定 app 打包并本地验证，修复后的远端重跑待用户推送确认
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - 本机终端 `run_terminal` 默认关闭，需显式工作区和独立权限，每条命令强制确认；共用 broker、deadline 和副作用锁，HTTP/CLI 无通道拒绝。cwd 不是沙箱，命令拥有服务账户权限，文件开关不限制它；Windows 挂起后绑定 Job，普通子孙在退出/超时/取消时清理。使用与实测边界见 `docs/13-local-terminal.md`。
@@ -247,6 +247,9 @@ apps/web/src/
 2. **挑一件、写下来**：这个项目的提交规范是**一件事一个提交**，
    提交信息写**为什么**而不是"改了什么"。
 3. **改前先跑门禁**（§2）建立基线；**改后必须再跑**。
+   改打包配置还要验证隔离构建与安装：已有环境里的 pytest 不经过 setuptools 包发现。
+   `app.rag_service` 没有 `__init__.py`，限定 `app`/`app.*` 时保留命名空间发现；
+   wheel 必须包含全部 `app/**/*.py`，不能只靠 editable 能导入就判定打包完整。
 4. **能有真实证据就别只写测试**：
    - 涉及界面 → `scripts\smoke_ui.py`
    - 涉及部署 → `docker compose up -d` + `scripts\verify_compose.py`
@@ -288,7 +291,7 @@ HTTP/SSE 运行摘要已接通，入口见 `docs/09-run-history.md`。默认 `RU
 真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
 并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
 旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。
-真实模型的重规划/失败/裁剪/竞争写入尚未付费验证，已有离线回归；远端 CI 首跑待推送。
+真实模型的重规划/失败/裁剪/竞争写入尚未付费验证，已有离线回归；远端 CI 安装修复后的重跑待推送。
 
 新增预算：`AGENT_PLAN_MAX_TOTAL_TOKENS=60000`、`AGENT_MULTI_MAX_TOTAL_TOKENS=80000`，
 0 表示关闭。在设置界面保存后下一轮生效，在途上下文保持自己的配置。
