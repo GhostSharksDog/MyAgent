@@ -446,10 +446,23 @@ async def test_rejecting_another_command_does_not_relabel_an_already_started_com
 
 
 @pytest.mark.skipif(not runner_available(), reason="系统没有受支持的本机命令运行器")
+@pytest.mark.parametrize("startup_delay", [0, 2.2])
 async def test_real_approved_command_runs_through_registry_in_temporary_workspace(
     command_workspace,
     monkeypatch,
+    startup_delay,
 ):
+    from app.tools import terminal_process
+
+    # 合成用例的两秒预算不代表系统 shell 的启动 SLA；真实集成使用默认30秒。
+    monkeypatch.setattr(get_settings().agent, "terminal_timeout", 30)
+    real_start = terminal_process._start
+
+    def delayed_start(*args):
+        time.sleep(startup_delay)
+        return real_start(*args)
+
+    monkeypatch.setattr(terminal_process, "_start", delayed_start)
     monkeypatch.setattr(terminal, "shell_name", runner_shell_name)
     monkeypatch.setattr(terminal, "available", runner_available)
     context, registry = context_and_registry()
@@ -465,7 +478,7 @@ async def test_real_approved_command_runs_through_registry_in_temporary_workspac
     assert view["shell"] == runner_shell_name()
     assert not operation.done()
     context.approvals.decide(view["id"], "approve")
-    result = await asyncio.wait_for(operation, 10)
+    result = await asyncio.wait_for(operation, 35)
     assert result.ok
     assert isinstance(result.duration_ms, int) and result.duration_ms > 0
     output = json.loads(result.content.split("\n", 1)[1])

@@ -19,9 +19,9 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-07 **1458 后端通过 + 1 live 跳过、211 前端通过**；最新终端与 411 项 Edge 证据见 `docs/13-local-terminal.md`；排序/答案证据见 `docs/12-rag-answer-quality.md`；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-07 **1467 后端通过 + 1 live 跳过、211 前端通过**；模拟可选模块缺失为 **1459 通过 + 9 跳过**；CI 补强及终端初版 411 项 Edge 证据见 `docs/13-local-terminal.md`（本轮未重跑浏览器）；排序/答案证据见 `docs/12-rag-answer-quality.md`；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
-- 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；远端首跑暴露 editable 安装误识别 seed 为包，已限定 app 打包并本地验证，修复后的远端重跑待用户推送确认
+- 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；打包修复后远端暴露16项测试失败。可选依赖误判与临时配置被环境覆盖已修并本地验证；终端零输出超时尚未本机复现，CI 新增三阶段探针，推送后确认远端结果
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - 本机终端 `run_terminal` 默认关闭，需显式工作区和独立权限，每条命令强制确认；共用 broker、deadline 和副作用锁，HTTP/CLI 无通道拒绝。cwd 不是沙箱，命令拥有服务账户权限，文件开关不限制它；Windows 挂起后绑定 Job，普通子孙在退出/超时/取消时清理。使用与实测边界见 `docs/13-local-terminal.md`。
@@ -127,6 +127,7 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 | `python scripts\eval_agent.py --offline` | 无 | 30 个通用任务的合成模型／真实内核链路验收；`--records` 只评分已有记录。没有联网执行入口，不读取用户配置；报告在 `data/agent-eval` |
 | `python scripts\eval_rag_ranking.py --dataset holdout` | 无 | 冻结策略在公开合成留出上比较五方案×k4/k5；已看过本版结果，不能再调参后当首次留出实验 |
 | `python scripts\eval_rag_answers.py --self-test --dataset holdout` | 无 | 受控反例检验答案核验链路，不能当模型正确率；真实已有答案用export/score，接口见docs/12 |
+| `python scripts\probe_terminal.py` | 本机 shell；无需启动 API | 固定公开输出命令，分别测原始 shell、包装器、Job/进程组保护；任何阶段失败则非零退出。仅报告基础环境键名，不报告值，默认产物 `data/terminal-probe.json` |
 
 ---
 
@@ -291,7 +292,7 @@ HTTP/SSE 运行摘要已接通，入口见 `docs/09-run-history.md`。默认 `RU
 真实编排验证用 `scripts/verify_agent_modes.py --live`：单次最多 30 请求，输出 512、重试 0，
 并关闭 JSON fallback、不写 .env；多次执行要扣减累计额度。本轮受限脚本 26 次，
 旧门禁失败预检另保守占用最多 4 次，30 次额度按已用尽处理，不要继续联网。
-真实模型的重规划/失败/裁剪/竞争写入尚未付费验证，已有离线回归；远端 CI 安装修复后的重跑待推送。
+真实模型的重规划/失败/裁剪/竞争写入尚未付费验证，已有离线回归；远端 CI 测试补强后的重跑待推送。此前 Windows Server 终端测试在2–10秒时限内没有输出，原因尚未本机复现，不能直接宣称只是冷启动慢；先看 `probe_terminal.py` 的三阶段报告再定位，不得为通过而跳过进程测试或移除 Job 保护。
 
 新增预算：`AGENT_PLAN_MAX_TOTAL_TOKENS=60000`、`AGENT_MULTI_MAX_TOTAL_TOKENS=80000`，
 0 表示关闭。在设置界面保存后下一轮生效，在途上下文保持自己的配置。

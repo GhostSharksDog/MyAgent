@@ -65,7 +65,7 @@ def _shell_argv(command: str) -> list[str]:
         wrapper = (
             "$ProgressPreference = 'SilentlyContinue'; "
             "$ErrorActionPreference = 'Stop'; "
-            "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); "
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
             "$OutputEncoding = [Console]::OutputEncoding; "
             "try { & {\n" + command + "\n}; "
             "if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE } "
@@ -191,8 +191,10 @@ def _start(command: str, cwd: Path, env: Mapping[str, str], output_limit: int) -
             creationflags=(0x00000004 | 0x08000000) if job else 0,  # SUSPENDED | NO_WINDOW
             start_new_session=not bool(job),
         )
+        logger.debug("终端进程已创建：pid=%s，等待绑定清理范围", process.pid)
         if job:
             job.attach_and_resume(int(process._handle), process.pid)
+        logger.debug("终端进程已恢复：pid=%s", process.pid)
         return _Running(
             process,
             _Capture(process.stdout, output_limit),
@@ -258,6 +260,12 @@ async def run_command(
         while running.process.poll() is None:
             if time.monotonic() - started >= timeout:
                 timed_out = True
+                logger.warning(
+                    "终端进程达到时限：pid=%s，stdout_bytes=%s，stderr_bytes=%s",
+                    running.process.pid,
+                    len(running.stdout.data),
+                    len(running.stderr.data),
+                )
                 break
             await asyncio.sleep(min(0.02, max(0, timeout - (time.monotonic() - started))))
     except asyncio.CancelledError as cancelled:

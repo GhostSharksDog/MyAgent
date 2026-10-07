@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-07",
+  "scope": "CI fixture isolation and real-shell verification; remote Windows Server fault not reproduced locally",
+  "baseline": {
+    "backend_passed": 1458,
+    "live_skipped": 1
+  },
+  "checks": [
+    {
+      "xml": "data/ci-regression-tests.xml",
+      "passed": 1467,
+      "skipped": 1,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 87.951
+    },
+    {
+      "xml": "data/ci-no-optional-tests.xml",
+      "passed": 1459,
+      "skipped": 9,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 92.904
+    }
+  ],
+  "optional_absence_simulation": {
+    "method": "MetaPathFinder raises ModuleNotFoundError; no packages uninstalled",
+    "modules": [
+      "pypdf",
+      "docx",
+      "tiktoken"
+    ],
+    "fixture": "data/ci_no_optional_gate.py"
+  },
+  "terminal_probe": {
+    "platform": "Windows-11-10.0.26100-SP0",
+    "python": "3.12.3",
+    "shell": "powershell",
+    "environment_keys": [
+      "ALLUSERSPROFILE",
+      "APPDATA",
+      "COMSPEC",
+      "HOMEDRIVE",
+      "HOMEPATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "LOCALAPPDATA",
+      "NUMBER_OF_PROCESSORS",
+      "OS",
+      "PATH",
+      "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "PROCESSOR_IDENTIFIER",
+      "PROGRAMDATA",
+      "PROGRAMFILES",
+      "PROGRAMFILES(X86)",
+      "SYSTEMROOT",
+      "TEMP",
+      "TMP",
+      "USERPROFILE",
+      "WINDIR"
+    ],
+    "stages": {
+      "plain_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 141,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      },
+      "wrapped_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 172,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      },
+      "protected_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 250,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      }
+    },
+    "ok": true
+  },
+  "frontend": {
+    "passed": 211,
+    "typecheck": true,
+    "build": true,
+    "modules": 76
+  },
+  "readonly_format": true,
+  "lint": true,
+  "runtime_lock_packages": 34,
+  "model_requests": 0,
+  "user_env_modified": false,
+  "existing_venv_modified": false,
+  "edge_rerun": false,
+  "unverified": [
+    "Exact cause of the remote zero-output terminal timeouts",
+    "Complete remote CI after pushing",
+    "POSIX runner"
+  ],
+  "source_sha256_utf8_lf": {
+    "services/api/app/tools/terminal_process.py": "9d6d209975d752fafa0ed6399c0b0024cea52346b513c2c8f918fb6fb5b13a3c",
+    "services/api/tests/test_terminal_process.py": "6ac7d74a07b207714144b42e4e20ac72e0805d96791886a05b4879c036f2f7ce",
+    "scripts/probe_terminal.py": "23690d7176da937361a0c76f506254b60db13b69a43ae49141232e62d1f9b158",
+    ".github/workflows/ci.yml": "2fcbbf6ff3da1cff4cf5670e22e8981409dc4f358deb82eab547a3ea883a22b6"
+  }
+}

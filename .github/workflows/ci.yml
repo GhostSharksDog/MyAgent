@@ -40,9 +40,23 @@ jobs:
       - name: Verify runtime lock
         run: python scripts/lock_deps.py --check
       - name: Check format without modifying files
-        run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py --check
+        run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py scripts/probe_terminal.py --check
       - name: Lint
-        run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py
+        run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py scripts/probe_terminal.py
+      - name: Install frontend
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Frontend tests
+        working-directory: apps/web
+        run: pnpm test
+      - name: Typecheck
+        working-directory: apps/web
+        run: pnpm run typecheck
+      - name: Build frontend before backend hosting tests
+        working-directory: apps/web
+        run: pnpm build
+      - name: Diagnose and warm up real terminal using public output only
+        run: python scripts/probe_terminal.py --json-out data/terminal-probe.json
       - name: Backend offline tests
         run: python -m pytest services/api/tests -q --junitxml=backend-tests.xml
       - name: Public RAG sample evaluation
@@ -67,23 +81,12 @@ jobs:
           python scripts/eval_rag_answers.py --self-test --dataset holdout --json-out data/rag-answer-quality/holdout-self-test.json
       - name: Agent evaluation with synthetic model and real orchestration
         run: python scripts/eval_agent.py --offline
-      - name: Install frontend
-        working-directory: apps/web
-        run: pnpm install --frozen-lockfile
-      - name: Frontend tests
-        working-directory: apps/web
-        run: pnpm test
-      - name: Typecheck
-        working-directory: apps/web
-        run: pnpm run typecheck
-      - name: Build frontend
-        working-directory: apps/web
-        run: pnpm build
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: offline-check-results
           path: |
+            data/terminal-probe.json
             backend-tests.xml
             data/rag-eval.json
             data/rag-general-eval.json
