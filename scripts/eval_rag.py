@@ -54,6 +54,19 @@ from app.rag.retriever import RetrievalMode, Retriever
 EVAL_SET_PUBLIC = ROOT / "services" / "api" / "seed" / "eval_set.json"
 EVAL_SET_LOCAL = ROOT / "data" / "eval_set.local.json"
 GENERAL_BENCHMARK = ROOT / "services" / "api" / "seed" / "rag_general"
+HOLDOUT_BENCHMARK = ROOT / "services" / "api" / "seed" / "rag_holdout"
+
+
+def public_benchmark(dataset: str):  # type: ignore[no-untyped-def]
+    if dataset == "general":
+        return load_benchmark(GENERAL_BENCHMARK)
+    if dataset == "holdout":
+        from app.rag.holdout import load_holdout_benchmark
+
+        return load_holdout_benchmark(
+            HOLDOUT_BENCHMARK, development_root=GENERAL_BENCHMARK
+        )
+    raise ValueError(f"未知公开基准：{dataset}")
 
 
 def resolve_eval_set(use_sample: bool, dataset: str | None = None) -> Path:
@@ -69,6 +82,8 @@ def resolve_eval_set(use_sample: bool, dataset: str | None = None) -> Path:
     """
     if dataset == "general":
         return GENERAL_BENCHMARK / "eval_set.json"
+    if dataset == "holdout":
+        return HOLDOUT_BENCHMARK / "eval_set.json"
     if not use_sample and EVAL_SET_LOCAL.exists():
         return EVAL_SET_LOCAL
     return EVAL_SET_PUBLIC
@@ -173,14 +188,14 @@ async def cmd_run(
     )
     report.parameters["retriever_stats"] = retriever.stats()
     report.provenance = {
-        "source": "general-public"
-        if getattr(args, "dataset", None) == "general"
+        "source": f"{args.dataset}-public"
+        if getattr(args, "dataset", None) in ("general", "holdout")
         else "jobhunt-public"
         if args.sample
         else "declared-local"
     }
-    if getattr(args, "dataset", None) == "general":
-        _, _, metadata = load_benchmark(GENERAL_BENCHMARK)
+    if getattr(args, "dataset", None) in ("general", "holdout"):
+        _, _, metadata = public_benchmark(args.dataset)
         report.provenance.update(metadata)
 
     if quiet:
@@ -415,6 +430,10 @@ def build_reranker(kind: str) -> Reranker | None:
         return None
     if kind == "lexical":
         return LexicalReranker()
+    if kind == "coverage":
+        from app.rag.coverage import CoverageReranker
+
+        return CoverageReranker()
     if kind == "llm":
         from app.llm.client import LLMClient
 
@@ -462,10 +481,10 @@ def build_retriever(args: argparse.Namespace) -> Retriever:
 
     # --sample 是完整的数据源声明，不只是替换简历文件名。
     # 公开基准必须排除私人笔记及 .env 中声明的私人路径。
-    if getattr(args, "dataset", None) == "general":
+    if getattr(args, "dataset", None) in ("general", "holdout"):
         if args.rerank == "llm" or getattr(args, "rewrite", "none") != "none":
             raise ValueError("通用公开基准只允许离线管线，不能使用模型重排或改写")
-        docs, _, _ = load_benchmark(GENERAL_BENCHMARK)
+        docs, _, _ = public_benchmark(args.dataset)
     elif args.sample:
         docs = build_corpus(
             include_resume=True,
@@ -537,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--rerank",
-        choices=["none", "lexical", "llm"],
+        choices=["none", "lexical", "coverage", "llm"],
         default="lexical",
-        help="重排器。默认 lexical —— 它是消融实验里唯一稳定带来收益且零成本的选项",
+        help="重排器。默认 lexical；coverage 为离线覆盖/去重实验，不改变服务默认值",
     )
     parser.add_argument(
         "--rewrite",
@@ -577,8 +596,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     source.add_argument(
         "--dataset",
-        choices=["general"],
-        help="60查询的通用公开基准，只加载清单文件，严格离线",
+        choices=["general", "holdout"],
+        help="通用开发集或冻结留出集，只加载公开清单文件，严格离线",
     )
     parser.add_argument(
         "--with-llm",
@@ -605,13 +624,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--min-score 必须在0到1之间")
     if args.rrf_k <= 0 or (args.recall_k is not None and args.recall_k <= 0):
         parser.error("--rrf-k 和 --recall-k 必须大于0")
-    if args.dataset == "general" and (
+    if args.dataset in ("general", "holdout") and (
         args.with_llm
         or args.with_rewrite
         or args.rerank == "llm"
         or args.rewrite != "none"
     ):
-        parser.error("--dataset general 是离线基准，不接受模型重排或改写")
+        parser.error(f"--dataset {args.dataset} 是离线基准，不接受模型重排或改写")
     try:
         parse_rrf_weights(args.rrf_weights)
         return execute(args)
