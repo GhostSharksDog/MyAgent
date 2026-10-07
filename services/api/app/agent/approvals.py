@@ -1,4 +1,4 @@
-"""请求内的文件审批通道。决定不执行写入，只有原工具任务能应用已批准的快照。"""
+"""请求内审批通道。决定只释放原工具任务，不在确认端点执行副作用。"""
 
 from __future__ import annotations
 
@@ -40,43 +40,70 @@ class ApprovalBroker:
         for approval_id, item in self.items.items():
             if item.view["status"] not in {"pending", "approved"}:
                 continue
+            # 已启动的命令不能被另一份拒绝伪装成「未执行」；拒绝只封锁后续副作用。
+            if item.view.get("kind") == "command" and item.view.get("started") is True:
+                continue
             self.update(approval_id, status, reason)
             if not item.future.done():
                 item.future.set_result(False)
 
-    def update(self, approval_id: str, status: str, message: str) -> None:
+    def update(
+        self, approval_id: str, status: str, message: str, *, started: bool | None = None
+    ) -> None:
         item = self.items[approval_id]
         item.view = {**item.view, "status": status, "message": message}
+        if started is not None:
+            item.view["started"] = started
         self.events.put_nowait(
             AgentEvent(type=EventType.APPROVAL_UPDATE, approval=item.view.copy())
         )
 
-    async def request(self, view: dict) -> tuple[str, bool]:
+    async def request(
+        self,
+        view: dict,
+        *,
+        timeout: float | None = None,  # noqa: ASYNC109 -- per-proposal wait_for.
+    ) -> tuple[str, bool]:
         if not self.active:
             raise ApprovalUnavailable("本轮已停止；如需修改，请重新发起任务并核对预览。")
         if self.blocked_reason is not None:
             raise ApprovalUnavailable(self.blocked_reason)
         loop = asyncio.get_running_loop()
         approval_id = uuid4().hex
-        view = {**view, "id": approval_id, "status": "pending", "message": "等待批准，尚未写入"}
+        command = view.get("kind") == "command"
+        wait_timeout = self.timeout if timeout is None else timeout
+        view = {
+            **view,
+            "id": approval_id,
+            "status": "pending",
+            "message": "等待批准，尚未执行命令" if command else "等待批准，尚未写入",
+        }
         item = PendingApproval(
-            view, loop.create_future(), loop.time() + self.timeout if self.timeout > 0 else None
+            view, loop.create_future(), loop.time() + wait_timeout if wait_timeout > 0 else None
         )
         self.items[approval_id] = item
         self.events.put_nowait(AgentEvent(type=EventType.APPROVAL_REQUEST, approval=view.copy()))
         try:
             approved = await asyncio.wait_for(
-                item.future, timeout=self.timeout if self.timeout > 0 else None
+                item.future, timeout=wait_timeout if wait_timeout > 0 else None
             )
             return approval_id, approved
         except TimeoutError:
             self._block(
-                "等待批准超时，本轮不再修改文件；请重新发起任务，可在工作区设置调整确认等待时间。",
+                "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务并确认。"
+                if command
+                else "等待批准超时，本轮不再修改文件；请重新发起任务，可在工作区设置调整确认等待时间。",
                 "expired",
             )
             raise ApprovalUnavailable(self.blocked_reason) from None
         except asyncio.CancelledError:
-            self.update(approval_id, "cancelled", "运行已停止，此预览失效，未应用修改。")
+            self.update(
+                approval_id,
+                "cancelled",
+                "运行已停止，命令批准失效，未启动命令。"
+                if command
+                else "运行已停止，此预览失效，未应用修改。",
+            )
             raise
 
     def decide(self, approval_id: str, decision: str) -> str:
@@ -87,22 +114,33 @@ class ApprovalBroker:
             raise ApprovalUnavailable(self.blocked_reason)
         if decision not in {"approve", "reject"}:
             raise ApprovalUnavailable("审批决定必须是 approve 或 reject，请核对请求后重试。")
-        if item.expires_at is not None and asyncio.get_running_loop().time() >= item.expires_at:
-            self._block("等待批准超时，本轮不再修改文件；请重新生成差异后确认。", "expired")
-            raise ApprovalUnavailable("预览已超时；请重新生成差异后确认。")
+        # 处理过的批准不再消耗「等待确认」期限，迟到的 HTTP 重试不能封锁其它预览。
         if item.future.done() or item.view["status"] != "pending":
             raise ApprovalUnavailable("该预览已处理或失效，不能重复批准。")
+        if item.expires_at is not None and asyncio.get_running_loop().time() >= item.expires_at:
+            self._block(
+                "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务。"
+                if item.view.get("kind") == "command"
+                else "等待批准超时，本轮不再修改文件；请重新生成差异后确认。",
+                "expired",
+            )
+            raise ApprovalUnavailable("预览已超时；请重新生成差异后确认。")
         approved = decision == "approve"
         if not approved:
             self.rejected = True
             self._block(
-                "用户已拒绝文件修改，本轮不再写入；如需修改，请重新发起任务并核对预览。", "rejected"
+                "用户已拒绝命令，本轮不再执行命令或修改文件；请重新发起任务并确认。"
+                if item.view.get("kind") == "command"
+                else "用户已拒绝文件修改，本轮不再写入；如需修改，请重新发起任务并核对预览。",
+                "rejected",
             )
             return "rejected"
         self.update(
             approval_id,
             "approved",
-            "已批准，正在重新核验文件与权限；尚未确认写入成功",
+            "已批准，正在重新核验终端权限与工作目录；尚未执行完成"
+            if item.view.get("kind") == "command"
+            else "已批准，正在重新核验文件与权限；尚未确认写入成功",
         )
         item.future.set_result(True)
         return "approved"

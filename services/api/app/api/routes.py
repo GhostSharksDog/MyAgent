@@ -64,7 +64,7 @@ class ApprovalDecision(BaseModel):
     decision: Literal["approve", "reject"]
 
 
-@router.post("/api/runs/{run_id}/approvals/{approval_id}", summary="批准或拒绝当前文件差异")
+@router.post("/api/runs/{run_id}/approvals/{approval_id}", summary="批准或拒绝当前文件差异或命令")
 async def decide_file_change(
     run_id: str, approval_id: str, payload: ApprovalDecision, request: Request
 ) -> dict[str, str]:

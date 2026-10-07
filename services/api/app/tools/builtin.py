@@ -271,6 +271,7 @@ def build_default_registry(
     profile: str = "general",
     include_file_tools: bool = True,
     file_write: bool = False,
+    terminal: bool = False,
 ) -> ToolRegistry:
     """按 profile 构造工具集。
 
@@ -329,6 +330,13 @@ def build_default_registry(
         from app.tools.files import build_file_tools
 
         for tool in build_file_tools(include_write=file_write):
+            registry.register(tool)
+
+    # 终端是独立权限：设置工作区或开启文件写权限都不会顺便授权命令。
+    if terminal:
+        from app.tools.terminal import build_terminal_tools
+
+        for tool in build_terminal_tools():
             registry.register(tool)
 
     # ---------- 技能包：只在 jobhunt 时加载 ----------

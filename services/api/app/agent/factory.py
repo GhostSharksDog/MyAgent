@@ -118,6 +118,7 @@ def build_agent_stack(settings: Settings | None = None) -> AgentStack:
         long_term_memory=long_term,
         profile=s.agent.profile,
         file_write=s.agent.file_write_enabled,
+        terminal=s.agent.terminal_enabled,
     )
 
     agent = Agent(llm_client, tools, s.agent, memory=short_memory, long_term=long_term)
@@ -148,6 +149,7 @@ def refresh_agent_tools(app: Any, settings: Settings) -> None:
         long_term_memory=getattr(app.state, "long_term", None),
         profile=settings.agent.profile,
         file_write=settings.agent.file_write_enabled,
+        terminal=settings.agent.terminal_enabled,
     )
     app.state.tools.replace_tools(tools)
     app.state.agent = Agent(

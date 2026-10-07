@@ -64,6 +64,9 @@ EDITABLE_KEYS = {
     "AGENT_FILE_APPROVAL_REQUIRED",
     "AGENT_FILE_APPROVAL_TIMEOUT",
     "AGENT_FILE_ALLOW_SECRETS",
+    "AGENT_TERMINAL_ENABLED",
+    "AGENT_TERMINAL_TIMEOUT",
+    "AGENT_TERMINAL_APPROVAL_TIMEOUT",
 }
 
 # 这些键写进 .env 时**不加引号会被 shell/docker 解析出问题**，统一加引号
@@ -198,6 +201,9 @@ class AgentView(BaseModel):
     file_approval_required: bool = True
     file_approval_timeout: float = 300
     file_allow_secrets: bool = False
+    terminal_enabled: bool = False
+    terminal_timeout: float = 30
+    terminal_approval_timeout: float = 300
     # 便于界面显示当前实际加载了多少文档（改完配置能立刻看到效果）
     corpus_loaded: bool = False
     corpus_doc_count: int = 0
@@ -245,6 +251,11 @@ class SettingsUpdate(BaseModel):
     file_approval_required: bool | None = None
     file_approval_timeout: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     file_allow_secrets: bool | None = None
+    terminal_enabled: bool | None = None
+    terminal_timeout: float | None = Field(default=None, ge=1, le=600, allow_inf_nan=False)
+    terminal_approval_timeout: float | None = Field(
+        default=None, ge=1, le=3600, allow_inf_nan=False
+    )
     plan_max_total_tokens: int | None = Field(default=None, ge=0)
     multi_max_total_tokens: int | None = Field(default=None, ge=0)
     run_history_backend: Literal["memory", "sql"] | None = None
@@ -285,6 +296,9 @@ def _current_view() -> SettingsView:
             file_approval_required=s.agent.file_approval_required,
             file_approval_timeout=s.agent.file_approval_timeout,
             file_allow_secrets=s.agent.file_allow_secrets,
+            terminal_enabled=s.agent.terminal_enabled,
+            terminal_timeout=s.agent.terminal_timeout,
+            terminal_approval_timeout=s.agent.terminal_approval_timeout,
         ),
         env_path=str(ENV_PATH),
     )
@@ -435,6 +449,12 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
         updates["AGENT_FILE_APPROVAL_TIMEOUT"] = str(payload.file_approval_timeout)
     if payload.file_allow_secrets is not None:
         updates["AGENT_FILE_ALLOW_SECRETS"] = "true" if payload.file_allow_secrets else "false"
+    if payload.terminal_enabled is not None:
+        updates["AGENT_TERMINAL_ENABLED"] = "true" if payload.terminal_enabled else "false"
+    if payload.terminal_timeout is not None:
+        updates["AGENT_TERMINAL_TIMEOUT"] = str(payload.terminal_timeout)
+    if payload.terminal_approval_timeout is not None:
+        updates["AGENT_TERMINAL_APPROVAL_TIMEOUT"] = str(payload.terminal_approval_timeout)
 
     if updates:
         written = _write_env(updates)

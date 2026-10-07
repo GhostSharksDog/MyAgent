@@ -216,7 +216,11 @@ class Tool(ABC):
 
         # ---- 阶段 3：输出裁剪 ----
         content, truncated = _truncate(result.content)
-        return stamp(result.model_copy(update={"truncated": truncated, "content": content}))
+        return stamp(
+            result.model_copy(
+                update={"truncated": result.truncated or truncated, "content": content}
+            )
+        )
 
 
 def _truncate(text: str, limit: int = MAX_OBSERVATION_CHARS) -> tuple[str, bool]:

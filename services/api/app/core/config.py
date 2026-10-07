@@ -270,6 +270,13 @@ class AgentSettings(BaseSettings):
     # "允许读私钥"应该是**独立的一次显式决定**，不该搭在别的开关上。
     file_allow_secrets: bool = False
 
+    # 独立授权本机命令。工作目录不是沙箱，命令拥有服务账户权限且可能联网；
+    # 文件工具的写入/敏感文件开关不能约束子进程，所以默认不加载，逐条强制审批。
+    terminal_enabled: bool = False
+    # 非交互命令必须有有限执行时长；等待审批仍计入原 RunContext deadline。
+    terminal_timeout: float = Field(default=30, ge=1, le=600, allow_inf_nan=False)
+    terminal_approval_timeout: float = Field(default=300, ge=1, le=3600, allow_inf_nan=False)
+
     # ---------- 目录选择器 ----------
     # 界面上"打开文件夹"用哪种交互：
     #   auto   —— 启动时按宿主事实自动判定（默认）
