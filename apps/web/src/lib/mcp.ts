@@ -2,6 +2,7 @@ import { apiUrl } from './api'
 import { accessHeaders } from './access'
 
 export interface MCPConfig {
+  preset?: 'tavily' | 'exa' | 'filesystem' | 'desktop_commander' | 'custom'
   id?: string
   name: string
   transport: 'http' | 'stdio'
@@ -16,7 +17,7 @@ export interface MCPConfig {
   selected_tools: string[]
 }
 export interface MCPToolView { name: string; description: string; selected: boolean; trusted: boolean; trust_allowed: boolean; error: string }
-export interface MCPServerView extends MCPConfig { id: string; status: string; error: string; protocol: string; tools: MCPToolView[] }
+export interface MCPServerView extends MCPConfig { id: string; status: string; error: string; protocol: string; tools: MCPToolView[]; secret_configured?: boolean }
 export interface MCPView { enabled: boolean; error: string; max_tools: number; servers: MCPServerView[] }
 
 export function newMCPConfig(exa = false): MCPConfig {

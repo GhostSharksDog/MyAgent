@@ -182,6 +182,27 @@
 }
 .mcp-service h4 { margin: 0 0 var(--space-4); }
 .mcp-service h4 small { color: var(--text-3); font-weight: 400; }
+.mcp-presets { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-5); }
+.mcp-service--compact { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.mcp-service--compact .settings__actions { margin: 0; }
+.mcp-map { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); }
+.mcp-map__row { display: flex; gap: var(--space-3); min-width: 0; }
+.mcp-map__row input { min-width: 0; flex: 1; width: 0; }
+.mcp-advanced { margin: var(--space-5) 0; }
+.mcp-advanced summary, .storage-summary summary { cursor: pointer; color: var(--text-2); padding: var(--space-3) 0; }
+.storage-summary { padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: var(--space-5); }
+.storage-summary code { overflow-wrap: anywhere; }
+.memory-fact { border-top: 1px solid var(--border); padding: var(--space-4) 0; overflow-wrap: anywhere; }
+.setup-dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 32px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-panel); box-shadow: var(--shadow-lg); }
+.setup-dialog h2 { margin: 12px 0; font-size: 26px; }
+.setup-dialog__brand { font-weight: 600; color: var(--accent); }
+.setup-dialog form { margin-top: 24px; }
+.setup-dialog__submit { width: 100%; }
+@media (max-width: 760px) {
+  .setup-dialog { padding: 24px; }
+  .mcp-service--compact { align-items: flex-start; flex-direction: column; }
+  .mcp-map__row { flex-wrap: wrap; }
+}
 .mcp-service .settings__actions { margin-bottom: var(--space-4); }
 .mcp-tool { border-top: 1px solid var(--border); padding-top: var(--space-4); }
 

@@ -46,6 +46,21 @@ async def configure(payload: Enabled, request: Request):
 
 @router.put("/servers")
 async def save_server(payload: dict, request: Request):
+    return await _save_server(payload, request)
+
+
+@router.put("/servers/connect")
+async def save_and_connect(payload: dict, request: Request):
+    from app.mcp_client.presets import resolve_preset
+
+    try:
+        payload = resolve_preset(payload)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await _save_server({**payload, "enabled": True}, request, coordinate=True)
+
+
+async def _save_server(payload: dict, request: Request, *, coordinate=False):
     m = manager(request)
     async with m.lock:
         if m.error:
@@ -53,6 +68,7 @@ async def save_server(payload: dict, request: Request):
         try:
             # 只读授权由独立接口绑定真实已发现的定义，不能随配置导入。
             supplied = {**payload, "trusted_tools": {}}
+            supplied.pop("secret_configured", None)
             new = ServerConfig.model_validate(supplied)
             old = m.servers.get(new.id)
             new = merge_secrets(new, old)
@@ -74,12 +90,31 @@ async def save_server(payload: dict, request: Request):
         except OSError:
             raise HTTPException(503, "无法保存 MCP 清单，请检查配置目录的写权限。") from None
         m.servers = updated
+        if coordinate:
+            _write_env(
+                {"MCP_ENABLED": "true" if any(s.enabled for s in updated.values()) else "false"}
+            )
+            _apply()
+            m.settings = get_settings().mcp
+            request.app.state.settings = request.app.state.settings.model_copy(
+                update={"mcp": m.settings}
+            )
         if new.id in m.connections:
             await m.connections.pop(new.id).close()
         if new.enabled and m.settings.enabled:
             await m.connect(new.id)
         m.on_change()
         return m.view()
+
+
+@router.patch("/servers/{server_id}/enabled")
+async def enable_server(server_id: str, payload: Enabled, request: Request):
+    old = manager(request).servers.get(server_id)
+    if old is None:
+        raise HTTPException(404, "MCP 服务不存在，请刷新列表。")
+    return await _save_server(
+        {**old.model_dump(), "enabled": payload.enabled}, request, coordinate=True
+    )
 
 
 @router.post("/servers/{server_id}/test")

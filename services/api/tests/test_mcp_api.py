@@ -41,11 +41,17 @@ async def test_crud_masks_secrets_and_rejects_imported_trust(api):
     response = await client.put("/api/mcp/servers", json=fields)
     assert response.status_code == 200
     assert manager.servers[server["id"]].headers["Authorization"] == "Bearer public-secret"
+    assert response.json()["servers"][0]["secret_configured"]
     assert (
         await client.put(
             f"/api/mcp/servers/{server['id']}/tools", json={"selected": [], "trusted": []}
         )
     ).status_code == 409
+    fields["headers"] = {}
+    response = await client.put("/api/mcp/servers", json=fields)
+    assert response.status_code == 200
+    assert not response.json()["servers"][0]["secret_configured"]
+    assert not manager.servers[server["id"]].headers
     assert (await client.delete(f"/api/mcp/servers/{server['id']}")).status_code == 200
     assert manager.catalog.load() == []
 

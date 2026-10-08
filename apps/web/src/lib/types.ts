@@ -150,7 +150,16 @@ export interface MCPApproval {
   message: string
 }
 
-export type Approval = FileApproval | CommandApproval | MCPApproval
+export interface MemoryApproval {
+  id: string
+  kind: 'memory'
+  fact: string
+  tags: string[]
+  started: boolean
+  status: FileApprovalStatus
+  message: string
+}
+export type Approval = FileApproval | CommandApproval | MCPApproval | MemoryApproval
 
 /** 保留旧名称兼容组件与 Hook；承载文件和终端两种操作。 */
 export type FileApprovalView = Approval & {

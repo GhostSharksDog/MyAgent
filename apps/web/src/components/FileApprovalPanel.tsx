@@ -21,16 +21,17 @@ export const FileApprovalPanel = memo(function FileApprovalPanel({ approvals, ac
     {approvals.map((item) => {
       const command = item.kind === 'command'
       const external = item.kind === 'mcp'
+      const memory = item.kind === 'memory'
       const status = describeApproval(item.status, item.kind ?? 'file', (command || external) && item.started === true)
       const actionable = active && !disabled && item.status === 'pending' && !!onDecide
       return <section key={item.id} className={`file-approval file-approval--${status.tone}`}
-        aria-label={external ? `外部工具：${item.server_name} / ${item.tool_name}` : command ? `终端命令：${item.command}` : `文件修改：${item.path}`}
+        aria-label={memory ? '保存长期记忆' : external ? `外部工具：${item.server_name} / ${item.tool_name}` : command ? `终端命令：${item.command}` : `文件修改：${item.path}`}
         data-kind={item.kind ?? 'file'} data-approval-id={item.id} data-status={item.status}>
         <header className="file-approval__head">
           <strong role="status">{status.title}</strong>
-          <span className="file-approval__operation">{external ? 'MCP 外部工具' : command ? '本机终端' : OPERATIONS[item.operation]}</span>
+          <span className="file-approval__operation">{memory ? '长期记忆' : external ? 'MCP 外部工具' : command ? '本机终端' : OPERATIONS[item.operation]}</span>
         </header>
-        {external ? <>
+        {memory ? <><p className="file-approval__path">{item.fact}</p><p className="settings__hint">批准后保存到本机，在以后的任务中使用。你可以在记忆与存储设置中编辑或删除。</p></> : external ? <>
           <p className="file-approval__path">{item.server_name} / <code>{item.tool_name}</code></p>
           <div className="command-approval__command" role="region" aria-label="完整外部调用参数" tabIndex={0}>
             <pre>{JSON.stringify(item.arguments, null, 2)}</pre>
@@ -67,9 +68,9 @@ export const FileApprovalPanel = memo(function FileApprovalPanel({ approvals, ac
         {item.error && <p className="file-approval__error" role="alert">{item.error}</p>}
         {item.status === 'pending' && <div className="file-approval__actions">
           <button type="button" className="btn btn--primary" disabled={!actionable || item.busy}
-            onClick={() => void onDecide?.(assistantId, item.id, 'approve')}>{external ? '批准外部调用' : command ? '批准执行' : '批准此修改'}</button>
+            onClick={() => void onDecide?.(assistantId, item.id, 'approve')}>{memory ? '确认保存记忆' : external ? '批准外部调用' : command ? '批准执行' : '批准此修改'}</button>
           <button type="button" className="btn" disabled={!actionable || item.busy}
-            onClick={() => void onDecide?.(assistantId, item.id, 'reject')}>{external ? '拒绝外部调用' : command ? '拒绝执行' : '拒绝修改'}</button>
+            onClick={() => void onDecide?.(assistantId, item.id, 'reject')}>{memory ? '不保存' : external ? '拒绝外部调用' : command ? '拒绝执行' : '拒绝修改'}</button>
           {item.busy && <span role="status">正在提交决定…</span>}
           {!active && <span>本轮已关闭，不能再确认</span>}
           {active && disabled && <span>正在切换对话，暂时不能确认</span>}

@@ -11,9 +11,15 @@
     const payload = JSON.parse(options.body || '{}');
     if (path.startsWith('/api/mcp')) {
       if (path.endsWith('/config')) f.mcp.enabled = payload.enabled;
-      else if (path === '/api/mcp/servers') {
-        const item = { ...payload, id: payload.id || 'public-exa', status: 'disabled', error: '', protocol: '', tools: [] };
+      else if (path === '/api/mcp/servers' || path === '/api/mcp/servers/connect') {
+        f.mcpSubmitted = payload;
+        const item = { ...payload, headers: Object.fromEntries(Object.keys(payload.headers || {}).map(k => [k, '********'])), id: payload.id || 'public-exa', enabled: true, status: f.mcp.failConnect ? 'error' : 'connected', error: f.mcp.failConnect ? 'API Key：密钥无效，请检查后重新连接。' : '', protocol: '', tools: ['web_search_exa', 'web_fetch_exa'].map(name => ({ name, description: '公开合成工具', selected: true, trusted: false, trust_allowed: true, error: '' })) };
+        f.mcp.enabled = true;
         f.mcp.servers = [...f.mcp.servers.filter(s => s.id !== item.id), item];
+      } else if (path.endsWith('/enabled')) {
+        f.mcp.servers[0].enabled = payload.enabled;
+        f.mcp.enabled = payload.enabled;
+        f.mcp.servers[0].status = payload.enabled ? 'connected' : 'disabled';
       } else if (path.endsWith('/test')) {
         const s = f.mcp.servers[0];
         s.status = 'connected'; s.protocol = '2026-07-28';

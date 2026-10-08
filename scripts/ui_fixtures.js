@@ -82,6 +82,7 @@
     if (!path.startsWith('/api/') && path !== '/healthz') return originalFetch(input,options);
     const method = options.method || 'GET';
     window.__fixture.requests.push({path,method});
+    if (path === '/api/setup') return json({ required: false, desktop: false, stores_locally: true });
     if (path === '/api/chat/stream') return stream(options);
     if (path === '/api/mcp') return json({enabled:false,error:'',max_tools:32,servers:[]});
     if(path==='/api/runs') {

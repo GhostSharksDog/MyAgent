@@ -18,6 +18,7 @@ class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(default_factory=lambda: uuid4().hex[:12], pattern=r"^[a-zA-Z0-9_-]{1,32}$")
     name: str = Field(min_length=1, max_length=80)
+    preset: Literal["tavily", "exa", "filesystem", "desktop_commander", "custom"] | None = None
     transport: Literal["stdio", "http"] = "http"
     enabled: bool = False
     url: str = Field(default="", max_length=2048)
@@ -69,7 +70,9 @@ class ServerConfig(BaseModel):
         return view
 
     def connection_fingerprint(self):
-        value = self.model_dump(exclude={"name", "enabled", "selected_tools", "trusted_tools"})
+        value = self.model_dump(
+            exclude={"name", "enabled", "selected_tools", "trusted_tools", "preset"}
+        )
         return digest(value)
 
 

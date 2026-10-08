@@ -39,6 +39,7 @@ import { useDialogFocus } from '../hooks/useDialogFocus'
 import { GeneralSection } from './settings/GeneralSection'
 import { ModelsSection } from './settings/ModelsSection'
 import { MCPSection } from './settings/MCPSection'
+import { MemorySection } from './settings/MemorySection'
 import { IconAlert, IconCheck, IconCoins, IconFolder, IconGear, IconLayers, IconX } from './Icons'
 
 type SettingsApi = ReturnType<typeof useSettings>
@@ -57,9 +58,10 @@ export interface SettingsDialogProps {
   onUpdated?: () => void
 }
 
-export type SettingsSection = 'general' | 'models' | 'agent' | 'workspace' | 'access' | 'mcp'
+export type SettingsSection = 'general' | 'models' | 'agent' | 'workspace' | 'access' | 'mcp' | 'memory'
 
 const NAV: { id: SettingsSection; label: string; icon: ReactNode; note: string }[] = [
+  { id: 'memory', label: '记忆与存储', icon: <IconLayers size={16} />, note: '本机数据与已确认记忆' },
   { id: 'mcp', label: 'MCP', icon: <IconLayers size={16} />, note: '连接外部工具' },
   { id: 'general', label: '通用', icon: <IconGear size={16} />, note: '外观与交互' },
   { id: 'models', label: '模型', icon: <IconCoins size={16} />, note: '供应商与切换' },
@@ -248,6 +250,7 @@ export function SettingsDialog({
 
             {section === 'models' && <ModelsSection onChanged={onUpdated} />}
             {section === 'mcp' && <MCPSection onChanged={onUpdated} />}
+            {section === 'memory' && <MemorySection onChanged={onUpdated} />}
 
             {section === 'agent' && (
               <>

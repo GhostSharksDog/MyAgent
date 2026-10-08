@@ -200,8 +200,12 @@ def close_settings(cdp: Cdp) -> None:
     cdp.wait("!document.querySelector('[role=dialog][aria-label=\"设置\"]')")
 
 
-def focus_trap_check(cdp: Cdp, label: str) -> None:
-    scope = f"document.querySelector('[role=dialog][aria-label={json.dumps(label, ensure_ascii=False)}]')"
+def focus_trap_check(cdp: Cdp, label: str, *, selector: str | None = None) -> None:
+    scope = (
+        f"document.querySelector({json.dumps(selector)})"
+        if selector
+        else f"document.querySelector('[role=dialog][aria-label={json.dumps(label, ensure_ascii=False)}]')"
+    )
     targets = (
         f"[...{scope}.querySelectorAll('button,input,select,textarea,a[href],summary,[tabindex]')]"
         ".filter(e=>e.tabIndex>=0&&!e.matches(':disabled')&&!e.closest('[inert]')&&e.getClientRects().length>0)"
@@ -1839,8 +1843,26 @@ def visual_checks(cdp: Cdp, directory: Path) -> None:
     )
     from mcp_ui_checks import run as mcp_checks
 
-    mcp_checks(cdp, directory, check=check, close_settings=close_settings,
-               layout_check=layout_check, focus_trap_check=focus_trap_check, send=send)
+    mcp_checks(
+        cdp,
+        directory,
+        check=check,
+        close_settings=close_settings,
+        layout_check=layout_check,
+        focus_trap_check=focus_trap_check,
+        send=send,
+    )
+    from desktop_ui_checks import run as desktop_checks
+
+    desktop_checks(
+        cdp,
+        directory,
+        check=check,
+        close_settings=close_settings,
+        layout_check=layout_check,
+        focus_trap_check=focus_trap_check,
+        send=send,
+    )
     service_state_checks(cdp)
     keyboard_checks(cdp)
     check(

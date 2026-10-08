@@ -12,6 +12,7 @@ import { SessionSidebar } from './components/SessionSidebar'
 import { FileSidebar } from './components/FileSidebar'
 import { FolderPicker } from './components/FolderPicker'
 import { SettingsDialog } from './components/SettingsDialog'
+import { SetupDialog } from './components/SetupDialog'
 import type { SettingsSection } from './components/SettingsDialog'
 import { ToolsDrawer } from './components/ToolsDrawer'
 import { RunHistoryDialog } from './components/RunHistoryDialog'
@@ -255,6 +256,7 @@ export default function App() {
         initialSection={settingsSection} onUpdated={handleConfigurationUpdated}
         settings={settings} themePreference={theme.preference} onThemeChange={theme.setPreference}
         prefs={prefs.prefs} onPrefChange={prefs.set} onResetPrefs={prefs.reset} />
+      {server.health?.llm_configured === false && !offline && accessNotice !== 'required' && <SetupDialog onSaved={handleConfigurationUpdated} />}
       <FolderPicker open={pickerOpen} current={settings.saved?.agent.workspace_root} note={pickerNote}
         onClose={() => { setPickerOpen(false); setPickerNote('') }}
         onPick={(path) => void handlePickFolder(path)} />

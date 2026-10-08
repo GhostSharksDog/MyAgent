@@ -203,6 +203,7 @@ class MCPManager:
             servers.append(
                 {
                     **server.public(),
+                    "secret_configured": bool(server.headers or server.env),
                     "status": "connected"
                     if conn and conn.client
                     else "error"

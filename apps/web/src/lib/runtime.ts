@@ -62,6 +62,7 @@ export function executionActivity(state: AssistantTurnState): { text: string; pr
   if (running && pending.length) return {
     text: pending.every((item) => item.kind === 'command') ? '等待批准终端命令'
       : pending.every((item) => item.kind === 'mcp') ? '等待批准外部工具'
+      : pending.every((item) => item.kind === 'memory') ? '等待确认保存记忆'
         : pending.every((item) => !item.kind || item.kind === 'file') ? '等待批准文件修改' : '等待批准工具操作',
     progress: pending.length + ' 项待确认',
   }

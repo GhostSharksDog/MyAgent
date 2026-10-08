@@ -8,6 +8,12 @@ export function readApproval(value: unknown): Approval | null {
   const item = value as Record<string, unknown>
   if (typeof item.id !== 'string' || !item.id.trim() || typeof item.message !== 'string' ||
     !STATUSES.includes(item.status as FileApprovalStatus)) return null
+  if (item.kind === 'memory') {
+    if (typeof item.fact !== 'string' || !item.fact.trim() || item.fact.length > 500 ||
+      !Array.isArray(item.tags) || item.tags.some(v => typeof v !== 'string') ||
+      typeof item.started !== 'boolean' || (item.started && item.status === 'pending')) return null
+    return item as unknown as Approval
+  }
   if (item.kind === 'mcp') {
     if (typeof item.server_id !== 'string' || !item.server_id ||
       typeof item.server_name !== 'string' || !item.server_name ||
@@ -51,10 +57,12 @@ export function mergeApproval(items: FileApprovalView[], proposal: Approval): Fi
     error: proposal.status === 'pending' ? previous?.error ?? null : null }
   if (next.kind === 'command' && previous?.kind === 'command' && previous.started === true) next.started = true
   if (next.kind === 'mcp' && previous?.kind === 'mcp' && previous.started) next.started = true
+  if (next.kind === 'memory' && previous?.kind === 'memory' && previous.started) next.started = true
   return previous ? items.map((item) => item.id === proposal.id ? next : item) : [...items, next]
 }
 
 function sameOperation(before: Approval, after: Approval): boolean {
+  if (before.kind === 'memory' || after.kind === 'memory') return before.kind === 'memory' && after.kind === 'memory' && before.fact === after.fact && canonical(before.tags) === canonical(after.tags)
   if (before.kind === 'mcp') return after.kind === 'mcp' &&
     before.server_id === after.server_id && before.server_name === after.server_name &&
     before.tool_name === after.tool_name && before.fingerprint === after.fingerprint &&
@@ -81,7 +89,11 @@ export function closeApprovals(items: FileApprovalView[], message: string): File
         ? '本轮已关闭，不能再批准命令；未收到执行完成事件。已产生的副作用不会自动撤销。' : message } : item)
 }
 
-export function describeApproval(status: FileApprovalStatus, kind: 'file' | 'command' | 'mcp' = 'file', started = false): { title: string; tone: 'pending' | 'ok' | 'warn' | 'error' } {
+export function describeApproval(status: FileApprovalStatus, kind: 'file' | 'command' | 'mcp' | 'memory' = 'file', started = false): { title: string; tone: 'pending' | 'ok' | 'warn' | 'error' } {
+  if (kind === 'memory') {
+    return { title: status === 'pending' ? '确认保存记忆' : status === 'applied' ? '记忆已保存' : status === 'approved' ? '正在保存记忆' : status === 'rejected' ? '未保存记忆' : '记忆未确认保存',
+      tone: status === 'applied' ? 'ok' : status === 'pending' || status === 'approved' ? 'pending' : status === 'failed' ? 'error' : 'warn' }
+  }
   if (kind === 'mcp') {
     switch (status) {
       case 'pending': return { title: '等待批准外部工具', tone: 'pending' }
