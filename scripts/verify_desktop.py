@@ -121,6 +121,9 @@ def main():
     parser.add_argument(
         "--zip", type=Path, default=ROOT / "data/releases/Legacy-Windows-x64.zip"
     )
+    parser.add_argument(
+        "--picker", action="store_true", help="实际操作受控系统目录对话框"
+    )
     args = parser.parse_args()
     work = ROOT / "data" / "desktop-verification" / ("中文路径 空格 " + uuid4().hex[:8])
     work.mkdir(parents=True)
@@ -238,6 +241,21 @@ def main():
             == state["instance"],
             "重复启动没有替换实例",
         )
+        if args.picker:
+            from verify_frozen_picker import verify as verify_picker
+
+            for label, options in (
+                ("专用worker", {}),
+                ("工作区选择接口", {"api_url": url, "parent_pid": process.pid}),
+            ):
+                report = verify_picker(exe, work / label, **options)
+                for item in report["checks"]:
+                    check(item["passed"], label + "：" + item["check"])
+                check(
+                    client.get(url + "_desktop/instance").json()["instance"]
+                    == state["instance"],
+                    label + "没有替换主程序实例",
+                )
         response = client.post(
             url + "api/setup",
             json={
@@ -597,6 +615,10 @@ def main():
             "environment": "Windows x64; PATH contains Windows tools only; isolated data directory",
             "tray_exit_method": "shared tray callback through authenticated local control",
             "new_machine_verified": False,
+            "native_picker_verified": any(
+                item["check"] == "工作区选择接口没有替换主程序实例" and item["passed"]
+                for item in results
+            ),
         }
         report_path = ROOT / "data" / "desktop-verification.json"
         report_path.write_text(

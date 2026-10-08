@@ -65,6 +65,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.core.config import Settings, get_settings
+from app.desktop.entry import PICKER_ARGUMENT
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,13 @@ class ComDialogRunner(ChooserRunner):
         # 解释器可注入：唯一能造出"启动失败"的办法就是给它一个不存在的程序，
         # 而那正是最需要被覆盖的一条分支（真出事时它就是唯一的线索）。
         self._python = python or sys.executable
+        self._frozen = python is None and getattr(sys, "frozen", False)
+
+    def _command(self, out_file: Path) -> list[str]:
+        if self._frozen:
+            # sys.executable 在发行包中是 Legacy.exe，不能再用它执行 .py 路径。
+            return [self._python, PICKER_ARGUMENT, str(out_file), self._title]
+        return [self._python, str(self._worker_path), str(out_file), self._title]
 
     def run(self) -> PickOutcome:
         out_dir = Path(tempfile.mkdtemp(prefix="legacy-picker-"))
@@ -231,7 +239,7 @@ class ComDialogRunner(ChooserRunner):
         try:
             try:
                 proc = subprocess.Popen(
-                    [self._python, str(self._worker_path), str(out_file)],
+                    self._command(out_file),
                     # 不用管道：子进程的输出我们一个字都不需要，
                     # 而管道在受限环境里可能根本建不起来。DEVNULL 两边都省事。
                     stdout=subprocess.DEVNULL,
@@ -253,9 +261,13 @@ class ComDialogRunner(ChooserRunner):
             code = proc.wait()
 
             if not out_file.exists():
+                hint = (
+                    "请从托盘退出后重新启动 Legacy；仍失败时可在页面手动填写目录。"
+                    if self._frozen
+                    else f'可手动复现：python "{self._worker_path}" "<结果文件.json>"'
+                )
                 return PickOutcome(
-                    error=f"目录选择进程异常退出（退出码 {code}），没有返回结果。"
-                    f"可手动复现：python {self._worker_path}"
+                    error=f"目录选择进程异常退出（退出码 {code}），没有返回结果。" + hint
                 )
 
             try:
@@ -263,12 +275,27 @@ class ComDialogRunner(ChooserRunner):
             except (OSError, ValueError) as exc:
                 return PickOutcome(error=f"无法解析目录选择结果：{exc}")
 
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get("error", ""), str)
+                or not isinstance(payload.get("cancelled"), bool)
+                or (payload.get("path") is not None and not isinstance(payload["path"], str))
+            ):
+                return PickOutcome(error="无法解析目录选择结果：格式无效。请重试或手动填写目录。")
             error = str(payload.get("error") or "")
             if error:
                 return PickOutcome(error=error)
+            if code != 0:
+                return PickOutcome(
+                    error=f"目录选择进程异常退出（退出码 {code}）。请重试或手动填写目录。"
+                )
             path = payload.get("path")
-            if not path:
+            if payload["cancelled"] and not path:
                 return PickOutcome(cancelled=True)
+            if not path or payload["cancelled"]:
+                return PickOutcome(
+                    error="无法解析目录选择结果：缺少选中目录。请重试或手动填写目录。"
+                )
             return PickOutcome(path=str(path))
         finally:
             shutil.rmtree(out_dir, ignore_errors=True)

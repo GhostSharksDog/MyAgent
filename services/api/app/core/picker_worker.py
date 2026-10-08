@@ -315,13 +315,14 @@ def _write_result(out_path: Path, payload: dict[str, Any]) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("用法：picker_worker.py <结果文件>", file=sys.stderr)
+    if len(argv) not in (2, 3):
+        if sys.stderr is not None:
+            print("用法：picker_worker.py <结果文件> [对话框标题]", file=sys.stderr)
         return 2
 
     out_path = Path(argv[1])
     try:
-        path = pick_folder()
+        path = pick_folder(argv[2] if len(argv) == 3 else "选择工作区文件夹")
     except Exception as exc:
         # 异常也要**写文件**，不能只靠退出码：父进程需要知道失败原因，
         # 好把它翻译成给用户看的提示。沉默的退出码等于让用户猜。
