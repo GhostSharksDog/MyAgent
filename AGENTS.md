@@ -19,13 +19,15 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-07 **1467 后端通过 + 1 live 跳过、211 前端通过**；模拟可选模块缺失为 **1459 通过 + 9 跳过**；CI 补强及终端初版 411 项 Edge 证据见 `docs/13-local-terminal.md`（本轮未重跑浏览器）；排序/答案证据见 `docs/12-rag-answer-quality.md`；文件审批见 `docs/11-file-approvals.md`，检索复测见 `docs/10-rag-retrieval.md`，运行记录见 `docs/09-run-history.md`，通用基准见 `docs/08-general-rag-benchmark.md`，任务评测见 `docs/07-agent-evaluation.md`，界面验收见 `docs/06-ui-design.md`
+- 测试：2026-10-08 **1524 后端通过 + 1 live 跳过、216 前端通过、446 项 Edge 通过**；本轮 MCP、干净安装与终端探针证据见 `docs/14-mcp.md` 和 `docs/evidence/mcp-v1/verification.json`。此前 CI 补强模拟可选模块缺失为1459通过/9跳过；旧终端、RAG、界面证据仍分别见docs/13、12、11、10、09、08、07、06。
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；打包修复后远端暴露16项测试失败。可选依赖误判与临时配置被环境覆盖已修并本地验证；终端零输出超时尚未本机复现，CI 新增三阶段探针，推送后确认远端结果
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - 本机终端 `run_terminal` 默认关闭，需显式工作区和独立权限，每条命令强制确认；共用 broker、deadline 和副作用锁，HTTP/CLI 无通道拒绝。cwd 不是沙箱，命令拥有服务账户权限，文件开关不限制它；Windows 挂起后绑定 Job，普通子孙在退出/超时/取消时清理。使用与实测边界见 `docs/13-local-terminal.md`。
-- Plan/Supervisor 本轮不使用会话历史；HTTP/SSE 只持久化 `finished`。缺 Usage 时 `usage_complete=false`
+- MCP 默认关闭、服务清单为空；官方 SDK 2.3.0 的 stdio/Streamable HTTP Tools 在 API 生命周期接入（三编排共用），CLI 尚未自动加载 MCP。默认逐次审批/串行，具体只读信任绑定配置与工具定义；本地程序需用户预装与明确目录，外部访问不受内置文件权限限制。设置专用接口即时应用，不回传明文凭据。
+- Session.meta.execution_facts 保留最近100条实际执行事实，不保存命令/参数/正文/原始输出；失败与取消仍保存事实，只有 finished 答案进入历史。正常完成保存后再发 done；session_saved 与 record_saved 独立。同进程同会话等待上一轮清理/保存，Redis原子合并不等于分布式执行锁。
+- Plan/Supervisor 本轮不使用会话历史。缺 Usage 时 `usage_complete=false`
 - Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近
 - `scripts/eval_agent.py` 默认离线：30 个通用公开任务 × 三模式，合成 LLM 驱动真实内核和只读工具。90 轮通过是框架验收，不是模型成功率；可离线重新评分已有 RunBundle
 - RAG NDCG 已按全语料相关块校正，报告标记 `ndcg-corpus-v2`；历史 top-k 命中数分母的数字不能与新版本直接比较
@@ -127,6 +129,7 @@ powershell -File scripts\dev.ps1 tools             # 看模型实际拿到的工
 | `python scripts\eval_agent.py --offline` | 无 | 30 个通用任务的合成模型／真实内核链路验收；`--records` 只评分已有记录。没有联网执行入口，不读取用户配置；报告在 `data/agent-eval` |
 | `python scripts\eval_rag_ranking.py --dataset holdout` | 无 | 冻结策略在公开合成留出上比较五方案×k4/k5；已看过本版结果，不能再调参后当首次留出实验 |
 | `python scripts\eval_rag_answers.py --self-test --dataset holdout` | 无 | 受控反例检验答案核验链路，不能当模型正确率；真实已有答案用export/score，接口见docs/12 |
+| `python scripts\verify_mcp.py --exa` | 公开网络，用户明确复现时才执行 | 最多两次公开 Exa 业务调用，无模型/配置读取；本轮已验证2次，不自动重复 |
 | `python scripts\probe_terminal.py` | 本机 shell；无需启动 API | 固定公开输出命令，分别测原始 shell、包装器、Job/进程组保护；任何阶段失败则非零退出。仅报告基础环境键名，不报告值，默认产物 `data/terminal-probe.json` |
 
 ---
@@ -144,6 +147,7 @@ services/api/app/
     memory.py        短期记忆（窗口+摘要）与长期记忆；Turn 模型
     prompts.py       提示词；**按已注册工具裁剪规则行**
     factory.py       Agent 全栈装配（build_agent_stack / mount_agent_stack）
+  mcp_client/        catalog / manager / transport / tool / errors（本地配置、SDK连接、Schema/审批/结果）
   llm/
     client.py        手写 OpenAI 兼容客户端（流式、tool_calls 分片重组、重试）
     tokens.py        token 估算（tiktoken 可选 + 启发式）与精度计数器

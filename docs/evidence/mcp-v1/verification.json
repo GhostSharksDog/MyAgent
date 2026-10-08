@@ -1,0 +1,152 @@
+{
+  "date": "2026-10-08",
+  "platform": "Windows 11",
+  "python": "3.12.3",
+  "node": "24.20.0",
+  "pnpm": "10.12.1",
+  "sdk": "mcp==2.3.0",
+  "sse_starlette": "3.5.0",
+  "baseline": {
+    "backend_passed": 1467,
+    "live_skipped": 1,
+    "frontend_passed": 211
+  },
+  "backend": {
+    "command": "python -m pytest services/api/tests -o addopts=\"\" -q",
+    "passed": 1524,
+    "skipped": 1,
+    "duration_seconds": 157.44,
+    "warnings": 1,
+    "warning": "Starlette TestClient anyio.abc.BlockingPortal deprecated alias"
+  },
+  "frontend": {
+    "commands": [
+      "pnpm test",
+      "pnpm run typecheck",
+      "pnpm build"
+    ],
+    "passed": 216,
+    "failed": 0,
+    "typecheck": "passed",
+    "build": "passed"
+  },
+  "source_gates": {
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "formatted_files": 186,
+    "dependency_lock_check": "passed",
+    "lock_packages": 51
+  },
+  "clean_install": {
+    "command": "python -m pip install -r services/api/requirements.lock -e ./services/api[dev] -c services/api/requirements.lock",
+    "environment": "new isolated Windows Python 3.12 venv",
+    "result": "passed",
+    "pip_check": "passed"
+  },
+  "edge": {
+    "command": "python scripts/smoke_ui.py --visual --target http://127.0.0.1:8097/ --cdp-port 9237 --screenshots-dir data/mcp-ui-final",
+    "passed": 446,
+    "failed": 0,
+    "viewports": [
+      [
+        1440,
+        900
+      ],
+      [
+        1024,
+        768
+      ],
+      [
+        390,
+        844
+      ]
+    ],
+    "api_sse": "synthetic public data injected before app mount",
+    "uncaught_errors": 0,
+    "screenshots_reviewed": [
+      "mcp-settings-desktop.png",
+      "mcp-settings-mobile.png",
+      "mcp-approval-mobile.png"
+    ]
+  },
+  "exa": {
+    "source": "public Exa MCP; no LLM",
+    "tool_calls": 2,
+    "results": [
+      {
+        "tool": "web_search_exa",
+        "verified": true,
+        "duration_ms": 2141,
+        "characters": 1398
+      },
+      {
+        "tool": "web_fetch_exa",
+        "verified": true,
+        "duration_ms": 1781,
+        "characters": 543
+      }
+    ],
+    "connect_ms": 5454,
+    "tools": [
+      "web_search_exa",
+      "web_fetch_exa"
+    ],
+    "protocol": "2025-11-25"
+  },
+  "terminal_probe": {
+    "platform": "Windows-11-10.0.26100-SP0",
+    "python": "3.12.3",
+    "shell": "powershell",
+    "stages": {
+      "plain_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 187,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      },
+      "wrapped_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 500,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      },
+      "protected_shell": {
+        "ok": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 281,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stderr": ""
+      }
+    },
+    "ok": true
+  },
+  "real_model_requests": 0,
+  "user_env_modified": false,
+  "coverage": [
+    "real SDK stdio and Streamable HTTP",
+    "three real orchestration kernels with synthetic models",
+    "approval rejection and preapproval absence of side effects",
+    "definition/config-bound readonly trust",
+    "original deadline during approval and call",
+    "unknown outcomes prevent same-round replay",
+    "HTTP 429 sanitization and rate-limit hints",
+    "namespaces, paginated discovery, JSON Schema and unsupported content",
+    "Windows parent and child process teardown checked by live PID",
+    "same-session immediate followup waits for fact saving",
+    "memory/SQLite/Redis atomic fact merge and deleted-session protection"
+  ],
+  "unverified": [
+    "remote GitHub CI after push",
+    "Linux image build and POSIX runtime",
+    "real-model tool selection and answer quality",
+    "OAuth, Resources, Prompts, MCP server, CLI automatic loading (outside first release)"
+  ]
+}
