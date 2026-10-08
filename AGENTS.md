@@ -26,6 +26,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
 - 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - 本机终端 `run_terminal` 默认关闭，需显式工作区和独立权限，每条命令强制确认；共用 broker、deadline 和副作用锁，HTTP/CLI 无通道拒绝。cwd 不是沙箱，命令拥有服务账户权限，文件开关不限制它；Windows 挂起后绑定 Job，普通子孙在退出/超时/取消时清理。使用与实测边界见 `docs/13-local-terminal.md`。
 - MCP 默认关闭、服务清单为空；官方 SDK 2.3.0 的 stdio/Streamable HTTP Tools 在 API 生命周期接入（三编排共用），CLI 尚未自动加载 MCP。默认逐次审批/串行，具体只读信任绑定配置与工具定义；本地程序需用户预装与明确目录，外部访问不受内置文件权限限制。设置专用接口即时应用，不回传明文凭据。
+- 本机三服务接入：Tavily HTTP 配置已准备但待用户在界面填密钥；Desktop Commander 0.2.52（仅5项终端工具）与官方 Filesystem 2026.8.31（11项文件工具）已安装在忽略的 data/mcp-services 并受控实测。允许目录由用户明确指定，见本地 data/mcp.json；无免审批授权，Desktop Commander 状态隔离在 data/desktop-commander-home 且遥测关闭。说明/脱敏证据见 docs/14-mcp.md 与 docs/evidence/mcp-v1/three-services.json；不要自动重复安装或读取工作区内容。
 - Session.meta.execution_facts 保留最近100条实际执行事实，不保存命令/参数/正文/原始输出；失败与取消仍保存事实，只有 finished 答案进入历史。正常完成保存后再发 done；session_saved 与 record_saved 独立。同进程同会话等待上一轮清理/保存，Redis原子合并不等于分布式执行锁。
 - Plan/Supervisor 本轮不使用会话历史。缺 Usage 时 `usage_complete=false`
 - Web 已采用暖白／石墨／鼠尾草绿简约界面；首屏与聊天共用一个输入组件，计划／专家／工具统一在「执行过程」展开，终态说明始终显示在答案附近

@@ -1,0 +1,161 @@
+{
+  "date": "2026-10-08",
+  "packages": {
+    "@wonderwhy-er/desktop-commander": "0.2.52",
+    "@modelcontextprotocol/server-filesystem": "2026.8.31"
+  },
+  "installation": {
+    "prefix": "data/mcp-services",
+    "ignore_scripts": true,
+    "global_install": false,
+    "lock": "data/mcp-services/package-lock.json (ignored)"
+  },
+  "configuration": {
+    "workspace": "<user-declared-workspace>",
+    "live_api_applied": false,
+    "mcp_global_enabled": true,
+    "local_services": [
+      {
+        "id": "desktop_commander",
+        "connected": true,
+        "selected_tools": 5,
+        "tool_definitions": 26,
+        "workspace_confirmed": true,
+        "protocol": "2025-11-25"
+      },
+      {
+        "id": "filesystem",
+        "connected": true,
+        "selected_tools": 11,
+        "tool_definitions": 14,
+        "workspace_confirmed": true,
+        "protocol": "2025-11-25"
+      }
+    ],
+    "tavily": {
+      "configured": true,
+      "enabled": false,
+      "key_needed": true,
+      "business_calls": 0
+    },
+    "default_approval": true,
+    "model_requests": 0
+  },
+  "controlled_probe": {
+    "model_requests": 0,
+    "servers": [
+      {
+        "id": "filesystem",
+        "connect_ms": 343,
+        "protocol": "2025-11-25",
+        "tools": {
+          "read_file": "valid",
+          "read_text_file": "valid",
+          "read_media_file": "valid",
+          "read_multiple_files": "valid",
+          "write_file": "valid",
+          "edit_file": "valid",
+          "create_directory": "valid",
+          "list_directory": "valid",
+          "list_directory_with_sizes": "valid",
+          "directory_tree": "valid",
+          "move_file": "valid",
+          "search_files": "valid",
+          "get_file_info": "valid",
+          "list_allowed_directories": "valid"
+        },
+        "calls": [
+          {
+            "tool": "write_file",
+            "ok": true,
+            "duration_ms": 16
+          },
+          {
+            "tool": "read_text_file",
+            "ok": true,
+            "duration_ms": 0
+          },
+          {
+            "tool": "list_allowed_directories",
+            "ok": true,
+            "duration_ms": 0
+          }
+        ]
+      },
+      {
+        "id": "desktop_commander",
+        "connect_ms": 1328,
+        "protocol": "2025-11-25",
+        "tools": {
+          "get_config": "valid",
+          "set_config_value": "valid",
+          "read_file": "valid",
+          "read_multiple_files": "valid",
+          "write_file": "valid",
+          "write_pdf": "valid",
+          "create_directory": "valid",
+          "list_directory": "valid",
+          "move_file": "valid",
+          "start_search": "valid",
+          "get_more_search_results": "valid",
+          "stop_search": "valid",
+          "list_searches": "valid",
+          "get_file_info": "valid",
+          "edit_block": "valid",
+          "start_process": "valid",
+          "read_process_output": "valid",
+          "interact_with_process": "valid",
+          "force_terminate": "valid",
+          "list_sessions": "valid",
+          "list_processes": "valid",
+          "kill_process": "valid",
+          "get_usage_stats": "valid",
+          "get_recent_tool_calls": "valid",
+          "give_feedback_to_desktop_commander": "valid",
+          "get_prompts": "valid"
+        },
+        "calls": [
+          {
+            "tool": "get_config",
+            "ok": true,
+            "duration_ms": 47
+          },
+          {
+            "tool": "read_process_output",
+            "ok": true,
+            "duration_ms": 2390
+          },
+          {
+            "tool": "start_process",
+            "ok": true,
+            "duration_ms": 3421
+          }
+        ]
+      }
+    ]
+  },
+  "unchanged_source_baseline": {
+    "backend_passed": 1524,
+    "live_skipped": 1,
+    "backend_seconds": 151.83,
+    "frontend_passed": 216
+  },
+  "limits": [
+    "Tavily key, authenticated discovery and search pending user input in UI",
+    "No real model calls",
+    "No PDF/media/search or remote Desktop Commander validation",
+    "Directory restrictions do not sandbox terminal commands"
+  ],
+  "final_gates": {
+    "backend_passed": 1524,
+    "live_skipped": 1,
+    "backend_seconds": 141.75,
+    "frontend_passed": 216,
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "lock_check": "passed (51 packages)",
+    "typecheck": "passed",
+    "build": "passed",
+    "backend_environment": "MCP disabled and empty catalog path supplied only to test subprocess; .env unchanged"
+  }
+}

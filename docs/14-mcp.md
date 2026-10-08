@@ -30,6 +30,49 @@ Exa 示例地址为 `https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa`�
 模板使用直接 `node` 入口，避免测试连接时由 `npx` 自动安装依赖。
 文件服务配置方式来源：[官方 filesystem 服务说明](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)。
 
+### Tavily、Desktop Commander 和官方 Filesystem
+
+2026-10-08 已在本机按用户明确指定的目录完成三项配置，存放在被忽略的 `data/mcp.json`。
+两个本地服务已安装并连接验证；Tavily 使用远程 HTTP，等待用户在界面填写密钥，尚未完成鉴权/搜索验证。
+这次没有修改 `.env`，未调用模型，也没有读取用户工作区里的文件。
+
+| 服务 | 配置方式 | 本次向模型提供的工具 |
+|---|---|---|
+| Tavily | `https://mcp.tavily.com/mcp/`，请求头 `Authorization: Bearer <API Key>` | `tavily-search`、`tavily-extract`；未填密钥时保持关闭 |
+| Desktop Commander | 项目内安装 `@wonderwhy-er/desktop-commander@0.2.52`，stdio | `start_process`、`read_process_output`、`interact_with_process`、`force_terminate`、`list_sessions` |
+| 官方 Filesystem | 项目内安装 `@modelcontextprotocol/server-filesystem@2026.8.31`，stdio | 文本读取/多文件读取、写入/编辑、建目录、列表/目录树、移动、搜索、文件信息和允许目录，共11项 |
+
+重启 API 后进入「设置 → MCP → Tavily 联网 → 编辑」，在「鉴权请求头 JSON」填写：
+
+```json
+{"Authorization":"Bearer 在这里填入你的Tavily密钥"}
+```
+
+保存，再点击「测试连接／刷新工具」，确认选中的工具仍存在，开启该服务即可。
+Tavily 的静态请求头鉴权来自 [官方 README](https://github.com/tavily-ai/tavily-mcp#remote-mcp-server)。
+不把密钥放 URL，不提交本地清单；这一步无需安装本地 Tavily 服务。
+
+本地安装可以复现为以下命令（只有用户明确决定安装时执行）：
+
+```powershell
+npm install --prefix data/mcp-services --cache data/npm-cache --ignore-scripts --no-audit --no-fund --save-exact @wonderwhy-er/desktop-commander@0.2.52 @modelcontextprotocol/server-filesystem@2026.8.31
+```
+
+程序均由本机 `node.exe` 直接启动，各自入口在安装包的 `dist/index.js`，不通过 `npx` 在每次连接时下载。
+启动参数、cwd 和 Filesystem 的允许目录必须填写用户明确选择的绝对路径；通用未启用模板见 [三服务模板](examples/mcp-three-services.example.json)。
+Desktop Commander 使用独立 `USERPROFILE` 指向项目的 `data/desktop-commander-home`，配置与调用日志不会混入其他客户端的默认状态目录。
+其中 `.claude-server-commander/config.json` 保留上游默认命令阻止列表，明确设置 `allowedDirectories`，并关闭遥测和 onboarding。
+只选择终端相关工具，未向模型提供该服务的配置修改、反馈或重复文件工具。
+它的终端目录不是沙箱，外部权限与内置终端/文件开关独立；所有已选工具保留逐次审批，无免确认授权。
+状态位置与目录限制来自 [Desktop Commander 实现](https://github.com/wonderwhy-er/DesktopCommanderMCP/blob/main/src/config.ts) 和 [使用说明](https://github.com/wonderwhy-er/DesktopCommanderMCP#usage)。
+
+验收使用临时公开样本：Filesystem 写入/读取/查询允许目录成功；Desktop Commander 配置范围核验、固定 `Write-Output` 命令和读取异步输出成功。
+`start_process` 返回“仍在运行”时，需要继续调用 `read_process_output`，不能把首次没有输出误判为命令失败。
+实测发现 Filesystem 14 项、Desktop Commander 26 项工具；只选择上述16项本地工具，Tavily 预选2项，合计18项。
+Schema 均通过现有校验；本机实际连接再次核验了用户指定目录，未列举其文件。脱敏证据见 [三服务配置验证](evidence/mcp-v1/three-services.json)。
+首次 Desktop Commander 冷启动在并行门禁时耗时26.8秒，后续受控连接1.3秒；遇到15秒默认连接超时可重新点击测试连接，本轮没有自动重试业务调用或修改默认限时。
+PDF、媒体读取、Desktop Commander 搜索及其远程登录不在本次选择/验收范围；安装未执行第三方安装脚本。
+
 **外部服务的访问范围由该服务配置决定。** 内置文件工作区、写权限和敏感文件开关不约束 MCP 服务。
 本地程序拥有服务账户权限，cwd 不是沙箱；仅配置自己信任的服务。
 
