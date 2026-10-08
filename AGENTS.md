@@ -19,7 +19,7 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-08 **1543 后端通过 + 1 live 跳过、219 前端通过、497 项 Edge 通过**；本轮桌面包、隔离目录/无开发运行时PATH/随包MCP/重启存储证据见 `docs/15-desktop-release.md` 和 `docs/evidence/desktop-v1/verification.json`。先前MCP基线1524/216/446及相关证据仍在docs/14，不冒充本轮结果。
+- 测试：2026-10-08 **1553 后端通过 + 1 live 跳过、219 前端通过、501 项 Edge 通过、51 项最终 ZIP 检查通过**；桌面包与MCP可用性修复证据见 `docs/15-desktop-release.md`、`docs/16-mcp-availability.md` 和 `docs/evidence/mcp-availability-v1/verification.json`。初版1543/219/497/47的报告仍在 `docs/evidence/desktop-v1`；更早MCP基线1524/216/446仍在docs/14，不冒充当前结果。
 - Windows桌面ZIP已构建，默认 `%LOCALAPPDATA%/Legacy`，配置/数据库与只读资源分离；SQLite会话不过期、长期记忆200条、有界运行摘要，任务为memory，不探测Redis。源码 `.env` 和旧配置保持原语义；禁止把当前用户数据打进包。产物/校验在忽略的data/releases，构建/受控验证脚本见docs/15；Windows10、新机器/Sandbox及实际托盘弹出菜单尚未验证，退出的共用回调已实测。
 - 长期记忆仅设置明确提交或模型 remember_fact 逐次批准后保存；切换模型保留同一资源。Session.meta.conversation_summary保存摘要、已处理前缀计数和摘要校验值；失败/取消也保存位置、不重复压缩，完整会话仍保留。Plan/Supervisor仅使用已确认偏好，不读过去对话。
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类

@@ -16,3 +16,6 @@
 
 全套497项Edge验收另覆盖1024×768、深色主题、工具确认、三模式、停止、键盘与预先安装的错误采集。
 更早的聊天、文件和深色截图仍见 [界面重设计截图](../ui-redesign/)。
+
+MCP可用性修复另用 `--screenshots-dir data/ui-mcp-availability` 重跑501项Edge验收。
+[缺失工具提示](mcp-missing-tools-desktop.png) 为1440×900的公开合成反例，已逐张复核：显示已连接但0项工具可用、缺失名称及配置修复入口。

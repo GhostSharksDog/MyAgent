@@ -39,13 +39,14 @@ Exa 示例地址为 `https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa`�
 
 | 服务 | 配置方式 | 本次向模型提供的工具 |
 |---|---|---|
-| Tavily | `https://mcp.tavily.com/mcp/`，请求头 `Authorization: Bearer <API Key>` | `tavily-search`、`tavily-extract`；未填密钥时保持关闭 |
+| Tavily | `https://mcp.tavily.com/mcp/`，请求头 `Authorization: Bearer <API Key>` | 远程发现的 `tavily_search`、`tavily_extract`；未填密钥时保持关闭 |
 | Desktop Commander | 项目内安装 `@wonderwhy-er/desktop-commander@0.2.52`，stdio | `start_process`、`read_process_output`、`interact_with_process`、`force_terminate`、`list_sessions` |
 | 官方 Filesystem | 项目内安装 `@modelcontextprotocol/server-filesystem@2026.8.31`，stdio | 文本读取/多文件读取、写入/编辑、建目录、列表/目录树、移动、搜索、文件信息和允许目录，共11项 |
 
 重启后进入「设置 → MCP → Tavily 服务 → 配置」，直接在 **API Key** 输入框填写密钥，点击「保存并连接」。
 旧配置仍兼容，无需编辑 JSON；查询不会返回原始密钥。
 Tavily 的静态请求头鉴权来自 [官方 README](https://github.com/tavily-ai/tavily-mcp#remote-mcp-server)。
+远程工具名以连接时的实际发现为准；旧预设连字符与远程下划线不匹配的修复、工具可用数量和 Agent 状态查询见 [可用性修复记录](16-mcp-availability.md)。
 不把密钥放 URL，不提交本地清单；这一步无需安装本地 Tavily 服务。
 
 本地安装可以复现为以下命令（只有用户明确决定安装时执行）：
