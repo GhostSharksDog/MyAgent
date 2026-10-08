@@ -8,23 +8,24 @@ Legacy 使用官方 Python SDK `mcp==2.3.0`，接入本地 stdio 和远程 Strea
 
 更新依赖并构建界面后，重启 API。进入「设置 → MCP」：
 
-1. 点击「添加 Exa 搜索示例」，保存。此操作只保存未启用的配置。
-2. 点击「测试连接／刷新工具」，确认连接结果并查看工具。测试会连接远程服务；对 stdio 服务会启动已配置的程序，但不调用业务工具。
-3. 选择需要的工具，开启「向 Agent 提供此服务的已选工具」，再开启全局 MCP。
+1. 点击「添加 Tavily 搜索 / Exa 搜索 / 本地文件 / Desktop Commander / 自定义服务」，只填写草稿，不自动启动。
+2. Tavily 直接填写 **API Key**；本地预设填写允许目录。自定义 HTTP 填地址、鉴权方式与密钥，stdio 填程序与目录，参数/环境变量采用逐项编辑器。
+3. 点击「保存并连接」，自动协调单服务与全局开关。成功显示「已连接」；失败保留草稿并给出修复提示。工具选择、测试连接、代理与启动详情放在「高级设置」。
 4. 返回聊天，使用自动推理、先规划或多专家模式。默认每次调用都展示服务、工具与完整参数，由你批准或拒绝。
-5. 只有你明确勾选「我信任此只读工具」后，该具体工具才可免确认并发调用。取消勾选立即恢复逐次确认。
+5. 只有在高级设置中明确授权具体只读工具后，该工具才可免确认并发调用。取消勾选立即恢复逐次确认。
 
 Exa 示例地址为 `https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa`，仅选择这两个工具。
 免密钥入口有服务方频率限制。遇到限流应等待后另起任务，或按服务方说明配置自己的鉴权；不要反复发送结果未确认的操作。
 示例和频率限制来源：[Exa 官方文档](https://exa.ai/docs/get-started/exa-mcp)。
 
-通用远程服务填写完整 HTTP(S) URL、可选鉴权请求头 JSON 和显式代理。
-例如请求头 `{"Authorization":"Bearer 你的密钥"}`；密钥不能放在 URL。
+通用远程服务填写完整 HTTP(S) URL、鉴权方式和密钥；Bearer 模式由程序转换为 Authorization 请求头。
+查询仅返回掩码与配置状态；编辑密钥留空保留旧值，勾选明确清除才删除。密钥不能放在 URL。
 连接不自动读取系统代理，环回服务也不会误走 Windows 注册表代理。没有代理时留空。
 
-本地服务选择 stdio，分别填写启动程序、参数 JSON 数组、绝对工作目录和环境变量 JSON。
+自定义本地服务选择 stdio，填写启动程序、绝对工作目录，高级设置中逐项填写参数与环境变量。
 程序使用独立双向管道，stdout 只能输出 MCP 协议，日志应写 stderr。
-启动程序应已由用户安装。Legacy 不自动下载服务、不猜允许目录、不扫描私人文件。
+源码入口的程序应已由用户安装；Windows 桌面包包含锁定版本 Filesystem 与 Desktop Commander。
+首次默认均不启动，Legacy 不猜允许目录、不扫描私人文件；发行隔离与补丁见 [桌面记录](15-desktop-release.md)。
 
 本地文件示例见 [未启用模板](examples/mcp-servers.example.json)。先明确填写允许目录和已安装服务入口，再保存/测试。
 模板使用直接 `node` 入口，避免测试连接时由 `npx` 自动安装依赖。
@@ -42,13 +43,8 @@ Exa 示例地址为 `https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa`�
 | Desktop Commander | 项目内安装 `@wonderwhy-er/desktop-commander@0.2.52`，stdio | `start_process`、`read_process_output`、`interact_with_process`、`force_terminate`、`list_sessions` |
 | 官方 Filesystem | 项目内安装 `@modelcontextprotocol/server-filesystem@2026.8.31`，stdio | 文本读取/多文件读取、写入/编辑、建目录、列表/目录树、移动、搜索、文件信息和允许目录，共11项 |
 
-重启 API 后进入「设置 → MCP → Tavily 联网 → 编辑」，在「鉴权请求头 JSON」填写：
-
-```json
-{"Authorization":"Bearer 在这里填入你的Tavily密钥"}
-```
-
-保存，再点击「测试连接／刷新工具」，确认选中的工具仍存在，开启该服务即可。
+重启后进入「设置 → MCP → Tavily 服务 → 配置」，直接在 **API Key** 输入框填写密钥，点击「保存并连接」。
+旧配置仍兼容，无需编辑 JSON；查询不会返回原始密钥。
 Tavily 的静态请求头鉴权来自 [官方 README](https://github.com/tavily-ai/tavily-mcp#remote-mcp-server)。
 不把密钥放 URL，不提交本地清单；这一步无需安装本地 Tavily 服务。
 

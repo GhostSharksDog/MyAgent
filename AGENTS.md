@@ -19,13 +19,15 @@ Supervisor 三种形态共用同一套工具与护栏层，带 RAG、记忆、�
   （`jobhunt`），刻意保留但没有加载 —— 理由在 `README.md` 的当前实现说明、
   `app/agent/prompts.py` 的 `_GENERAL_CAPABILITIES`，以及 `app/core/config.py`
   里 `profile` 字段的注释
-- 测试：2026-10-08 **1524 后端通过 + 1 live 跳过、216 前端通过、446 项 Edge 通过**；本轮 MCP、干净安装与终端探针证据见 `docs/14-mcp.md` 和 `docs/evidence/mcp-v1/verification.json`。此前 CI 补强模拟可选模块缺失为1459通过/9跳过；旧终端、RAG、界面证据仍分别见docs/13、12、11、10、09、08、07、06。
+- 测试：2026-10-08 **1543 后端通过 + 1 live 跳过、219 前端通过、497 项 Edge 通过**；本轮桌面包、隔离目录/无开发运行时PATH/随包MCP/重启存储证据见 `docs/15-desktop-release.md` 和 `docs/evidence/desktop-v1/verification.json`。先前MCP基线1524/216/446及相关证据仍在docs/14，不冒充本轮结果。
+- Windows桌面ZIP已构建，默认 `%LOCALAPPDATA%/Legacy`，配置/数据库与只读资源分离；SQLite会话不过期、长期记忆200条、有界运行摘要，任务为memory，不探测Redis。源码 `.env` 和旧配置保持原语义；禁止把当前用户数据打进包。产物/校验在忽略的data/releases，构建/受控验证脚本见docs/15；Windows10、新机器/Sandbox及实际托盘弹出菜单尚未验证，退出的共用回调已实测。
+- 长期记忆仅设置明确提交或模型 remember_fact 逐次批准后保存；切换模型保留同一资源。Session.meta.conversation_summary保存摘要、已处理前缀计数和摘要校验值；失败/取消也保存位置、不重复压缩，完整会话仍保留。Plan/Supervisor仅使用已确认偏好，不读过去对话。
 - 编号技术债（T01–T23）**已清空**，见 §10「已知未做」的那三类
 - 已有 Windows CI（`.github/workflows/ci.yml`）：Python 3.12、Node 24、pnpm 10；打包修复后远端暴露16项测试失败。可选依赖误判与临时配置被环境覆盖已修并本地验证；终端零输出超时尚未本机复现，CI 新增三阶段探针，推送后确认远端结果
 - 三种编排共享每轮 `RunContext`（`agent/runtime.py`）；规划、路由、子任务、工具和汇总不能重领预算
 - 文件写权限默认关闭，开启后默认完整 diff 批准（`AGENT_FILE_APPROVAL_REQUIRED=true`），等待300秒且计入原 deadline；HTTP/CLI 无审批通道拒绝写入。broker 只在请求内，取消失效；批准后重新核验版本/路径/权限。详见文件审批证据。
 - 本机终端 `run_terminal` 默认关闭，需显式工作区和独立权限，每条命令强制确认；共用 broker、deadline 和副作用锁，HTTP/CLI 无通道拒绝。cwd 不是沙箱，命令拥有服务账户权限，文件开关不限制它；Windows 挂起后绑定 Job，普通子孙在退出/超时/取消时清理。使用与实测边界见 `docs/13-local-terminal.md`。
-- MCP 默认关闭、服务清单为空；官方 SDK 2.3.0 的 stdio/Streamable HTTP Tools 在 API 生命周期接入（三编排共用），CLI 尚未自动加载 MCP。默认逐次审批/串行，具体只读信任绑定配置与工具定义；本地程序需用户预装与明确目录，外部访问不受内置文件权限限制。设置专用接口即时应用，不回传明文凭据。
+- MCP 默认关闭、服务清单为空；官方 SDK 2.3.0 的 stdio/Streamable HTTP Tools 在 API 生命周期接入（三编排共用），CLI 尚未自动加载 MCP。默认逐次审批/串行，具体只读信任绑定配置与工具定义。桌面随包提供两个本地服务，明确目录并开启后才连接；源码需预装。Tavily直接填API Key；列表简短，一次编辑一个服务，高级设置放工具与启动详情，失败保留草稿；保存并连接协调全局开关，不回传明文凭据。
 - 本机三服务接入：Tavily HTTP 配置已准备但待用户在界面填密钥；Desktop Commander 0.2.52（仅5项终端工具）与官方 Filesystem 2026.8.31（11项文件工具）已安装在忽略的 data/mcp-services 并受控实测。允许目录由用户明确指定，见本地 data/mcp.json；无免审批授权，Desktop Commander 状态隔离在 data/desktop-commander-home 且遥测关闭。说明/脱敏证据见 docs/14-mcp.md 与 docs/evidence/mcp-v1/three-services.json；不要自动重复安装或读取工作区内容。
 - Session.meta.execution_facts 保留最近100条实际执行事实，不保存命令/参数/正文/原始输出；失败与取消仍保存事实，只有 finished 答案进入历史。正常完成保存后再发 done；session_saved 与 record_saved 独立。同进程同会话等待上一轮清理/保存，Redis原子合并不等于分布式执行锁。
 - Plan/Supervisor 本轮不使用会话历史。缺 Usage 时 `usage_complete=false`
@@ -181,6 +183,8 @@ apps/web/src/
    `AGENT_RUN_TIMEOUT=0`、`AGENT_FILE_WRITE_ENABLED=false`。
    本机命令也默认关闭（`AGENT_TERMINAL_ENABLED=false`），不能因为文件写权限或 profile 顺带启用。
    *要开一个新能力，先问"没读文档的人会得到什么"。*
+   桌面发行的已批准例外：长期记忆默认开启，但不自动提取聊天，只有明确提交或逐次批准才写；
+   会话/记忆/运行摘要默认SQLite，源代码的旧默认与用户显式配置保留，详见docs/15。
 3. **能力不存在时就不该出现在菜单上**：没配工作区 → 文件工具一个都不注册；
    没开写权限 → `write_file`/`edit_file` 根本不在工具表里；没注册的工具，
    提示词里引用它的规则行会被 `build_system_prompt` 裁掉。
