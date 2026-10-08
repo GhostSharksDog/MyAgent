@@ -410,6 +410,25 @@ class SqlSessionStore(SessionStore):
             )
             return True
 
+    async def merge_summary(self, session_id: str, state: dict) -> bool:
+        await self._ensure_ready()
+        async with self._write_lock, self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    select(SESSIONS.c.meta, SESSIONS.c.updated_at).where(
+                        SESSIONS.c.id == session_id
+                    )
+                )
+            ).first()
+            if row is None or self._expired(row[1]):
+                return False
+            await conn.execute(
+                update(SESSIONS)
+                .where(SESSIONS.c.id == session_id)
+                .values(meta={**(row[0] or {}), "conversation_summary": state.copy()})
+            )
+            return True
+
     async def append_turn(
         self,
         session_id: str,
@@ -528,7 +547,7 @@ class SqlSessionStore(SessionStore):
 
     # ---------- 内部 ----------
     def _cutoff(self) -> float:
-        return time.time() - self.ttl_seconds
+        return time.time() - self.ttl_seconds if self.ttl_seconds else float("-inf")
 
     def _expired(self, updated_at: float) -> bool:
         return updated_at < self._cutoff()

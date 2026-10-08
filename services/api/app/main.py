@@ -28,6 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.agent.factory import build_agent_stack, mount_agent_stack
 from app.api.auth import ApiKeyMiddleware, check_exposure_posture
+from app.api.desktop import router as desktop_router
 from app.api.files import router as files_router
 from app.api.mcp import router as mcp_router
 from app.api.metrics import router as metrics_router
@@ -36,6 +37,7 @@ from app.api.routes import router
 from app.api.runs import router as runs_router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
+from app.api.storage import router as storage_router
 from app.api.tasks import router as tasks_router
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
@@ -294,6 +296,8 @@ app.include_router(settings_router)
 app.include_router(models_router)
 app.include_router(files_router)
 app.include_router(mcp_router)
+app.include_router(storage_router)
+app.include_router(desktop_router)
 
 
 # ============================================================
@@ -432,6 +436,10 @@ def resolve_web_dist(settings: Settings) -> Path:
     configured = settings.web_dist.strip()
     if configured:
         return Path(configured).expanduser()
+    from app.core.config import DESKTOP, RESOURCE_ROOT
+
+    if DESKTOP:
+        return RESOURCE_ROOT / "web"
     return Path(__file__).resolve().parents[3] / "apps" / "web" / "dist"
 
 

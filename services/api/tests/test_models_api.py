@@ -288,8 +288,8 @@ class TestModelsApi:
         built: list[object] = []
         real_build = agent_factory.build_agent_stack
 
-        def spy(settings=None):  # type: ignore[no-untyped-def]
-            stack = real_build(settings)
+        def spy(settings=None, **kwargs):  # type: ignore[no-untyped-def]
+            stack = real_build(settings, **kwargs)
             built.append(stack.llm)
             return stack
 

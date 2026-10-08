@@ -1,26 +1,14 @@
-"""长期记忆工具：让 Agent 主动记住关于用户的事实。
-
-【为什么需要"写入"这个动作，而不是自动记录全部对话】
-自动全记有两个问题：噪声大（寒暄也被记下），且成本高（每轮一次嵌入+存储）。
-更好的模式是**让模型判断什么值得记** —— 它比关键词规则更懂语境：
-用户说"我只考虑北京的机会"值得记，"你好"不值得记。
-
-代价是模型可能漏记或记错。因此工具描述必须把"什么该记"讲得非常具体，
-并且要求 Agent 在记录后向用户确认 —— 让用户可以纠正。
-
-【与 RAG 的分工】
-`search_knowledge` 检索**静态文档**（简历、岗位库）；
-本工具写入的是**交互中产生的事实**（偏好、目标、进展）。
-两者共用向量检索基础设施，但写入方与生命周期完全不同。
-"""
+"""仅申请保存用户明确要求记住的事实；逐次批准后事务写入。"""
 
 from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from app.agent.approvals import ApprovalUnavailable
 from app.agent.memory import LongTermMemory
+from app.agent.runtime import current_run_context
 from app.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -31,15 +19,15 @@ class RememberFactParams(BaseModel):
         description=(
             "要记住的事实，写成**完整、自足的陈述句**。"
             "要包含主语，因为这条记录将来会脱离当前对话被单独召回 —— "
-            "『只考虑北京』这样的片段在几天后读起来毫无意义，"
-            "应写成『用户的求职意向城市是北京』。"
+            "例如『用户希望优先用中文回答』。不能自行提取未获用户确认的偏好。"
         ),
         min_length=1,
         max_length=500,
     )
     tags: list[str] = Field(
         default_factory=list,
-        description="分类标签，用于后续过滤，例如 ['求职意向']、['面试进展']、['简历事实']。",
+        description="分类标签，例如 ['语言偏好']、['长期目标']。",
+        max_length=20,
     )
 
 
@@ -48,29 +36,79 @@ class RememberFactTool(Tool):
 
     name = "remember_fact"
     description = (
-        "把关于用户的重要事实写入长期记忆，使其在**以后的对话中**依然可用。"
-        "适用于：求职意向（目标岗位/城市/薪资）、明确的偏好与限制、"
-        "重要的个人背景（学历、关键经历、技能）、面试与投递的进展。"
-        "**不要记录**：寒暄、一次性的临时问题、可以从简历直接查到而不需要特别记住的细节。"
-        "记录后应在回答中顺带向用户确认，以便用户纠正。"
+        "申请保存用户明确希望记住的事实或长期偏好。系统先展示完整内容，用户批准后才保存。"
+        "不得自动提取或偷偷保存聊天内容；拒绝后不得声称已保存。"
     )
     params_model = RememberFactParams
+    serial = True
 
     def __init__(self, memory: LongTermMemory) -> None:
         self._memory = memory
 
     def run(self, params: BaseModel) -> ToolResult:
-        p = RememberFactParams.model_validate(params.model_dump())
+        return ToolResult.failure("记忆尚未获批准；请使用聊天流式界面的记忆确认卡片。")
 
-        added = self._memory.remember(p.fact, tags=p.tags)
-        if not added:
-            # 去重命中不是失败，但必须如实告知 —— 否则模型会以为记下了新东西
-            return ToolResult.success(f"这条信息已经在长期记忆中了，无需重复记录：{p.fact}")
+    async def prepare_execution(self, call):
+        context = current_run_context()
+        if not context or not context.approvals:
+            return ToolResult.failure(
+                "记忆需要用户逐次确认，请使用聊天流式界面，或在设置中直接添加。"
+            )
+        context.check()
+        if not self._memory.enabled:
+            return ToolResult.failure("长期记忆已关闭，请在记忆与存储设置中开启。")
+        try:
+            params = RememberFactParams.model_validate(call.arguments)
+        except ValidationError:
+            return ToolResult.failure("记忆内容需要 1–500 字。")
+        try:
+            approval_id, approved = await context.approvals.request(
+                {"kind": "memory", "fact": params.fact, "tags": params.tags, "started": False}
+            )
+        except ApprovalUnavailable:
+            return ToolResult.failure("本轮记忆确认已失效，未保存；请重新发起。")
+        if not approved:
+            return ToolResult.failure("用户拒绝保存记忆，未写入。")
+        return approval_id, params, context
 
-        self._memory.save()  # 立即落盘：进程崩溃不该丢掉刚记住的用户偏好
-        logger.info("长期记忆新增（tags=%s）：%s", p.tags, p.fact)
+    async def execute_prepared(self, call, preparation):
+        if not isinstance(preparation, tuple):
+            return ToolResult.failure("记忆缺少有效批准，未保存。")
+        approval_id, params, context = preparation
+        context.check()
+        broker = context.approvals
+        item = broker.items.get(approval_id) if broker else None
+        if (
+            context is not current_run_context()
+            or not self._memory.enabled
+            or not broker
+            or not broker.active
+            or broker.blocked_reason
+            or not item
+            or item.view["status"] != "approved"
+            or item.view.get("started")
+            or RememberFactParams.model_validate(call.arguments) != params
+        ):
+            return ToolResult.failure("记忆批准或权限已变化，未保存；请重新确认。")
+        broker.update(approval_id, "approved", "正在保存已确认的记忆", started=True)
+        try:
+            result = await self._invoke_sync(self._write, params)
+        except BaseException:
+            broker.update(approval_id, "failed", "保存被中断，请在记忆设置中核对实际状态")
+            raise
+        broker.update(
+            approval_id,
+            "applied" if result.ok else "failed",
+            "记忆已保存到本机" if result.ok else result.content,
+        )
+        return result
 
-        total = len(self._memory)
+    def _write(self, params):
+        if not self._memory.enabled:
+            return ToolResult.failure("长期记忆已关闭，未保存。")
+        with self._memory._lock:
+            added = self._memory.remember(params.fact, params.tags)
+            self._memory.save()
         return ToolResult.success(
-            f"已记住：{p.fact}（当前长期记忆共 {total} 条）。请在回答中向用户确认这条信息是否正确。"
+            "用户确认的记忆已保存。" if added else "这条记忆已存在，未重复保存。"
         )

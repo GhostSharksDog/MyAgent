@@ -104,14 +104,14 @@ def _ingest_document(source: str, doc_type: str | None) -> dict[str, Any]:
     doc = load_document(path, DocType(doc_type) if doc_type else None)
 
     # 输出路径按类型决定，与 scripts/ingest.py 保持一致
-    from app.core.config import PROJECT_ROOT
+    from app.core.config import DATA_ROOT
 
     target_name = {
         DocType.RESUME: "resume.md",
         DocType.JD: "target_jd.md",
         DocType.NOTE: "note.md",
     }[doc.doc_type]
-    out_path = PROJECT_ROOT / "data" / target_name
+    out_path = DATA_ROOT / target_name
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     header = f"<!-- 来源: {doc.source} | 类型: {doc.doc_type} | 由任务队列生成 -->\n\n"

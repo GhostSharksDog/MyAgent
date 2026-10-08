@@ -13,19 +13,22 @@
 
 长期记忆（LongTermMemory）解决的是**跨会话的知识沉淀**：
 
-    用户说"我只考虑北京的机会" → 这条偏好应该被记住，下次不用再问
-    用户说"我在准备阿里三面"   → 这是背景信息，对后续所有建议都有影响
+    用户明确要求"请记住我希望用中文回答" → 批准后保存为长期偏好
+    用户在设置中确认一条长期目标 → 后续相关任务可以召回
 
 它与 RAG 的区别是**写入方不同**：RAG 检索的是静态文档（简历、岗位库），
-长期记忆检索的是 Agent 在与用户交互中**自己积累的事实**。
+长期记忆检索的是用户**明确确认保存的事实**，不自动提取聊天偏好。
 两者可以共用同一套向量检索基础设施，但生命周期与语义完全不同。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import threading
 import time
+import uuid
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -112,11 +115,15 @@ class ConversationMemory:
         self._turns: list[Turn] = []
         self._summary: str = ""
         self.execution_context: str = ""
+        self._processed = 0
+        self._source_turns: list[Turn] = []
 
     # ---------- 写入 ----------
 
     def add_turn(self, user: str, assistant: str, *, tool_summary: str = "") -> None:
-        self._turns.append(Turn(user=user, assistant=assistant, tool_summary=tool_summary))
+        turn = Turn(user=user, assistant=assistant, tool_summary=tool_summary)
+        self._turns.append(turn)
+        self._source_turns.append(turn)
 
     @classmethod
     def from_turns(
@@ -128,6 +135,7 @@ class ConversationMemory:
         keep_recent: int = 6,
         max_summary_chars: int = 1200,
         enable_summary: bool = True,
+        summary_state: dict | None = None,
     ) -> ConversationMemory:
         """从已有轮次恢复记忆。
 
@@ -148,11 +156,38 @@ class ConversationMemory:
             enable_summary=enable_summary,
         )
         memory._turns = list(turns)
+        memory._source_turns = list(turns)
+        state = summary_state or {}
+        processed = state.get("processed", 0)
+        if (
+            isinstance(processed, int)
+            and not isinstance(processed, bool)
+            and 0 <= processed <= len(turns)
+            and state.get("digest") == memory._prefix_digest(processed)
+            and isinstance(state.get("summary"), str)
+        ):
+            memory._processed = processed
+            memory._summary = state["summary"][:max_summary_chars]
+            memory._turns = list(turns[processed:])
         return memory
+
+    def _prefix_digest(self, count: int) -> str:
+        payload = [(t.user, t.assistant, t.tool_summary) for t in self._source_turns[:count]]
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+
+    @property
+    def summary_state(self) -> dict:
+        return {
+            "processed": self._processed,
+            "summary": self._summary,
+            "digest": self._prefix_digest(self._processed),
+        }
 
     def clear(self) -> None:
         self._turns.clear()
         self._summary = ""
+        self._source_turns.clear()
+        self._processed = 0
 
     # ---------- 组装上下文 ----------
 
@@ -207,6 +242,11 @@ class ConversationMemory:
 
         overflow = self._turns[: -self.keep_recent]
         self._turns = self._turns[-self.keep_recent :]
+        self._processed += len(overflow)
+        from app.agent.runtime import current_run_context
+
+        if context := current_run_context():
+            context.context_trimmed = True
 
         if not self.enable_summary:
             # 没有 LLM 时退化为"截断"，但要留下痕迹 ——
@@ -229,6 +269,11 @@ class ConversationMemory:
                 f"\n\n已有的摘要（请与新材料合并，不要遗漏其中仍然有效的信息）：\n{self._summary}"
             )
 
+        previous_summary = self._summary
+        self._summary = (
+            previous_summary
+            + f"\n（新增 {len(overflow)} 轮旧对话的摘要尚未完成，已裁剪；完整历史仍保存在会话中）"
+        )[: self.max_summary_chars]
         try:
             from app.llm.types import ChatMessage as Msg
 
@@ -244,8 +289,11 @@ class ConversationMemory:
 
         if new_summary:
             self._summary = new_summary[: self.max_summary_chars]
-        elif not self._summary:
-            self._summary = f"（{len(overflow)} 轮较早的对话未能成功摘要）"
+        else:
+            self._summary = (
+                previous_summary
+                + f"\n（新增 {len(overflow)} 轮较早的对话未能成功摘要，已裁剪；完整历史仍保存在会话中）"
+            )[: self.max_summary_chars]
 
     # ---------- 自省 ----------
 
@@ -275,6 +323,7 @@ class Fact(BaseModel):
     """一条长期记忆。"""
 
     text: str
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     tags: list[str] = Field(default_factory=list)
     ts: float = Field(default_factory=time.time)
 
@@ -291,20 +340,25 @@ class LongTermMemory:
     成本恒定、干扰最小。
 
     【持久化】
-    当前落地为 JSON 文件。它的不足很明确：单进程、无并发控制、
-    不适合多副本部署。P3 接 Redis/SQL 时替换 `save`/`load` 即可，
-    检索接口不变 —— 这也是把存储与检索分开的理由。
+    源码默认 JSON，使用进程内锁与原子替换；桌面版的 SqliteLongTermMemory
+    每次变更事务提交。两者共享召回接口，仅面向单机单用户。
     """
 
     def __init__(self, path: Path | None = None, max_facts: int = 200) -> None:
         self.path = path
+        self._lock = threading.RLock()
         self.max_facts = max_facts
+        self.enabled = True
         self._facts: list[Fact] = []
         self._store: object | None = None  # 懒构建的向量库
 
     # ---------- 写入 ----------
 
     def remember(self, text: str, tags: list[str] | None = None) -> bool:
+        with self._lock:
+            return self._remember(text, tags)
+
+    def _remember(self, text: str, tags: list[str] | None = None) -> bool:
         """记一条事实。返回是否真的新增（去重后）。
 
         去重是必需的：Agent 可能反复被告知同一件事（"我在北京"），
@@ -366,7 +420,7 @@ class LongTermMemory:
 
     def recall(self, query: str, k: int = 3, *, min_score: float = 0.0) -> list[Fact]:
         """按相关性召回记忆。"""
-        if not self._facts:
+        if not self.enabled or not self._facts:
             return []
         self._ensure_store()
 
@@ -392,9 +446,54 @@ class LongTermMemory:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = [f.model_dump() for f in self._facts]
-        self.path.write_text(
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
         )
+        temporary.replace(self.path)
+
+    def update_fact(self, fact_id: str, text: str, tags: list[str]) -> bool:
+        with self._lock:
+            original = self._facts
+            facts = [f.model_copy(deep=True) for f in original]
+            for fact in facts:
+                if fact.id == fact_id:
+                    fact.text, fact.tags = text.strip(), tags
+                    self._facts = facts
+                    try:
+                        self.save()
+                    except BaseException:
+                        self._facts = original
+                        raise
+                    self._store = None
+                    return True
+            return False
+
+    def delete_fact(self, fact_id: str) -> bool:
+        with self._lock:
+            original = self._facts
+            self._facts = [f for f in original if f.id != fact_id]
+            if len(self._facts) == len(original):
+                return False
+            try:
+                self.save()
+            except BaseException:
+                self._facts = original
+                raise
+            self._store = None
+            return True
+
+    def clear_facts(self) -> bool:
+        with self._lock:
+            original = self._facts
+            self._facts = []
+            try:
+                self.save()
+            except BaseException:
+                self._facts = original
+                raise
+            self._store = None
+            return bool(original)
 
     def load(self) -> int:
         if self.path is None or not self.path.exists():

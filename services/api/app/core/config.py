@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -65,6 +66,19 @@ def _infer_project_root(here: Path) -> Path:
 
 
 PROJECT_ROOT = _infer_project_root(Path(__file__).resolve())
+DESKTOP = bool(getattr(sys, "frozen", False))
+RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+if DESKTOP:
+    PROJECT_ROOT = RESOURCE_ROOT
+# 冻结程序的资源只读；配置和数据库不随安装目录移动。源码入口仍读原 .env。
+DATA_ROOT = (
+    Path(os.environ.get("LEGACY_DATA_DIR") or Path(os.environ["LOCALAPPDATA"]) / "Legacy")
+    if DESKTOP
+    else PROJECT_ROOT / "data"
+)
+ENV_PATH = DATA_ROOT / "config.env" if DESKTOP else PROJECT_ROOT / ".env"
+CONFIG_ROOT = DATA_ROOT if DESKTOP else PROJECT_ROOT
+SEED_ROOT = RESOURCE_ROOT / "seed" if DESKTOP else PROJECT_ROOT / "services" / "api" / "seed"
 
 
 class AppEnv(StrEnum):
@@ -86,7 +100,7 @@ class LLMSettings(BaseSettings):
     # 如果这里不重复声明 env_file，.env 里的 LLM_API_KEY 就读不到，
     # 表现为"明明写了 .env 却报未配置密钥"。这是 pydantic-settings 的经典陷阱。
     model_config = SettingsConfigDict(
-        env_prefix="LLM_", env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_prefix="LLM_", env_file=ENV_PATH, env_file_encoding="utf-8", extra="ignore"
     )
 
     api_key: SecretStr = SecretStr("")
@@ -118,7 +132,7 @@ class AgentSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -329,7 +343,7 @@ class SecuritySettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SECURITY_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -390,12 +404,12 @@ class TaskSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="TASK_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    backend: str = "auto"  # auto | memory | redis
+    backend: str = "memory" if DESKTOP else "auto"  # auto | memory | redis
     worker_count: int = Field(default=1, ge=1, le=16)
     max_tasks: int = Field(default=200, ge=1)
     ttl_seconds: int = Field(default=24 * 3600, gt=0)
@@ -436,18 +450,18 @@ class SessionSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SESSION_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    backend: str = "auto"  # auto | memory | fake | sql | sqlite | redis
-    ttl_seconds: int = Field(default=7 * 24 * 3600, gt=0)
+    backend: str = "sql" if DESKTOP else "auto"  # auto | memory | fake | sql | sqlite | redis
+    ttl_seconds: int = Field(default=0 if DESKTOP else 7 * 24 * 3600, ge=0)
     max_sessions: int = Field(default=500, ge=1)
 
 
 class RunHistorySettings(BaseSettings):
-    """运行摘要默认只存内存；持久化必须显式开启，切换需重启。
+    """源码运行摘要默认只存内存；桌面发行使用有界 SQLite，切换需重启。
 
     不记录输入、答案、工具参数/结果或模型生成的任务描述。
     有界保留避免演示服务一直运行时积累无限记录；SQLite 只用于单机单进程。
@@ -455,12 +469,12 @@ class RunHistorySettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="RUN_HISTORY_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
-    backend: Literal["memory", "sql"] = "memory"
-    path: str = str(PROJECT_ROOT / "data" / "run-history.db")
+    backend: Literal["memory", "sql"] = "sql" if DESKTOP else "memory"
+    path: str = str(DATA_ROOT / "run-history.db")
     max_records: int = Field(default=200, ge=1, le=10000)
     max_events: int = Field(default=256, ge=1, le=2000)
 
@@ -470,7 +484,7 @@ class RunHistorySettings(BaseSettings):
         if not value.strip():
             raise ValueError("RUN_HISTORY_PATH 不能为空，请指定 SQLite 文件路径")
         path = Path(value).expanduser()
-        return str(path if path.is_absolute() else (PROJECT_ROOT / path).resolve())
+        return str(path if path.is_absolute() else (CONFIG_ROOT / path).resolve())
 
 
 class MemorySettings(BaseSettings):
@@ -484,30 +498,31 @@ class MemorySettings(BaseSettings):
       便宜，但会突然失忆。
     - `max_facts=200`：长期记忆超过后淘汰最早的。生产环境应改为按访问时间
       淘汰，或让模型判断重要性；前者需要记录访问，后者需要额外调用。
-    - `enabled=False`：默认关闭。记忆会让每轮多出记忆装配与召回的开销，
-      而且**它的价值应该被度量而不是被假设** —— 与检索消融实验同样的方法论。
+    - 源码 `enabled=False`，保留现有显式配置；桌面发行默认开启 SQLite。
+      开启不自动提取聊天内容，只保存用户在设置中提交或逐次批准的记忆。
     """
 
     model_config = SettingsConfigDict(
         env_prefix="MEMORY_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    enabled: bool = False
+    enabled: bool = DESKTOP
+    backend: Literal["json", "sql"] = "sql" if DESKTOP else "json"
     max_turns: int = Field(default=8, ge=2, le=100)
     keep_recent: int = Field(default=6, ge=1, le=50)
     enable_summary: bool = True
     max_summary_chars: int = Field(default=1200, gt=0)
     max_facts: int = Field(default=200, ge=1)
     # 长期记忆的落盘位置。相对路径按项目根目录解析。
-    facts_path: str = "data/memory/facts.json"
+    facts_path: str = str(DATA_ROOT / "memory.db") if DESKTOP else "data/memory/facts.json"
 
     @property
     def facts_file(self) -> Path:
         p = Path(self.facts_path)
-        return p if p.is_absolute() else PROJECT_ROOT / p
+        return p if p.is_absolute() else CONFIG_ROOT / p
 
 
 class RagSettings(BaseSettings):
@@ -525,7 +540,7 @@ class RagSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="RAG_", env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_prefix="RAG_", env_file=ENV_PATH, env_file_encoding="utf-8", extra="ignore"
     )
 
     mode: str = "hybrid"  # dense | sparse | hybrid
@@ -593,7 +608,7 @@ class ResilienceSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="RESILIENCE_",
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -627,10 +642,10 @@ class MCPSettings(BaseSettings):
     """显式接入外部工具；默认不连接、不启动本地程序。"""
 
     model_config = SettingsConfigDict(
-        env_prefix="MCP_", env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_prefix="MCP_", env_file=ENV_PATH, env_file_encoding="utf-8", extra="ignore"
     )
     enabled: bool = False
-    config_path: Path = PROJECT_ROOT / "data" / "mcp.json"
+    config_path: Path = DATA_ROOT / "mcp.json"
     connect_timeout: float = Field(default=15, ge=1, le=120, allow_inf_nan=False)
     tool_timeout: float = Field(default=30, ge=1, le=600, allow_inf_nan=False)
     approval_timeout: float = Field(default=300, ge=1, le=3600, allow_inf_nan=False)
@@ -639,14 +654,14 @@ class MCPSettings(BaseSettings):
     @field_validator("config_path")
     @classmethod
     def absolute_path(cls, value: Path) -> Path:
-        return value if value.is_absolute() else PROJECT_ROOT / value
+        return value if value.is_absolute() else CONFIG_ROOT / value
 
 
 class Settings(BaseSettings):
     """全局配置聚合根。"""
 
     model_config = SettingsConfigDict(
-        env_file=(PROJECT_ROOT / ".env"),
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -690,7 +705,11 @@ class Settings(BaseSettings):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
 
     # 数据库地址（SQLAlchemy URL）。目前被 `SESSION_BACKEND=sql` 使用。
-    database_url: str = "sqlite+aiosqlite:///./data/legacy.db"
+    database_url: str = (
+        f"sqlite+aiosqlite:///{(DATA_ROOT / 'legacy.db').as_posix()}"
+        if DESKTOP
+        else "sqlite+aiosqlite:///./data/legacy.db"
+    )
 
     @field_validator("database_url")
     @classmethod
@@ -721,7 +740,7 @@ class Settings(BaseSettings):
         scheme, path = value.split(marker, 1)
         if path in (":memory:", "") or Path(path).is_absolute():
             return value
-        resolved = (PROJECT_ROOT / path.lstrip("./")).resolve()
+        resolved = (CONFIG_ROOT / path.lstrip("./")).resolve()
         return f"{scheme}{marker}{resolved.as_posix()}"
 
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -790,7 +809,7 @@ class Settings(BaseSettings):
 
     @property
     def data_dir(self) -> Path:
-        d = PROJECT_ROOT / "data"
+        d = DATA_ROOT
         d.mkdir(parents=True, exist_ok=True)
         return d
 

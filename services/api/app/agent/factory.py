@@ -18,6 +18,7 @@ from typing import Any
 
 from app.agent.loop import Agent
 from app.agent.memory import ConversationMemory, LongTermMemory
+from app.agent.sqlite_memory import SqliteLongTermMemory
 from app.core.config import Settings, get_settings
 from app.llm.client import LLMClient
 from app.tools.base import ToolRegistry
@@ -30,6 +31,7 @@ def build_memories(
     settings: Settings | None = None,
     *,
     llm: object | None = None,
+    long_term: LongTermMemory | None = None,
 ) -> tuple[ConversationMemory | None, LongTermMemory | None]:
     """按配置构造 (短期记忆, 长期记忆)。未启用时返回 (None, None)。
 
@@ -39,9 +41,12 @@ def build_memories(
     """
     s = settings or get_settings()
 
-    if not s.memory.enabled:
+    if not s.memory.enabled and long_term is None:
         logger.info("记忆模块未启用（MEMORY_ENABLED=false）")
         return None, None
+    if not s.memory.enabled:
+        long_term.enabled = False
+        return None, long_term
 
     short = ConversationMemory(
         llm=llm,
@@ -51,8 +56,12 @@ def build_memories(
         enable_summary=s.memory.enable_summary,
     )
 
-    long_term = LongTermMemory(path=s.memory.facts_file, max_facts=s.memory.max_facts)
-    loaded = long_term.load()
+    if long_term is None:
+        cls = SqliteLongTermMemory if s.memory.backend == "sql" else LongTermMemory
+        long_term = cls(path=s.memory.facts_file, max_facts=s.memory.max_facts)
+        long_term.load()
+    long_term.enabled = s.memory.enabled
+    loaded = len(long_term)
     logger.info(
         "记忆模块已启用：短期窗口 %d 轮（保留最近 %d 轮，摘要%s），长期记忆已加载 %d 条（%s）",
         short.max_turns,
@@ -86,7 +95,9 @@ class AgentStack:
     long_term: LongTermMemory | None
 
 
-def build_agent_stack(settings: Settings | None = None) -> AgentStack:
+def build_agent_stack(
+    settings: Settings | None = None, *, long_term: LongTermMemory | None = None
+) -> AgentStack:
     """装配 Agent 全栈。
 
     【为什么要有这个函数，而不是把这段留在 lifespan 里】
@@ -105,7 +116,7 @@ def build_agent_stack(settings: Settings | None = None) -> AgentStack:
     # 记忆要先于工具表构造：`remember_fact` 工具需要与 Agent 共享同一个
     # 长期记忆实例，否则工具"记住"的东西 Agent 读不到 —— 这是
     # 依赖注入顺序上最容易踩的坑。
-    short_memory, long_term = build_memories(s, llm=llm_client)
+    short_memory, long_term = build_memories(s, llm=llm_client, long_term=long_term)
 
     # 工具集与提示词都由 profile 决定：general（默认）只加载核心工具，
     # jobhunt 才额外加载简历/岗位。见 build_default_registry 的分层说明。
@@ -156,6 +167,12 @@ def mount_agent_stack(app: Any, stack: AgentStack) -> LLMClient | None:
 
 def refresh_agent_tools(app: Any, settings: Settings) -> None:
     """保存能力设置后刷新工具/提示词，不重建或关闭在途请求的模型连接。"""
+    long_term = getattr(app.state, "long_term", None)
+    if long_term is not None:
+        long_term.enabled = settings.memory.enabled
+    elif settings.memory.enabled:
+        _, long_term = build_memories(settings, llm=app.state.llm)
+        app.state.long_term = long_term
     tools = build_default_registry(
         long_term_memory=getattr(app.state, "long_term", None),
         profile=settings.agent.profile,

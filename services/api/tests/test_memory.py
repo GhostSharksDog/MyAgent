@@ -291,9 +291,9 @@ class TestRememberFactTool:
         m = LongTermMemory(path=tmp_path / "f.json")
         tool = RememberFactTool(m)
         result = tool.run(RememberFactParams(fact="用户的意向城市是北京"))
-        assert result.ok
-        assert "已记住" in result.content
-        assert tmp_path.joinpath("f.json").exists(), "记录后应立即落盘"
+        assert not result.ok
+        assert "批准" in result.content
+        assert not tmp_path.joinpath("f.json").exists(), "未批准不能写入"
 
     def test_confirmation_requested(self) -> None:
         """工具必须要求 Agent 向用户确认，否则记错了也没人纠正。"""
@@ -306,8 +306,8 @@ class TestRememberFactTool:
         tool.run(RememberFactParams(fact="用户的意向城市是北京"))
         result = tool.run(RememberFactParams(fact="用户的意向城市是北京"))
         # 去重命中不是失败，但要如实告知，否则模型会以为记下了新东西
-        assert result.ok
-        assert "已经" in result.content
+        assert not result.ok
+        assert "批准" in result.content
 
     def test_schema_requires_fact(self) -> None:
         with pytest.raises(Exception):  # noqa: B017

@@ -85,6 +85,9 @@ class SessionStore(ABC):
     async def merge_execution_facts(self, session_id: str, facts: list[dict]) -> bool:
         raise NotImplementedError("会话存储未实现执行事实的原子合并")
 
+    async def merge_summary(self, session_id: str, state: dict) -> bool:
+        raise NotImplementedError("会话存储未实现摘要的原子合并")
+
     @property
     @abstractmethod
     def backend(self) -> str: ...
@@ -134,6 +137,14 @@ class InMemorySessionStore(SessionStore):
                 return False
             session.meta = merge_facts(session.meta, facts)
             session.updated_at = time.time()
+            return True
+
+    async def merge_summary(self, session_id: str, state: dict) -> bool:
+        async with self._lock:
+            session = await self.get(session_id)
+            if session is None:
+                return False
+            session.meta = {**session.meta, "conversation_summary": state.copy()}
             return True
 
     async def create(self, *, title: str = "") -> Session:
@@ -194,7 +205,7 @@ class InMemorySessionStore(SessionStore):
     # ---------- 内部 ----------
 
     def _is_expired(self, session: Session) -> bool:
-        return (time.time() - session.updated_at) > self.ttl_seconds
+        return self.ttl_seconds > 0 and (time.time() - session.updated_at) > self.ttl_seconds
 
     def _evict_if_needed(self) -> None:
         """超出容量时淘汰最久未更新的会话。调用方必须已持锁。"""
@@ -256,9 +267,11 @@ class RedisSessionStore(SessionStore):
                     session = Session.model_validate_json(raw)
                     mutate(session)
                     pipe.multi()
-                    pipe.set(key, session.model_dump_json(), ex=self.ttl_seconds)
+                    pipe.set(key, session.model_dump_json(), ex=self.ttl_seconds or None)
                     pipe.zadd(self.INDEX_KEY, {session_id: session.updated_at})
-                    pipe.expire(self.INDEX_KEY, self.ttl_seconds * 2)
+                    pipe.expire(
+                        self.INDEX_KEY, self.ttl_seconds * 2
+                    ) if self.ttl_seconds else pipe.persist(self.INDEX_KEY)
                     await pipe.execute()
                     return session
                 except WatchError:
@@ -275,6 +288,12 @@ class RedisSessionStore(SessionStore):
         def mutate(session):
             session.meta = merge_facts(session.meta, facts)
             session.updated_at = time.time()
+
+        return await self._update(session_id, mutate) is not None
+
+    async def merge_summary(self, session_id: str, state: dict) -> bool:
+        def mutate(session):
+            session.meta = {**session.meta, "conversation_summary": state.copy()}
 
         return await self._update(session_id, mutate) is not None
 
@@ -305,11 +324,13 @@ class RedisSessionStore(SessionStore):
         """
         payload = session.model_dump_json()
         pipe = self._redis.pipeline()  # type: ignore[attr-defined]
-        pipe.set(self._key(session.id), payload, ex=self.ttl_seconds)
+        pipe.set(self._key(session.id), payload, ex=self.ttl_seconds or None)
         pipe.zadd(self.INDEX_KEY, {session.id: session.updated_at})
         # 索引也设 TTL 兜底：即使某个会话 key 先过期，
         # 索引整体也不会永久驻留
-        pipe.expire(self.INDEX_KEY, self.ttl_seconds * 2)
+        pipe.expire(self.INDEX_KEY, self.ttl_seconds * 2) if self.ttl_seconds else pipe.persist(
+            self.INDEX_KEY
+        )
         await pipe.execute()
 
     async def list(self, *, limit: int = 20) -> list[SessionSummary]:

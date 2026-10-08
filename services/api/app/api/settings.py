@@ -34,18 +34,20 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.config import PROJECT_ROOT, get_settings
+from app.core.config import CONFIG_ROOT as PROJECT_ROOT
+from app.core.config import ENV_PATH, get_settings
 from app.core.directory_picker import reset_directory_picker
 from app.rag.factory import reset_shared_retriever
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-ENV_PATH = PROJECT_ROOT / ".env"
 
 # 允许通过界面修改的键。**白名单而不是黑名单** —— 黑名单意味着
 # 以后新增的任何配置项都默认可以被界面改，包括那些不该被改的。
 EDITABLE_KEYS = {
+    "MEMORY_ENABLED",
+    "MEMORY_ENABLE_SUMMARY",
     "RUN_HISTORY_BACKEND",
     "AGENT_PLAN_MAX_TOTAL_TOKENS",
     "AGENT_MULTI_MAX_TOTAL_TOKENS",
@@ -148,6 +150,7 @@ def _write_env(updates: dict[str, str]) -> list[str]:
     # newline="\n" 很重要：Windows 上默认写 \r\n，而 .env 被 git 与
     # Docker 读取时 \r 会跑到值里（"deepseek-chat\r" 这种），
     # 排查起来极其费劲 —— 模型名看着对，但就是匹配不上。
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return written
 
@@ -223,6 +226,7 @@ class SettingsView(BaseModel):
     agent: AgentView
     env_path: str
     run_history: RunHistoryView | None = None
+    memory: dict | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -260,6 +264,9 @@ class SettingsUpdate(BaseModel):
     plan_max_total_tokens: int | None = Field(default=None, ge=0)
     multi_max_total_tokens: int | None = Field(default=None, ge=0)
     run_history_backend: Literal["memory", "sql"] | None = None
+    memory_enabled: bool | None = None
+    memory_enable_summary: bool | None = None
+    clear_api_key: bool = False
 
 
 class TestConnectionResult(BaseModel):
@@ -313,6 +320,20 @@ async def get_settings_view(request: Request) -> SettingsView:
     最想知道的就是"生效了没有"，而让他去翻日志不算答案。
     """
     view = _current_view()
+    memory = getattr(request.app.state, "long_term", None)
+    configured_memory = get_settings().memory
+    view.memory = {
+        "enabled": configured_memory.enabled,
+        "active_enabled": bool(memory is not None and memory.enabled),
+        "backend": configured_memory.backend,
+        "active_backend": "sql"
+        if type(memory).__name__ == "SqliteLongTermMemory"
+        else "json"
+        if memory is not None
+        else "off",
+        "facts": len(memory) if memory is not None else 0,
+        "enable_summary": configured_memory.enable_summary,
+    }
     configured = get_settings().run_history
     active = getattr(request.app.state, "run_history", None)
     active_backend = active.backend if active is not None else configured.backend
@@ -390,6 +411,10 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
 
     s = get_settings()
     updates: dict[str, str] = {}
+    for name in ("memory_enabled", "memory_enable_summary"):
+        value = getattr(payload, name)
+        if value is not None:
+            updates[name.upper()] = "true" if value else "false"
     if payload.run_history_backend is not None:
         updates["RUN_HISTORY_BACKEND"] = payload.run_history_backend
     for name in ("plan_max_total_tokens", "multi_max_total_tokens"):
@@ -416,6 +441,8 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
     # 关键防护必须落在能被执行的地方 —— 这里就是那一行比较。
     if payload.api_key and payload.api_key.strip() != _mask(s.llm.api_key.get_secret_value()):
         updates["LLM_API_KEY"] = payload.api_key.strip()
+    if payload.clear_api_key:
+        updates["LLM_API_KEY"] = ""
     if payload.base_url is not None:
         updates["LLM_BASE_URL"] = payload.base_url.strip()
     if payload.model is not None:
@@ -465,13 +492,19 @@ async def update_settings(payload: SettingsUpdate, request: Request) -> Settings
         if hasattr(request.app.state, "settings"):
             fresh = get_settings().agent
             current = request.app.state.settings
-            request.app.state.settings = current.model_copy(update={"agent": fresh})
-            if any(key.startswith("AGENT_") for key in updates) and hasattr(
+            request.app.state.settings = current.model_copy(
+                update={"agent": fresh, "memory": get_settings().memory}
+            )
+            if any(key.startswith(("AGENT_", "MEMORY_")) for key in updates) and hasattr(
                 request.app.state, "llm"
             ):
                 from app.agent.factory import refresh_agent_tools
 
                 refresh_agent_tools(request.app, request.app.state.settings)
+            if payload.clear_api_key and hasattr(request.app.state, "llm"):
+                from app.api.models import _rebuild_stack
+
+                await _rebuild_stack(request)
 
     return await get_settings_view(request)
 

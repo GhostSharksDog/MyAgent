@@ -131,6 +131,13 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session
         )
     else:
         agent = _get_agent(request)
+        if isinstance(agent, Agent) and agent._memory is not None:
+            agent = Agent(
+                request.app.state.llm,
+                request.app.state.tools,
+                settings.agent,
+                long_term=getattr(request.app.state, "long_term", None),
+            )
 
     # ---------- 会话 ----------
     if not payload.session_id:
@@ -159,11 +166,9 @@ async def _resolve(request: Request, payload: ChatRequest) -> tuple[Any, Session
             max_turns=settings.memory.max_turns,
             keep_recent=settings.memory.keep_recent,
             max_summary_chars=settings.memory.max_summary_chars,
-            # 会话模式下**强制开启摘要**：会话要跨请求延续，
-            # 退化成"截断丢历史"会让用户莫名其妙地失去上下文，
-            # 而 MEMORY_ENABLED=false 的默认值本意是省掉"记忆装配"的开销，
-            # 不是要丢掉会话历史。
-            enable_summary=True,
+            # 会话摘要独立于长期记忆开关；关闭摘要时仍显式标记裁剪。
+            enable_summary=settings.memory.enable_summary,
+            summary_state=session.meta.get("conversation_summary"),
         )
         memory.execution_context = render_facts(session.meta)
         agent = Agent(
@@ -212,8 +217,12 @@ async def _save_session(store, session, context, *, user="", answer="", tokens=0
     with anyio.CancelScope(shield=True):
         try:
             saved = True
+            if context.session_memory is not None:
+                saved = await store.merge_summary(session.id, context.session_memory.summary_state)
             if context.execution_facts:
-                saved = await store.merge_execution_facts(session.id, context.execution_facts)
+                saved = (
+                    await store.merge_execution_facts(session.id, context.execution_facts) and saved
+                )
             if answer:
                 saved = (
                     bool(await _persist(store, session, user, answer, tokens, summary)) and saved
@@ -446,6 +455,9 @@ async def _start_run(
         "multi": settings.agent.multi_max_total_tokens,
     }[payload.mode]
     context = RunContext.create(settings.agent, token_limit=limit)
+    if payload.mode in {"plan", "multi"}:
+        context.preference_memory = getattr(request.app.state, "long_term", None)
+        context.preference_query = payload.message
     if context.deadline is not None:
         context.deadline = min(
             context.deadline,
@@ -512,6 +524,7 @@ async def _chat(payload: ChatRequest, request: Request) -> ChatResponse:
     # 这是刻意的：两套历史同时生效必然导致重复或错序。
     history = [] if session is not None else _to_history(payload.history)
     ledger, recorder, context = await _start_run(request, payload, session)
+    context.session_memory = getattr(agent, "_memory", None) if session else None
     try:
         result = await agent.run(payload.message, history, **_run_kwargs(agent, context))
         if not recorder.runtime_observed:
@@ -616,6 +629,7 @@ async def _chat_stream(payload: ChatRequest, request: Request) -> EventSourceRes
     ledger, recorder, context = await _start_run(
         request, payload, session, replay=replayer is not None
     )
+    context.session_memory = getattr(agent, "_memory", None) if session else None
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         final_answer = ""

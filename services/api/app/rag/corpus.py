@@ -20,7 +20,8 @@ import json
 import logging
 from pathlib import Path
 
-from app.core.config import PROJECT_ROOT
+from app.core.config import CONFIG_ROOT as PROJECT_ROOT
+from app.core.config import DATA_ROOT, SEED_ROOT
 from app.rag.loaders import (
     DocType,
     LoadedDocument,
@@ -31,8 +32,8 @@ from app.rag.loaders import (
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = PROJECT_ROOT / "data"
-SEED_DIR = PROJECT_ROOT / "services" / "api" / "seed"
+DATA_DIR = DATA_ROOT
+SEED_DIR = SEED_ROOT
 
 # ============================================================
 # "知识库为空"时给用户的指引 —— **只在这里定义一次**
@@ -102,7 +103,7 @@ def build_corpus(
         else:
             logger.warning(
                 "未找到 %s —— 请先运行：python scripts/ingest.py <你的简历.pdf> --type resume",
-                resume_path.relative_to(PROJECT_ROOT),
+                resume_path,
             )
 
     if include_jobs:

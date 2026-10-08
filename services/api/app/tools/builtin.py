@@ -20,12 +20,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
-from app.core.config import PROJECT_ROOT
+from app.core.config import DATA_ROOT, SEED_ROOT
 from app.tools.base import ToolRegistry, ToolResult
 from app.tools.errors import ToolError, ToolPermissionError
 
-_SEED_DIR: Final[Path] = PROJECT_ROOT / "services" / "api" / "seed"
-_DATA_DIR: Final[Path] = PROJECT_ROOT / "data"
+_SEED_DIR: Final[Path] = SEED_ROOT
+_DATA_DIR: Final[Path] = DATA_ROOT
 
 
 # ============================================================
@@ -363,7 +363,7 @@ def build_default_registry(
         from app.agent.memory import LongTermMemory
         from app.tools.memory_tool import RememberFactTool
 
-        if isinstance(long_term_memory, LongTermMemory):
+        if isinstance(long_term_memory, LongTermMemory) and long_term_memory.enabled:
             registry.register(RememberFactTool(long_term_memory))
 
     return registry

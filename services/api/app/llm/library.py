@@ -37,12 +37,12 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from app.core.config import PROJECT_ROOT
+from app.core.config import DATA_ROOT
 
 logger = logging.getLogger(__name__)
 
 # 与 data/ 下其它运行时文件同级；整个 data/ 已被 gitignore
-DEFAULT_PATH = PROJECT_ROOT / "data" / "models.json"
+DEFAULT_PATH = DATA_ROOT / "models.json"
 
 
 @dataclass

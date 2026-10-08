@@ -72,12 +72,15 @@ class ApprovalBroker:
         approval_id = uuid4().hex
         command = view.get("kind") == "command"
         external = view.get("kind") == "mcp"
+        memory = view.get("kind") == "memory"
         wait_timeout = self.timeout if timeout is None else timeout
         view = {
             **view,
             "id": approval_id,
             "status": "pending",
-            "message": "等待批准，尚未发送外部调用"
+            "message": "等待确认，尚未保存记忆"
+            if memory
+            else "等待批准，尚未发送外部调用"
             if external
             else "等待批准，尚未执行命令"
             if command
@@ -95,7 +98,9 @@ class ApprovalBroker:
             return approval_id, approved
         except TimeoutError:
             self._block(
-                "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
+                "等待记忆确认超时，本轮不再保存记忆或执行副作用；请重新发起任务。"
+                if memory
+                else "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
                 if external
                 else "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务并确认。"
                 if command
@@ -107,7 +112,9 @@ class ApprovalBroker:
             self.update(
                 approval_id,
                 "cancelled",
-                "外部调用批准已取消，尚未发送。"
+                "运行已停止，记忆确认失效，尚未保存。"
+                if memory
+                else "外部调用批准已取消，尚未发送。"
                 if external
                 else "运行已停止，命令批准失效，未启动命令。"
                 if command
@@ -128,7 +135,9 @@ class ApprovalBroker:
             raise ApprovalUnavailable("该预览已处理或失效，不能重复批准。")
         if item.expires_at is not None and asyncio.get_running_loop().time() >= item.expires_at:
             self._block(
-                "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
+                "等待记忆确认超时，本轮不再执行副作用；请重新发起任务。"
+                if item.view.get("kind") == "memory"
+                else "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
                 if item.view.get("kind") == "mcp"
                 else "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务。"
                 if item.view.get("kind") == "command"
@@ -140,7 +149,9 @@ class ApprovalBroker:
         if not approved:
             self.rejected = True
             self._block(
-                "用户已拒绝外部调用，本轮不再执行副作用；请重新发起任务。"
+                "用户拒绝保存记忆，本轮不再执行副作用；请重新发起任务。"
+                if item.view.get("kind") == "memory"
+                else "用户已拒绝外部调用，本轮不再执行副作用；请重新发起任务。"
                 if item.view.get("kind") == "mcp"
                 else "用户已拒绝命令，本轮不再执行命令或修改文件；请重新发起任务并确认。"
                 if item.view.get("kind") == "command"
@@ -151,7 +162,9 @@ class ApprovalBroker:
         self.update(
             approval_id,
             "approved",
-            "已批准，正在核验外部工具；尚未确认调用成功"
+            "已确认，正在核验记忆权限；尚未保存完成"
+            if item.view.get("kind") == "memory"
+            else "已批准，正在核验外部工具；尚未确认调用成功"
             if item.view.get("kind") == "mcp"
             else "已批准，正在重新核验终端权限与工作目录；尚未执行完成"
             if item.view.get("kind") == "command"

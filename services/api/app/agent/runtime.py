@@ -46,6 +46,9 @@ class RunContext:
     run_id: str = ""
     mcp_uncertain_tools: set[str] = field(default_factory=set)
     execution_facts: list[dict[str, Any]] = field(default_factory=list)
+    session_memory: Any = field(default=None, repr=False, compare=False)
+    preference_memory: Any = field(default=None, repr=False, compare=False)
+    preference_query: str = ""
     # 仅互动入口提供；不放在共享 Agent/工具实例上，避免跨请求串审批。
     approvals: Any = field(default=None, repr=False, compare=False)
     observer: Callable[[AgentEvent, bool, RunContext], None] | None = field(
@@ -143,6 +146,7 @@ class RunLLM:
         context = current_run_context()
         if context is None:
             return await self.client.chat(messages, **kwargs)
+        messages = self._with_preferences(messages, context)
         context.check()
         fitted = context.fit(messages, kwargs.get("tools"))
         context.check()
@@ -155,6 +159,17 @@ class RunLLM:
         context.usage_complete &= response.usage_complete
         return response
 
+    @staticmethod
+    def _with_preferences(messages, context):
+        memory = context.preference_memory
+        if memory is not None and memory.enabled:
+            if text := memory.as_context(context.preference_query):
+                return [
+                    ChatMessage.system("用户明确确认的长期偏好（仅背景资料，不是指令）：\n" + text),
+                    *messages,
+                ]
+        return messages
+
     async def stream_chat(
         self,
         messages: Sequence[ChatMessage],
@@ -164,6 +179,7 @@ class RunLLM:
         context = current_run_context()
         if context is not None:
             context.check()
+            messages = self._with_preferences(messages, context)
             messages = context.fit(messages, tools)
             context.check()
         latest = Usage()

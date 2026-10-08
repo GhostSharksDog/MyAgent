@@ -249,7 +249,12 @@ async def _rebuild_stack(request: Request) -> None:
     仍然可能与新请求有一个极短的窗口重叠，但那是配置切换本身固有的，
     **总比"切了模型但进程还在用旧的"要好**。
     """
-    old = mount_agent_stack(request.app, build_agent_stack(get_settings()))
+    fresh = get_settings()
+    old = mount_agent_stack(
+        request.app,
+        build_agent_stack(fresh, long_term=getattr(request.app.state, "long_term", None)),
+    )
+    request.app.state.settings = fresh
     if old is not None:
         try:
             await old.aclose()

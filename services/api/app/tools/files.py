@@ -85,9 +85,9 @@ def workspace_root() -> Path | None:
     # 相对路径按仓库根解析：相对**当前工作目录**解析会让"从哪启动"影响行为，
     # 那是配置里最常见的"本地能跑、换个目录就找不到"的来源。
     if not p.is_absolute():
-        from app.core.config import PROJECT_ROOT
+        from app.core.config import CONFIG_ROOT
 
-        p = PROJECT_ROOT / p
+        p = CONFIG_ROOT / p
     try:
         p = p.resolve()
     except OSError:
