@@ -205,12 +205,26 @@ def build_system_prompt(profile: str = "general", tool_names: set[str] | None = 
         prompt += "\n\n" + _TERMINAL_RULES
 
     if any(name.startswith("mcp_") for name in tool_names):
-        prompt = prompt.replace(
-            "- 不能联网浏览网页、不能访问用户没有放进工作区的文件",
-            "- 外部访问仅使用实际提供的 MCP 工具；内置文件工具仍限制在工作区",
-        ).replace(
-            "- 没有网页搜索或浏览工具；文件工具只访问工作区，本机命令按独立授权执行",
-            "- 外部访问仅使用实际提供的 MCP 工具；文件与本机命令仍遵守各自权限",
+        prompt = (
+            prompt.replace(
+                "- 不能联网浏览网页、不能访问用户没有放进工作区的文件",
+                "- 外部访问仅使用实际提供的 MCP 工具；内置文件工具仍限制在工作区",
+            )
+            .replace(
+                "- 没有网页搜索或浏览工具；文件工具只访问工作区，本机命令按独立授权执行",
+                "- 外部访问仅使用实际提供的 MCP 工具；文件与本机命令仍遵守各自权限",
+            )
+            .replace(
+                "- 不能执行 shell 命令、不能安装依赖",
+                "- 终端与依赖安装仅在当前工具确有对应能力时按用户授权调用；不得凭服务名称假定能力",
+            )
+        )
+
+    if "get_mcp_status" in tool_names:
+        prompt += (
+            "\n\n# MCP 状态查询\n"
+            "- 用户询问 MCP 连接、外部工具或为什么无法联网时，先调用 `get_mcp_status` 核实。\n"
+            "- 已连接不等于已提供工具；按状态中的可用工具及错误说明下一步，不猜测需要重启或重新配置会话。\n"
         )
         prompt += (
             "\n\n# 外部 MCP 工具规则\n"
@@ -254,4 +268,5 @@ _ALL_TOOL_TOKENS = {
     "write_file",
     "edit_file",
     "run_terminal",
+    "get_mcp_status",
 }

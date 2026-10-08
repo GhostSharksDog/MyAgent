@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+from urllib.parse import urlsplit
 
 import httpx2
 from mcp import Client
@@ -20,6 +21,7 @@ class Connection:
         self.definitions = {}
         self.error = ""
         self.protocol = ""
+        self.selection_error = ""
         self.stop = asyncio.Event()
         self.ready = asyncio.get_running_loop().create_future()
         self.task = asyncio.create_task(self._serve())
@@ -137,8 +139,43 @@ class MCPManager:
             await connection.start()
         except TimeoutError:
             pass
+        if connection.client is not None:
+            self._repair_tavily_selection(server_id, connection)
         self.on_change()
         return connection
+
+    def _repair_tavily_selection(self, server_id, connection):
+        """兼容旧预设；仅替换用户已选的两项，并以服务发现结果为准。"""
+        server = self.servers[server_id]
+        if server.preset != "tavily" and urlsplit(server.url).hostname != "mcp.tavily.com":
+            return
+        aliases = {"tavily-search": "tavily_search", "tavily-extract": "tavily_extract"}
+        selected = list(
+            dict.fromkeys(
+                aliases.get(name, name)
+                if name not in connection.definitions
+                and aliases.get(name, name) in connection.definitions
+                else name
+                for name in server.selected_tools
+            )
+        )
+        if selected == server.selected_tools:
+            return
+        repaired = server.model_copy(deep=True)
+        repaired.selected_tools = selected
+        # 改名不转移旧信任，也不选择此前没有启用的工具。
+        repaired.trusted_tools = {
+            name: value for name, value in repaired.trusted_tools.items() if name in selected
+        }
+        updated = {**self.servers, server_id: repaired}
+        try:
+            self.catalog.save(list(updated.values()))
+        except OSError:
+            connection.selection_error = (
+                "旧工具名称无法更新；请检查 MCP 配置目录写权限，再重新连接。"
+            )
+            return
+        self.servers = updated
 
     async def close(self):
         await asyncio.gather(*(c.close() for c in self.connections.values()))
@@ -200,6 +237,13 @@ class MCPManager:
                         "error": error,
                     }
                 )
+            missing = [
+                name
+                for name in server.selected_tools
+                if conn and conn.client and name not in conn.definitions
+            ]
+            active = bool(self.settings.enabled and server.enabled and conn and conn.client)
+            available = sum(t["selected"] and not t["error"] for t in tools) if active else 0
             servers.append(
                 {
                     **server.public(),
@@ -209,9 +253,11 @@ class MCPManager:
                     else "error"
                     if conn
                     else "disabled",
-                    "error": conn.error if conn else "",
+                    "error": conn.error or conn.selection_error if conn else "",
                     "protocol": conn.protocol if conn else "",
                     "tools": tools,
+                    "missing_tools": missing,
+                    "available_tool_count": available,
                 }
             )
         return {

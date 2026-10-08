@@ -222,6 +222,13 @@ def main():
             client.get(url + "api/mcp").json()["servers"] == [],
             "无个人服务与开发机配置",
         )
+        check(
+            any(
+                t["name"] == "get_mcp_status"
+                for t in client.get(url + "api/tools").json()
+            ),
+            "MCP 尚未配置时也能查询实际状态",
+        )
         duplicate = subprocess.Popen(
             [str(exe)], env=environment, creationflags=0x08000000
         )
@@ -404,6 +411,29 @@ def main():
                 )
             finally:
                 SyntheticModel.tool = None
+
+        mcp_view = client.get(url + "api/mcp").json()
+        check(
+            all(
+                s["available_tool_count"] == 2 and not s["missing_tools"]
+                for s in mcp_view["servers"]
+            ),
+            "已连接服务报告实际暴露的工具数量",
+        )
+        output = execute_tool("get_mcp_status", {})
+        mcp_status = json.loads(output)
+        check(
+            len(mcp_status["servers"]) == 2
+            and all(s["available_tool_count"] == 2 for s in mcp_status["servers"])
+            and {t["name"] for s in mcp_status["servers"] for t in s["tools"]}
+            == {
+                "read_text_file",
+                "list_allowed_directories",
+                "start_process",
+                "read_process_output",
+            },
+            "冻结程序模型实际收到 MCP 状态工具结果",
+        )
 
         tool = next(
             t

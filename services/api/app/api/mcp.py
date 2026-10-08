@@ -69,6 +69,8 @@ async def _save_server(payload: dict, request: Request, *, coordinate=False):
             # 只读授权由独立接口绑定真实已发现的定义，不能随配置导入。
             supplied = {**payload, "trusted_tools": {}}
             supplied.pop("secret_configured", None)
+            supplied.pop("available_tool_count", None)
+            supplied.pop("missing_tools", None)
             new = ServerConfig.model_validate(supplied)
             old = m.servers.get(new.id)
             new = merge_secrets(new, old)

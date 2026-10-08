@@ -21,7 +21,7 @@ export function presetDraft(preset: MCPPreset): MCPConfig {
   draft.name = MCP_PRESETS.find(v => v.id === preset)?.label ?? ''
   if (preset === 'tavily') {
     draft.url = 'https://mcp.tavily.com/mcp/'
-    draft.selected_tools = ['tavily-search', 'tavily-extract']
+    draft.selected_tools = ['tavily_search', 'tavily_extract']
   }
   if (preset === 'filesystem' || preset === 'desktop_commander') draft.transport = 'stdio'
   return draft

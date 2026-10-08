@@ -148,6 +148,9 @@ def mount_agent_stack(app: Any, stack: AgentStack) -> LLMClient | None:
     previous: LLMClient | None = getattr(app.state, "llm", None)
     manager = getattr(app.state, "mcp", None)
     if manager is not None:
+        from app.mcp_client.status import MCPStatusTool
+
+        stack.tools.register(MCPStatusTool(manager))
         for tool in manager.tools():
             stack.tools.register(tool)
     old_tools = getattr(app.state, "tools", None)
@@ -180,6 +183,9 @@ def refresh_agent_tools(app: Any, settings: Settings) -> None:
         terminal=settings.agent.terminal_enabled,
     )
     if manager := getattr(app.state, "mcp", None):
+        from app.mcp_client.status import MCPStatusTool
+
+        tools.register(MCPStatusTool(manager))
         for tool in manager.tools():
             tools.register(tool)
     app.state.tools.replace_tools(tools)

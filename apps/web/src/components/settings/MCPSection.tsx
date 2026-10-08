@@ -99,7 +99,11 @@ export function MCPSection({ onChanged }: { onChanged?: () => void }) {
       {!draft ? <>
         <div className="mcp-presets">{MCP_PRESETS.map(p => <button type="button" key={p.id} className="btn" onClick={() => edit(presetDraft(p.id))}>添加 {p.label}</button>)}</div>
         {view?.servers.map(s => <div className="mcp-service mcp-service--compact" key={s.id} aria-label={`MCP 服务：${s.name}`}>
-          <div><strong>{s.name}</strong><p className="settings__hint">{s.status === 'connected' && s.enabled && view.enabled ? '已连接' : s.status === 'error' ? '连接失败' : '未连接'}</p></div>
+          <div><strong>{s.name}</strong><p className="settings__hint">{s.status === 'connected' && s.enabled && view.enabled ? `已连接 · ${s.available_tool_count ?? s.tools.filter(t => t.selected && !t.error).length} 项工具可用` : s.status === 'error' ? '连接失败' : '未连接'}</p>
+            {!!s.missing_tools?.length && <p className="settings__alert settings__alert--bad" role="alert">所选工具未找到：{s.missing_tools.join('、')}。请进入配置 → 高级设置，刷新并选择实际工具。</p>}
+            {s.status === 'connected' && s.enabled && view.enabled && (s.available_tool_count ?? s.tools.filter(t => t.selected && !t.error).length) === 0 && <p className="settings__hint">当前服务尚未向 Agent 提供工具，请在高级设置选择工具。</p>}
+            {s.error && <p className="settings__alert settings__alert--bad" role="alert">{s.error}</p>}
+          </div>
           <div className="settings__actions"><button type="button" className="btn" onClick={() => edit(s)}>配置</button>
             <button type="button" className="btn btn--ghost" onClick={() => void perform(`/servers/${encodeURIComponent(s.id)}/enabled`, 'PATCH', { enabled: !s.enabled })}>{s.enabled ? '停用' : '连接'}</button></div>
         </div>)}

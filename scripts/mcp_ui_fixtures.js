@@ -13,7 +13,8 @@
       if (path.endsWith('/config')) f.mcp.enabled = payload.enabled;
       else if (path === '/api/mcp/servers' || path === '/api/mcp/servers/connect') {
         f.mcpSubmitted = payload;
-        const item = { ...payload, headers: Object.fromEntries(Object.keys(payload.headers || {}).map(k => [k, '********'])), id: payload.id || 'public-exa', enabled: true, status: f.mcp.failConnect ? 'error' : 'connected', error: f.mcp.failConnect ? 'API Key：密钥无效，请检查后重新连接。' : '', protocol: '', tools: ['web_search_exa', 'web_fetch_exa'].map(name => ({ name, description: '公开合成工具', selected: true, trusted: false, trust_allowed: true, error: '' })) };
+        const names = payload.preset === 'tavily' ? ['tavily_search', 'tavily_extract'] : ['web_search_exa', 'web_fetch_exa'];
+        const item = { ...payload, headers: Object.fromEntries(Object.keys(payload.headers || {}).map(k => [k, '********'])), id: payload.id || 'public-exa', enabled: true, status: f.mcp.failConnect ? 'error' : 'connected', error: f.mcp.failConnect ? 'API Key：密钥无效，请检查后重新连接。' : '', protocol: '', tools: names.map(name => ({ name, description: '公开合成工具', selected: payload.selected_tools.includes(name), trusted: false, trust_allowed: true, error: '' })) };
         f.mcp.enabled = true;
         f.mcp.servers = [...f.mcp.servers.filter(s => s.id !== item.id), item];
       } else if (path.endsWith('/enabled')) {
@@ -28,6 +29,10 @@
         const s = f.mcp.servers[0]; s.selected_tools = payload.selected;
         s.tools.forEach(t => { t.selected = payload.selected.includes(t.name); t.trusted = payload.trusted.includes(t.name); });
       } else if (options.method === 'DELETE') f.mcp.servers = [];
+      f.mcp.servers.forEach(s => {
+        s.available_tool_count = f.mcp.enabled && s.enabled && s.status === 'connected' ? s.tools.filter(t => t.selected && !t.error).length : 0;
+        s.missing_tools = s.selected_tools.filter(n => !s.tools.some(t => t.name === n));
+      });
       return json(f.mcp);
     }
     if (path === '/api/chat/stream' && f.case === 'mcp') {

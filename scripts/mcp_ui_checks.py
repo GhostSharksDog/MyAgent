@@ -49,6 +49,16 @@ def run(cdp, directory, *, check, close_settings, layout_check, focus_trap_check
         cdp.wait("!document.querySelector('[aria-label=\"编辑 MCP 服务\"]')"),
         "修正后可重新保存并连接",
     )
+    check(
+        cdp.eval(
+            "JSON.stringify(window.__fixture.mcpSubmitted.selected_tools)===JSON.stringify(['tavily_search','tavily_extract'])"
+        ),
+        "Tavily 预设匹配远程发现的实际工具名",
+    )
+    check(
+        cdp.wait("document.body.textContent.includes('已连接 · 2 项工具可用')"),
+        "连接状态同时显示可用工具数",
+    )
     cdp.click("配置")
     check(
         cdp.wait(
@@ -64,6 +74,19 @@ def run(cdp, directory, *, check, close_settings, layout_check, focus_trap_check
         cdp.wait("Object.keys(window.__fixture.mcpSubmitted.headers).length===0"),
         "明确清除 Tavily 密钥实际提交删除",
     )
+    cdp.eval(
+        "(()=>{const s=window.__fixture.mcp.servers[0];s.selected_tools=['missing_tool'];s.tools.forEach(t=>t.selected=false);})()"
+    )
+    cdp.click("刷新状态")
+    check(
+        cdp.wait("document.body.textContent.includes('已连接 · 0 项工具可用')"),
+        "已连接但工具未暴露不能冒充可用",
+    )
+    check(
+        cdp.wait("document.body.textContent.includes('所选工具未找到：missing_tool')"),
+        "工具缺失说明实际名称与修复入口",
+    )
+    cdp.screenshot(directory, "mcp-missing-tools-desktop")
     cdp.eval("window.__fixture.mcp.servers=[]")
     cdp.click("刷新状态")
     cdp.wait("document.body.textContent.includes('尚未添加服务')")

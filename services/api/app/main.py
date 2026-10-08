@@ -102,6 +102,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.mcp = MCPManager(settings.mcp, lambda: refresh_agent_tools(app, app.state.settings))
     await app.state.mcp.start()
+    # MCP 默认关闭时也提供只读状态查询；不能依赖连接成功才刷新工具。
+    refresh_agent_tools(app, app.state.settings)
     app.state.sessions = sessions
     app.state.tasks = tasks
     app.state.replayer = replayer

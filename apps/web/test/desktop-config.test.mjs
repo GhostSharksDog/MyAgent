@@ -18,7 +18,7 @@ test('五种 MCP 表单的公开预设，不含个人路径或密钥', () => {
     assert.equal(config.command, '')
     assert.deepEqual(config.headers, {})
   }
-  assert.deepEqual(draft.presetDraft('tavily').selected_tools, ['tavily-search', 'tavily-extract'])
+  assert.deepEqual(draft.presetDraft('tavily').selected_tools, ['tavily_search', 'tavily_extract'])
 })
 
 test('旧 MCP 配置仍可识别，留空保留密钥，清除必须明确', () => {

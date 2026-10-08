@@ -6,7 +6,7 @@
     "enabled": false,
     "url": "https://mcp.tavily.com/mcp/",
     "headers": {},
-    "selected_tools": ["tavily-search", "tavily-extract"]
+    "selected_tools": ["tavily_search", "tavily_extract"]
   },
   {
     "id": "desktop_commander",
