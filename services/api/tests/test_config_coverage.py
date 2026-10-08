@@ -292,7 +292,7 @@ class TestDependencyDeclaration:
         """
         declared = _declared_distributions()
         # 声明侧也换算成 import 名，两边才有可比性（sklearn ← scikit-learn）
-        declared_imports = {_import_name(d) for d in declared}
+        declared_imports = {_import_name(d).lower() for d in declared}
         app_dir = API_DIR / "app"
 
         # 本项目自己的包与标准库不算第三方

@@ -1,0 +1,9 @@
+{
+  "name": "legacy-desktop-mcp",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "@wonderwhy-er/desktop-commander": "0.2.52"
+  }
+}

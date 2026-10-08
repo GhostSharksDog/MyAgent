@@ -11,6 +11,7 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 from pydantic import TypeAdapter
 
+from app.desktop.process import external_popen
 from app.tools.terminal import terminal_environment
 from app.tools.terminal_windows import WindowsJob
 
@@ -27,7 +28,7 @@ async def stdio_transport(server):
         else {"creationflags": subprocess.CREATE_NO_WINDOW | 0x00000004}
     )
     # Popen 只创建管道和进程，不等待服务器就绪；绑定 Job 前没有 await。
-    process = subprocess.Popen(  # noqa: ASYNC220 -- bind suspended process before any await
+    process = external_popen(  # synchronous: bind suspended process before any await
         [server.command, *server.args],
         cwd=server.cwd,
         env=terminal_environment() | server.env,

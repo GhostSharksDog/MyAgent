@@ -13,7 +13,7 @@ namespaces = true
 [project]
 name = "legacy-api"
 version = "0.1.0"
-description = "Legacy 求职/招聘 AI Agent —— 手写内核的 Agent 服务"
+description = "Legacy 通用 AI Agent —— 手写内核与三种编排"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
@@ -47,6 +47,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = ["pystray==0.19.5", "Pillow==12.1.1"]
 # pyyaml 用于**校验 docker-compose.yml 的拓扑自洽性**（见 test_service_split.py）。
 # 它必须显式声明：测试如果依赖未声明的传递依赖，会在换了依赖解析结果时
 # 突然失败，而且失败原因看起来和测试本身毫无关系。

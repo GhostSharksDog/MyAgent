@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+from app.desktop.process import external_popen
 from app.tools.terminal_windows import WindowsJob, powershell_path
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ def _start(command: str, cwd: Path, env: Mapping[str, str], output_limit: int) -
     child_env["PYTHONUTF8"] = "1"
     job = WindowsJob() if os.name == "nt" else None
     try:
-        process = subprocess.Popen(
+        process = external_popen(
             argv,
             cwd=cwd,
             env=child_env,

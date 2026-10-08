@@ -43,6 +43,11 @@ jobs:
         run: python -m ruff format services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py scripts/probe_terminal.py --check
       - name: Lint
         run: python -m ruff check services/api scripts/eval_agent.py scripts/eval_rag.py scripts/eval_rag_ranking.py scripts/eval_rag_answers.py scripts/probe_terminal.py
+      - name: Check desktop build and validation scripts
+        run: |
+          python -m ruff format scripts/build_desktop.py scripts/desktop_entry.py scripts/patch_desktop_commander.py scripts/migrate_memory.py scripts/verify_desktop.py scripts/desktop_ui_checks.py scripts/mcp_ui_checks.py scripts/smoke_ui.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m ruff check scripts/build_desktop.py scripts/desktop_entry.py scripts/patch_desktop_commander.py scripts/migrate_memory.py scripts/verify_desktop.py scripts/desktop_ui_checks.py scripts/mcp_ui_checks.py scripts/smoke_ui.py
       - name: Install frontend
         working-directory: apps/web
         run: pnpm install --frozen-lockfile
