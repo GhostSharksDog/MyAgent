@@ -83,6 +83,7 @@
     const method = options.method || 'GET';
     window.__fixture.requests.push({path,method});
     if (path === '/api/chat/stream') return stream(options);
+    if (path === '/api/mcp') return json({enabled:false,error:'',max_tools:32,servers:[]});
     if(path==='/api/runs') {
       if(window.__fixture.runsFailure)return json({detail:'公开演示：运行记录读取失败，请重试'},503);
       const filtered=runs.filter(r=>(!url.searchParams.get('session_id')||r.session_id===url.searchParams.get('session_id'))&&(!url.searchParams.get('stopped_reason')||r.stopped_reason===url.searchParams.get('stopped_reason')));

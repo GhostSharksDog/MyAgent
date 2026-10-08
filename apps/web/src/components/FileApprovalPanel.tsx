@@ -20,16 +20,23 @@ export const FileApprovalPanel = memo(function FileApprovalPanel({ approvals, ac
   return <div className="file-approvals" aria-label="工具操作确认">
     {approvals.map((item) => {
       const command = item.kind === 'command'
-      const status = describeApproval(item.status, command ? 'command' : 'file', command && item.started === true)
+      const external = item.kind === 'mcp'
+      const status = describeApproval(item.status, item.kind ?? 'file', (command || external) && item.started === true)
       const actionable = active && !disabled && item.status === 'pending' && !!onDecide
       return <section key={item.id} className={`file-approval file-approval--${status.tone}`}
-        aria-label={command ? `终端命令：${item.command}` : `文件修改：${item.path}`}
-        data-kind={command ? 'command' : 'file'} data-approval-id={item.id} data-status={item.status}>
+        aria-label={external ? `外部工具：${item.server_name} / ${item.tool_name}` : command ? `终端命令：${item.command}` : `文件修改：${item.path}`}
+        data-kind={item.kind ?? 'file'} data-approval-id={item.id} data-status={item.status}>
         <header className="file-approval__head">
           <strong role="status">{status.title}</strong>
-          <span className="file-approval__operation">{command ? '本机终端' : OPERATIONS[item.operation]}</span>
+          <span className="file-approval__operation">{external ? 'MCP 外部工具' : command ? '本机终端' : OPERATIONS[item.operation]}</span>
         </header>
-        {command ? <>
+        {external ? <>
+          <p className="file-approval__path">{item.server_name} / <code>{item.tool_name}</code></p>
+          <div className="command-approval__command" role="region" aria-label="完整外部调用参数" tabIndex={0}>
+            <pre>{JSON.stringify(item.arguments, null, 2)}</pre>
+          </div>
+          <p className="file-approval__warning">批准后把上述参数发送到此服务。访问范围由外部服务配置决定，内置文件和终端权限不限制它；已发生的操作不会自动撤销。</p>
+        </> : command ? <>
           <dl className="command-approval__details">
             <div><dt>起始目录</dt><dd><code>{item.cwd}</code></dd></div>
             <div><dt>Shell</dt><dd><code>{item.shell}</code></dd></div>
@@ -56,13 +63,13 @@ export const FileApprovalPanel = memo(function FileApprovalPanel({ approvals, ac
         </>}
         <p className="file-approval__message">{item.message || (command
           ? '请核对完整命令与起始目录。批准后再次检查权限，每条命令都需要独立确认。'
-          : '请核对完整差异。批准后服务将重新核验文件，确认未变化后才写入。')}</p>
+          : external ? '请核对服务、工具和完整参数。' : '请核对完整差异。批准后服务将重新核验文件，确认未变化后才写入。')}</p>
         {item.error && <p className="file-approval__error" role="alert">{item.error}</p>}
         {item.status === 'pending' && <div className="file-approval__actions">
           <button type="button" className="btn btn--primary" disabled={!actionable || item.busy}
-            onClick={() => void onDecide?.(assistantId, item.id, 'approve')}>{command ? '批准执行' : '批准此修改'}</button>
+            onClick={() => void onDecide?.(assistantId, item.id, 'approve')}>{external ? '批准外部调用' : command ? '批准执行' : '批准此修改'}</button>
           <button type="button" className="btn" disabled={!actionable || item.busy}
-            onClick={() => void onDecide?.(assistantId, item.id, 'reject')}>{command ? '拒绝执行' : '拒绝修改'}</button>
+            onClick={() => void onDecide?.(assistantId, item.id, 'reject')}>{external ? '拒绝外部调用' : command ? '拒绝执行' : '拒绝修改'}</button>
           {item.busy && <span role="status">正在提交决定…</span>}
           {!active && <span>本轮已关闭，不能再确认</span>}
           {active && disabled && <span>正在切换对话，暂时不能确认</span>}

@@ -171,6 +171,20 @@
   flex-wrap: wrap;
 }
 
+.mcp-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mcp-service {
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.mcp-service h4 { margin: 0 0 var(--space-4); }
+.mcp-service h4 small { color: var(--text-3); font-weight: 400; }
+.mcp-service .settings__actions { margin-bottom: var(--space-4); }
+.mcp-tool { border-top: 1px solid var(--border); padding-top: var(--space-4); }
+
 .settings__result {
   display: inline-flex;
   align-items: center;

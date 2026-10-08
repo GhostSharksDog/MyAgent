@@ -231,7 +231,7 @@ export default function App() {
                 streaming={chat.isStreaming} disabled={offline || sessions.transitioning} modes={availableModes}
                 current={mode} onModeChange={setMode} sendWith={prefs.prefs.sendWith} inputRef={inputRef} />
               <div className="composer-context">
-                <span>{sessions.transitioning ? '正在打开对话…' : sessions.activeId === null ? '不保存此次对话' : mode === 'react' ? '可使用会话历史' : '独立任务'}</span>
+                <span>{sessions.transitioning ? '正在打开对话…' : sessions.activeId === null ? '不保存此次对话 · 每次请求不使用此前消息' : mode === 'react' ? '可使用会话历史' : '独立任务'}</span>
                 {sessions.activeId === null && <button type="button" className="link-button"
                   onClick={handleCreate}>新建对话</button>}
                 {chat.notice && <span role="status" className="composer-context__notice">{chat.notice}</span>}

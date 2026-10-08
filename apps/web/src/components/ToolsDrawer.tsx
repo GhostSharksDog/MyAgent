@@ -83,6 +83,7 @@ function ToolItem({ tool }: { tool: ToolInfo }) {
             </span>
           </span>
           <span className="toolitem__desc">{tool.description}</span>
+          {tool.source === 'mcp' && <span className="toolitem__desc">MCP · {tool.server_name} / {tool.remote_name}</span>}
         </span>
         <span className="toolitem__chevron">
           <IconChevronRight size={12} />

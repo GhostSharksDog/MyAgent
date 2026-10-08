@@ -38,6 +38,7 @@ import type { useSettings } from '../hooks/useSettings'
 import { useDialogFocus } from '../hooks/useDialogFocus'
 import { GeneralSection } from './settings/GeneralSection'
 import { ModelsSection } from './settings/ModelsSection'
+import { MCPSection } from './settings/MCPSection'
 import { IconAlert, IconCheck, IconCoins, IconFolder, IconGear, IconLayers, IconX } from './Icons'
 
 type SettingsApi = ReturnType<typeof useSettings>
@@ -56,9 +57,10 @@ export interface SettingsDialogProps {
   onUpdated?: () => void
 }
 
-export type SettingsSection = 'general' | 'models' | 'agent' | 'workspace' | 'access'
+export type SettingsSection = 'general' | 'models' | 'agent' | 'workspace' | 'access' | 'mcp'
 
 const NAV: { id: SettingsSection; label: string; icon: ReactNode; note: string }[] = [
+  { id: 'mcp', label: 'MCP', icon: <IconLayers size={16} />, note: '连接外部工具' },
   { id: 'general', label: '通用', icon: <IconGear size={16} />, note: '外观与交互' },
   { id: 'models', label: '模型', icon: <IconCoins size={16} />, note: '供应商与切换' },
   { id: 'agent', label: 'Agent', icon: <IconLayers size={16} />, note: '能力、预算与知识库' },
@@ -245,6 +247,7 @@ export function SettingsDialog({
             )}
 
             {section === 'models' && <ModelsSection onChanged={onUpdated} />}
+            {section === 'mcp' && <MCPSection onChanged={onUpdated} />}
 
             {section === 'agent' && (
               <>
@@ -522,7 +525,7 @@ export function SettingsDialog({
               </section>
             )}
 
-            {notice && (
+            {notice && section !== 'mcp' && (
               <p className="settings__alert settings__alert--ok" role="status">
                 <IconCheck size={14} /> {notice}
               </p>
@@ -559,6 +562,7 @@ export function SettingsDialog({
               {section === 'models' && '保存模型后，点击「切换」启用'}
               {section === 'general' && '外观与交互偏好即时生效'}
               {section === 'access' && '保存或清除后立即用于请求'}
+              {section === 'mcp' && '服务需保存；开关与工具授权即时生效'}
             </span>
           )}
         </footer>

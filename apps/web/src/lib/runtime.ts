@@ -33,6 +33,8 @@ export interface RunWarning { title: string; text: string; tone: 'warn' | 'error
 export function runWarnings(state: AssistantTurnState, restored = false): RunWarning[] {
   if (restored) return [] // 历史仅保存文本，不能把未保存的统计当作本次模型缺失用量。
   const warnings: RunWarning[] = []
+  if (state.sessionSaved === false) warnings.push({ title: '会话未保存',
+    text: '本轮记录未能保存，下轮可能无法引用此次对话或执行事实。请检查会话存储。', tone: 'warn' })
   if (state.recordSaved === false) warnings.push({ title: '运行摘要未保存',
     text: '请检查服务日志和运行记录的存储配置。当前回答仍可查看。', tone: 'warn' })
   const running = isTurnRunning(state)
@@ -59,7 +61,8 @@ export function executionActivity(state: AssistantTurnState): { text: string; pr
   const pending = state.approvals.filter((item) => item.status === 'pending')
   if (running && pending.length) return {
     text: pending.every((item) => item.kind === 'command') ? '等待批准终端命令'
-      : pending.every((item) => item.kind !== 'command') ? '等待批准文件修改' : '等待批准工具操作',
+      : pending.every((item) => item.kind === 'mcp') ? '等待批准外部工具'
+        : pending.every((item) => !item.kind || item.kind === 'file') ? '等待批准文件修改' : '等待批准工具操作',
     progress: pending.length + ' 项待确认',
   }
   if (state.plan) {

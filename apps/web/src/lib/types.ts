@@ -137,7 +137,20 @@ export interface CommandApproval {
   message: string
 }
 
-export type Approval = FileApproval | CommandApproval
+export interface MCPApproval {
+  id: string
+  kind: 'mcp'
+  server_id: string
+  server_name: string
+  tool_name: string
+  arguments: Record<string, unknown>
+  fingerprint: string
+  started: boolean
+  status: FileApprovalStatus
+  message: string
+}
+
+export type Approval = FileApproval | CommandApproval | MCPApproval
 
 /** 保留旧名称兼容组件与 Hook；承载文件和终端两种操作。 */
 export type FileApprovalView = Approval & {
@@ -152,6 +165,7 @@ export type FileApprovalView = Approval & {
 export interface AgentEvent {
   run_id?: string
   record_saved?: boolean
+  session_saved?: boolean | null
   type: AgentEventType | (string & {})
   /** 第几步。start/token/tool_call/tool_result/final/step 都带。 */
   step?: number
@@ -278,6 +292,9 @@ export interface ApiMeta {
 
 /** GET /api/tools —— 这里是完整定义，含 JSON Schema。 */
 export interface ToolInfo {
+  source?: 'builtin' | 'mcp'
+  server_name?: string
+  remote_name?: string
   name: string
   description: string
   parameters: Record<string, unknown>
@@ -319,6 +336,7 @@ export type TurnPhase =
 export interface AssistantTurnState {
   runId?: string
   recordSaved?: boolean
+  sessionSaved?: boolean | null
   /** 按 step 号递增的步骤列表 —— 这就是"时间线"的数据来源。 */
   steps: StepView[]
   /** `final` 事件给出的权威答案。为空表示这一轮没有产出最终答案。 */

@@ -1837,6 +1837,10 @@ def visual_checks(cdp: Cdp, directory: Path) -> None:
         "没有未声明的 API 请求",
         str(cdp.eval("window.__fixture.blocked")),
     )
+    from mcp_ui_checks import run as mcp_checks
+
+    mcp_checks(cdp, directory, check=check, close_settings=close_settings,
+               layout_check=layout_check, focus_trap_check=focus_trap_check, send=send)
     service_state_checks(cdp)
     keyboard_checks(cdp)
     check(

@@ -102,6 +102,7 @@ export function applyEvent(turn: AssistantTurnState, event: AgentEvent): Assista
   if (turn.runId && event.run_id && turn.runId !== event.run_id) return turn
   if (event.run_id) turn = { ...turn, runId: event.run_id }
   if (event.record_saved !== undefined) turn = { ...turn, recordSaved: event.record_saved }
+  if (event.session_saved !== undefined) turn = { ...turn, sessionSaved: event.session_saved }
   const stepIndex = typeof event.step === 'number' ? event.step : lastStepIndex(turn.steps)
 
   switch (event.type) {
