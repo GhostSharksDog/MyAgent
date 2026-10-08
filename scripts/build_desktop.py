@@ -162,7 +162,7 @@ def main():
     (output / "build-manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    shutil.copy2(ROOT / "docs" / "desktop-quickstart.txt", output / "使用说明.txt")
+    shutil.copy2(ROOT / "scripts" / "desktop-quickstart.txt", output / "使用说明.txt")
     release = ROOT / "data" / "releases"
     release.mkdir(exist_ok=True)
     archive = release / "Legacy-Windows-x64.zip"

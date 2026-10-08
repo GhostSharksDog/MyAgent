@@ -1,11 +1,11 @@
-# ---- Secrets ----
+# Secrets
 .env
 .env.*
 !.env.example
 *.pem
 credentials*.yaml
 
-# ---- Python ----
+# Python
 .venv/
 venv/
 __pycache__/
@@ -23,47 +23,34 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
-# ---- Node / Frontend ----
+# Node / frontend
 node_modules/
 .pnpm-store/
-dist/
 dist-ssr/
 *.local
 .vite/
 coverage/
 
-# ---- Data / artifacts ----
+# Local data, generated artifacts and caches
 data/
 uploads/
 logs/
 *.log
 artifacts/
-
-# 评测与压测产物**不入库**。
-#
-# 【为什么这一条不能省】
-# `eval_results/` 是本地评测的输出，而本地评测用的是**含真实简历的语料** ——
-# 报告里的"实取"字段会带上检索到的原文片段。也就是说这个目录天然可能含 PII。
-#
-# 而且它没有任何入库的理由：随时可以用一条命令重跑出来。
-# **构建/评测产物不该进版本控制** —— 它们是可以推导的，入库只会带来
-# 冲突、体积和（这里最关键的）泄露面。
-#
-# 需要作为证据保留的指标数字，写进 docs/ 的正文里，并附上复现命令 ——
-# 数字留在文档、产物留在本地，这样文档能公开、数据不公开。
 eval_results/
-
-# 演示录制文件：含真实简历的那一份在 data/demo/ 下（已被上面的 data/ 覆盖）。
-# 仓库里**只保留 PII-free 的** demo/transcript-public.json（它通过录制脚本的闸门）。
-demo/*.local.json
-
-# ---- 本机特定的构建/安装缓存 ----
-# pip 的默认缓存在 %LOCALAPPDATA% 下；本机因沙箱限制把它重定向到了项目内，
-# 属于纯缓存产物，绝不能进版本库。
 .pip-cache/
 .cache/
 
-# ---- Editors / OS ----
+# Work notes and demonstration materials stay on this machine
+/AGENTS.md
+/docs/
+/apps/web/README.md
+/DEMO.md
+/demo/
+/demos/
+/.github/workflows/
+
+# Editors / OS
 .vscode/
 .idea/
 .DS_Store
