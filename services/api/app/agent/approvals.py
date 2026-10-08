@@ -41,7 +41,7 @@ class ApprovalBroker:
             if item.view["status"] not in {"pending", "approved"}:
                 continue
             # 已启动的命令不能被另一份拒绝伪装成「未执行」；拒绝只封锁后续副作用。
-            if item.view.get("kind") == "command" and item.view.get("started") is True:
+            if item.view.get("started") is True:
                 continue
             self.update(approval_id, status, reason)
             if not item.future.done():
@@ -71,12 +71,17 @@ class ApprovalBroker:
         loop = asyncio.get_running_loop()
         approval_id = uuid4().hex
         command = view.get("kind") == "command"
+        external = view.get("kind") == "mcp"
         wait_timeout = self.timeout if timeout is None else timeout
         view = {
             **view,
             "id": approval_id,
             "status": "pending",
-            "message": "等待批准，尚未执行命令" if command else "等待批准，尚未写入",
+            "message": "等待批准，尚未发送外部调用"
+            if external
+            else "等待批准，尚未执行命令"
+            if command
+            else "等待批准，尚未写入",
         }
         item = PendingApproval(
             view, loop.create_future(), loop.time() + wait_timeout if wait_timeout > 0 else None
@@ -90,7 +95,9 @@ class ApprovalBroker:
             return approval_id, approved
         except TimeoutError:
             self._block(
-                "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务并确认。"
+                "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
+                if external
+                else "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务并确认。"
                 if command
                 else "等待批准超时，本轮不再修改文件；请重新发起任务，可在工作区设置调整确认等待时间。",
                 "expired",
@@ -100,7 +107,9 @@ class ApprovalBroker:
             self.update(
                 approval_id,
                 "cancelled",
-                "运行已停止，命令批准失效，未启动命令。"
+                "外部调用批准已取消，尚未发送。"
+                if external
+                else "运行已停止，命令批准失效，未启动命令。"
                 if command
                 else "运行已停止，此预览失效，未应用修改。",
             )
@@ -119,7 +128,9 @@ class ApprovalBroker:
             raise ApprovalUnavailable("该预览已处理或失效，不能重复批准。")
         if item.expires_at is not None and asyncio.get_running_loop().time() >= item.expires_at:
             self._block(
-                "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务。"
+                "等待外部调用批准超时，本轮不再执行副作用；请重新发起任务。"
+                if item.view.get("kind") == "mcp"
+                else "等待命令批准超时，本轮不再执行命令或修改文件；请重新发起任务。"
                 if item.view.get("kind") == "command"
                 else "等待批准超时，本轮不再修改文件；请重新生成差异后确认。",
                 "expired",
@@ -129,7 +140,9 @@ class ApprovalBroker:
         if not approved:
             self.rejected = True
             self._block(
-                "用户已拒绝命令，本轮不再执行命令或修改文件；请重新发起任务并确认。"
+                "用户已拒绝外部调用，本轮不再执行副作用；请重新发起任务。"
+                if item.view.get("kind") == "mcp"
+                else "用户已拒绝命令，本轮不再执行命令或修改文件；请重新发起任务并确认。"
                 if item.view.get("kind") == "command"
                 else "用户已拒绝文件修改，本轮不再写入；如需修改，请重新发起任务并核对预览。",
                 "rejected",
@@ -138,7 +151,9 @@ class ApprovalBroker:
         self.update(
             approval_id,
             "approved",
-            "已批准，正在重新核验终端权限与工作目录；尚未执行完成"
+            "已批准，正在核验外部工具；尚未确认调用成功"
+            if item.view.get("kind") == "mcp"
+            else "已批准，正在重新核验终端权限与工作目录；尚未执行完成"
             if item.view.get("kind") == "command"
             else "已批准，正在重新核验文件与权限；尚未确认写入成功",
         )

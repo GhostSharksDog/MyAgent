@@ -24,7 +24,9 @@ from tests.test_api import FakeAgent, _collect_from_stream
 def reset_sse_event_loop(monkeypatch):
     from sse_starlette.sse import AppStatus
 
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
 
 def config(tmp_path, **updates):

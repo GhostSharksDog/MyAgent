@@ -158,12 +158,23 @@ class TestLockFileShape:
         带 `>=` 的文件不是 lock：它把"装哪一版"重新交回给了 pip 和当天的 PyPI，
         而这正是 T21 要消除的东西。
         """
-        offenders = [line for line in _body_lines() if not _PIN_RE.match(line)]
+        offenders = [
+            line for line in _body_lines() if not _PIN_RE.match(line.partition(";")[0].strip())
+        ]
         assert not offenders, (
             "这些行不是精确的 name==version：\n  "
             + "\n  ".join(offenders)
             + "\n（lock 只记精确版本；需要范围约束请写在 pyproject.toml 里）"
         )
+
+    def test_native_windows_pin_is_not_installed_on_linux(self):
+        from packaging.requirements import Requirement
+
+        line = next(line for line in _body_lines() if line.startswith("pywin32=="))
+        marker = Requirement(line).marker
+        assert marker is not None
+        assert marker.evaluate({"sys_platform": "win32"})
+        assert not marker.evaluate({"sys_platform": "linux"})
 
     def test_versions_have_no_range_operators(self) -> None:
         """明确禁止 `>=` / `~=` / `*` 这些写法（比上面那条更直白地表达意图）。"""

@@ -53,6 +53,9 @@ EXIT_OK = 0
 EXIT_STALE = 1
 EXIT_UNRESOLVED = 2
 
+# Native Windows wheels must not be unconditionally installed in the Linux image.
+PLATFORM_MARKERS = {"pywin32": 'sys_platform == "win32"'}
+
 # 版本变量必须按**版本**比大小，不能按字符串比：
 # 字符串比较下 "3.12" < "3.8" 为真，于是 `python_version < "3.8"` 会把
 # 本不该装的包拉进 lock（sqlalchemy 真的写着这样一条）。
@@ -390,7 +393,10 @@ def render_lock(
 # 包数：{len(pins)}（直接依赖 {direct} + 传递依赖 {len(pins) - direct}）
 # ============================================================
 """
-    body = "".join(f"{name}=={pins[name]}\n" for name in sorted(pins))
+    body = "".join(
+        f"{name}=={pins[name]}" + (f"; {PLATFORM_MARKERS[name]}" if name in PLATFORM_MARKERS else "") + "\n"
+        for name in sorted(pins)
+    )
     return f"{header}\n{body}"
 
 
@@ -409,7 +415,10 @@ def read_lock(path: Path) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        name, separator, version = stripped.partition("==")
+        requirement, _, marker = stripped.partition(";")
+        if marker and not marker_holds(marker.strip(), frozenset()):
+            continue
+        name, separator, version = requirement.partition("==")
         if not separator or not version:
             raise LockError(f"{path}:{lineno} 不是 name==version 形式：{stripped!r}")
         pins[canonical(name)] = version.strip()

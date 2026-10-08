@@ -314,8 +314,20 @@ async def list_tools(request: Request) -> list[ToolInfo]:
     out: list[ToolInfo] = []
     for schema in request.app.state.tools.schemas():
         fn = schema["function"]
+        tool = request.app.state.tools.get(fn["name"])
         out.append(
-            ToolInfo(name=fn["name"], description=fn["description"], parameters=fn["parameters"])
+            ToolInfo(
+                name=fn["name"],
+                description=fn["description"],
+                parameters=fn["parameters"],
+                source=getattr(tool, "source", "builtin"),
+                server_name=(
+                    tool.manager.servers[tool.server_id].name
+                    if getattr(tool, "source", "") == "mcp"
+                    else None
+                ),
+                remote_name=getattr(tool, "remote_name", None),
+            )
         )
     return out
 
@@ -524,8 +536,6 @@ async def _chat(payload: ChatRequest, request: Request) -> ChatResponse:
         await _save_session(_get_store(request), session, context)
         await _finish_run(ledger, recorder, "error")
         raise
-    record_saved = await _finish_run(ledger, recorder)
-
     session_saved = await _save_session(
         _get_store(request),
         session,
@@ -535,6 +545,7 @@ async def _chat(payload: ChatRequest, request: Request) -> ChatResponse:
         tokens=result.usage.total_tokens,
         summary=result.tool_summary,
     )
+    record_saved = await _finish_run(ledger, recorder)
 
     return ChatResponse(
         run_id=recorder.record.run_id,
@@ -612,6 +623,7 @@ async def _chat_stream(payload: ChatRequest, request: Request) -> EventSourceRes
         tool_summary = ""
         stopped_reason = "error"
         saw_done = False
+        session_save_completed = False
         broker = ApprovalBroker(get_settings().agent.file_approval_timeout)
         context.approvals = broker
         brokers = getattr(request.app.state, "file_approvals", None)
@@ -658,6 +670,7 @@ async def _chat_stream(payload: ChatRequest, request: Request) -> EventSourceRes
                             tokens=total_tokens,
                             summary=tool_summary,
                         )
+                        session_save_completed = True
                         event.record_saved = await _finish_run(ledger, recorder)
 
                     # 指标采集放在**消费端**而不是 Agent 内核里：
@@ -719,7 +732,7 @@ async def _chat_stream(payload: ChatRequest, request: Request) -> EventSourceRes
             broker.close()
             brokers.pop(recorder.record.run_id, None)
             context.approvals = None
-            if not saw_done:
+            if not session_save_completed:
                 await _save_session(store, session, context)
             if recorder.record.finished_at is None:
                 await _finish_run(ledger, recorder, "cancelled")

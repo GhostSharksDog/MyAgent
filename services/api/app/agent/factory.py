@@ -135,6 +135,17 @@ def mount_agent_stack(app: Any, stack: AgentStack) -> LLMClient | None:
     （调用方在**替换之后**再关，这样在途请求还能用完自己手上那个引用。）
     """
     previous: LLMClient | None = getattr(app.state, "llm", None)
+    manager = getattr(app.state, "mcp", None)
+    if manager is not None:
+        for tool in manager.tools():
+            stack.tools.register(tool)
+    old_tools = getattr(app.state, "tools", None)
+    if old_tools is not None:
+        old_tools.replace_tools(stack.tools)
+        stack.tools = old_tools
+    stack.agent = Agent(
+        stack.llm, stack.tools, stack.agent._s, memory=stack.memory, long_term=stack.long_term
+    )
     app.state.llm = stack.llm
     app.state.tools = stack.tools
     app.state.agent = stack.agent
@@ -151,6 +162,9 @@ def refresh_agent_tools(app: Any, settings: Settings) -> None:
         file_write=settings.agent.file_write_enabled,
         terminal=settings.agent.terminal_enabled,
     )
+    if manager := getattr(app.state, "mcp", None):
+        for tool in manager.tools():
+            tools.register(tool)
     app.state.tools.replace_tools(tools)
     app.state.agent = Agent(
         app.state.llm,

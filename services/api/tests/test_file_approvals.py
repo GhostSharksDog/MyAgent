@@ -33,7 +33,9 @@ def reset_sse_event_loop(monkeypatch):
     # 本文件的 ASGI 用例各自使用 pytest 的事件循环；SSE 全局退出事件不能跨循环复用。
     from sse_starlette.sse import AppStatus
 
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
 
 class WriteLLM(RuntimeLLM):
@@ -308,7 +310,9 @@ async def test_whole_deadline_expires_approval_and_no_later_model_call(workspace
 async def test_real_sse_disconnect_cleans_pending_children(workspace, monkeypatch, mode):
     from sse_starlette.sse import AppStatus
 
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
     app = application()
     scope = {
         "type": "http",

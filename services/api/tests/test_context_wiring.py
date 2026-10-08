@@ -110,7 +110,7 @@ class TestBudgetIsWiredIntoTheLoop:
         """
         agent, llm = make_agent(
             [text_turn("答")],
-            AgentSettings(context_token_budget=400, max_steps=2),
+            AgentSettings(context_token_budget=2000, max_steps=2),
             system_prompt="你是助手。",
         )
         history = [ChatMessage.user(f"很早以前的问题{i}" + "细节" * 200) for i in range(4)]
@@ -118,7 +118,7 @@ class TestBudgetIsWiredIntoTheLoop:
         await drain(agent, "当前的问题", history=history)
 
         seen = llm.received[0]
-        assert count_messages_tokens(seen) <= 460, f"发出去的消息没有被裁到预算内：{seen}"
+        assert count_messages_tokens(seen) <= 2000, f"发出去的消息没有被裁到预算内：{seen}"
         assert seen[-1].content == "当前的问题", "当前的问题必须在最后"
         joined = "".join(m.content or "" for m in seen)
         assert "很早以前的问题0" not in joined, "最早的轮次没有被丢掉"

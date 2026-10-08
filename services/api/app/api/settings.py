@@ -67,6 +67,7 @@ EDITABLE_KEYS = {
     "AGENT_TERMINAL_ENABLED",
     "AGENT_TERMINAL_TIMEOUT",
     "AGENT_TERMINAL_APPROVAL_TIMEOUT",
+    "MCP_ENABLED",
 }
 
 # 这些键写进 .env 时**不加引号会被 shell/docker 解析出问题**，统一加引号

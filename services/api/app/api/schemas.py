@@ -70,6 +70,9 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any]
+    source: str = "builtin"
+    server_name: str | None = None
+    remote_name: str | None = None
 
 
 class MetaResponse(BaseModel):

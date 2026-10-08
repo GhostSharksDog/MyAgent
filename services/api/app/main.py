@@ -29,6 +29,7 @@ from app import __version__
 from app.agent.factory import build_agent_stack, mount_agent_stack
 from app.api.auth import ApiKeyMiddleware, check_exposure_posture
 from app.api.files import router as files_router
+from app.api.mcp import router as mcp_router
 from app.api.metrics import router as metrics_router
 from app.api.models import router as models_router
 from app.api.routes import router
@@ -94,6 +95,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.settings = settings
     mount_agent_stack(app, stack)
+    from app.agent.factory import refresh_agent_tools
+    from app.mcp_client.manager import MCPManager
+
+    app.state.mcp = MCPManager(settings.mcp, lambda: refresh_agent_tools(app, app.state.settings))
+    await app.state.mcp.start()
     app.state.sessions = sessions
     app.state.tasks = tasks
     app.state.replayer = replayer
@@ -114,6 +120,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await app.state.mcp.close()
         # 退出前落盘长期记忆：Agent 在交互中积累的事实不该因重启而丢失
         # （注意用 `app.state.long_term` 而不是装配时那个局部变量：
         #   换模型会重建全栈，局部变量指向的已经是**被替换下来的**旧实例，
@@ -286,6 +293,7 @@ app.include_router(metrics_router)
 app.include_router(settings_router)
 app.include_router(models_router)
 app.include_router(files_router)
+app.include_router(mcp_router)
 
 
 # ============================================================

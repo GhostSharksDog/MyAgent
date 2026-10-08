@@ -41,7 +41,9 @@ from tests.test_file_approvals import WriteLLM, application, pending
 def isolated_sse_loop(monkeypatch):
     from sse_starlette.sse import AppStatus
 
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
 
 @pytest.fixture

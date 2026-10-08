@@ -94,6 +94,8 @@ def _kernel():
         "Thread32First": ([handle, ctypes.POINTER(_ThreadEntry)], ctypes.c_int),
         "Thread32Next": ([handle, ctypes.POINTER(_ThreadEntry)], ctypes.c_int),
         "OpenThread": ([word, ctypes.c_int, word], handle),
+        "OpenProcess": ([word, ctypes.c_int, word], handle),
+        "WaitForSingleObject": ([handle, word], word),
         "ResumeThread": ([handle], word),
         "GetWindowsDirectoryW": ([ctypes.c_wchar_p, word], word),
     }
@@ -175,20 +177,64 @@ class WindowsJob:
     def terminate(self, *, wait_seconds: float = 5.0) -> None:
         if not self.handle:
             return
-        if not self.api.TerminateJobObject(self.handle, 1):
-            raise _failed("TerminateJobObject")
+        handles = self._process_handles()
         deadline = time.monotonic() + wait_seconds
-        while True:
-            accounting = _Accounting()
-            if not self.api.QueryInformationJobObject(
-                self.handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None
-            ):
-                raise _failed("QueryInformationJobObject")
-            if accounting.ActiveProcesses == 0:
-                return
-            if time.monotonic() >= deadline:
-                raise OSError("终端进程树未在清理期限内退出；请检查系统进程状态")
-            time.sleep(0.01)
+        try:
+            if not self.api.TerminateJobObject(self.handle, 1):
+                raise _failed("TerminateJobObject")
+            while True:
+                accounting = _Accounting()
+                if not self.api.QueryInformationJobObject(
+                    self.handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None
+                ):
+                    raise _failed("QueryInformationJobObject")
+                # Job accounting may reach zero before process handles are signaled.
+                # Retain handles across termination; a PID can otherwise be reused.
+                signaled = all(self.api.WaitForSingleObject(h, 0) == 0 for h in handles)
+                if accounting.ActiveProcesses == 0 and signaled:
+                    return
+                if time.monotonic() >= deadline:
+                    raise OSError("进程树未在清理期限内退出；请检查系统进程状态")
+                time.sleep(0.01)
+        finally:
+            for handle in handles:
+                self.api.CloseHandle(handle)
+
+    def _process_handles(self):
+        capacity = 128
+        while capacity <= 131072:
+
+            class ProcessIds(ctypes.Structure):
+                _fields_ = [
+                    ("assigned", ctypes.c_uint32),
+                    ("count", ctypes.c_uint32),
+                    ("ids", ctypes.c_size_t * capacity),
+                ]
+
+            values = ProcessIds()
+            success = self.api.QueryInformationJobObject(
+                self.handle, 3, ctypes.byref(values), ctypes.sizeof(values), None
+            )
+            if success and values.assigned <= values.count:
+                break
+            if not success and ctypes.get_last_error() != 234:  # ERROR_MORE_DATA
+                raise _failed("QueryInformationJobObject(process ids)")
+            capacity = max(capacity * 2, values.assigned)
+        else:
+            raise OSError("进程树过大，无法确认退出状态；请检查系统进程状态")
+        handles = []
+        try:
+            for pid in values.ids[: values.count]:
+                handle = self.api.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+                if handle:
+                    handles.append(handle)
+                elif ctypes.get_last_error() != 87:  # process already exited
+                    raise _failed("OpenProcess(wait for exit)")
+            return handles
+        except BaseException:
+            for handle in handles:
+                self.api.CloseHandle(handle)
+            raise
 
     def close(self) -> None:
         if self.handle:

@@ -138,7 +138,9 @@ async def test_followup_receives_execution_even_if_answer_failed(
 ):
     from sse_starlette.sse import AppStatus
 
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
     class LLM(ScriptedLLM):
         async def stream_chat(self, messages, **kwargs):
@@ -186,3 +188,75 @@ async def test_gate_waits_for_cleanup_but_not_other_sessions():
     second.release()
     first.release()  # 收尾与 background 可重复释放同一 lease。
     other.release()
+
+
+async def test_stop_then_immediate_followup_waits_for_fact_save(workspace):
+    from app.api.routes import chat_stream
+    from app.api.schemas import ChatRequest
+    from starlette.requests import Request
+
+    executing, saving, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class LLM(ScriptedLLM):
+        async def stream_chat(self, messages, **kwargs):
+            if self._i == 1:
+                self._i += 1
+                executing.set()
+                await asyncio.Event().wait()
+            async for delta in super().stream_chat(messages, **kwargs):
+                yield delta
+
+    class SlowStore(InMemorySessionStore):
+        async def merge_execution_facts(self, session_id, facts):
+            saving.set()
+            await release.wait()
+            return await super().merge_execution_facts(session_id, facts)
+
+    llm = LLM(
+        [
+            tool_turn("write_file", {"path": "saved.txt", "content": "public"}),
+            text_turn("never"),
+            text_turn("已看到执行记录"),
+        ]
+    )
+    app = application(llm=llm)
+    app.state.long_term = None
+    app.state.sessions = SlowStore()
+    session = await app.state.sessions.create()
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/chat/stream",
+        "headers": [],
+        "app": app,
+        "client": ("127.0.0.1", 1234),
+    }
+    response = await chat_stream(
+        ChatRequest(message="写公开样本", session_id=session.id), Request(scope)
+    )
+
+    async def receive():
+        await executing.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    first = asyncio.create_task(response(scope, receive, send))
+    await asyncio.wait_for(saving.wait(), 3)
+    assert (workspace / "saved.txt").read_text() == "public"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as api:
+        followup = asyncio.create_task(
+            api.post("/api/chat", json={"message": "刚才执行了吗", "session_id": session.id})
+        )
+        await asyncio.sleep(0.03)
+        assert not followup.done() and len(llm.received) == 1
+        release.set()
+        await asyncio.wait_for(first, 3)
+        assert (await asyncio.wait_for(followup, 3)).status_code == 200
+    assert "saved.txt" in "\n".join(m.content or "" for m in llm.received[-1])
+    saved = await app.state.sessions.get(session.id)
+    assert len(saved.turns) == 1
+    assert saved.meta["execution_facts"][0]["status"] == "succeeded"

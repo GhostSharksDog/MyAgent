@@ -623,6 +623,25 @@ class ResilienceSettings(BaseSettings):
     rate_limit_global_rps: float = Field(default=0.0, ge=0.0)
 
 
+class MCPSettings(BaseSettings):
+    """显式接入外部工具；默认不连接、不启动本地程序。"""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MCP_", env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
+    )
+    enabled: bool = False
+    config_path: Path = PROJECT_ROOT / "data" / "mcp.json"
+    connect_timeout: float = Field(default=15, ge=1, le=120, allow_inf_nan=False)
+    tool_timeout: float = Field(default=30, ge=1, le=600, allow_inf_nan=False)
+    approval_timeout: float = Field(default=300, ge=1, le=3600, allow_inf_nan=False)
+    max_tools: int = Field(default=32, ge=1, le=32)
+
+    @field_validator("config_path")
+    @classmethod
+    def absolute_path(cls, value: Path) -> Path:
+        return value if value.is_absolute() else PROJECT_ROOT / value
+
+
 class Settings(BaseSettings):
     """全局配置聚合根。"""
 
@@ -661,6 +680,7 @@ class Settings(BaseSettings):
     # 嵌套配置：pydantic-settings 会分别按各自 prefix 从环境变量读取
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
     rag: RagSettings = Field(default_factory=RagSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)

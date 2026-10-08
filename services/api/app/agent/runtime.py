@@ -8,6 +8,7 @@ token 上限按已经返回的 Usage 检查；在途调用可能超额，不是�
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import aclosing
@@ -18,6 +19,7 @@ from typing import Any
 from app.agent.context import ContextBudget, summarize_tools
 from app.agent.events import AgentEvent, EventType
 from app.core.config import AgentSettings
+from app.llm.tokens import count_tokens
 from app.llm.types import ChatMessage, ChatResponse, Role, StreamDelta, Usage
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,7 @@ class RunContext:
     context_tokens: int = 0
     tool_trace: list[dict[str, object]] = field(default_factory=list)
     run_id: str = ""
+    mcp_uncertain_tools: set[str] = field(default_factory=set)
     execution_facts: list[dict[str, Any]] = field(default_factory=list)
     # 仅互动入口提供；不放在共享 Agent/工具实例上，避免跨请求串审批。
     approvals: Any = field(default=None, repr=False, compare=False)
@@ -79,15 +82,19 @@ class RunContext:
             "如需更长时间，请调大 AGENT_RUN_TIMEOUT（0 表示不限制）。",
         )
 
-    def fit(self, messages: Sequence[ChatMessage]) -> list[ChatMessage]:
+    def fit(self, messages: Sequence[ChatMessage], tools=None) -> list[ChatMessage]:
         prefix = 0
         for message in messages:
             if message.role is not Role.SYSTEM:
                 break
             prefix += 1
-        fitted, report = ContextBudget(self.context_budget, protect_prefix=prefix).fit(messages)
+        schema_tokens = count_tokens(json.dumps(tools, ensure_ascii=False)) if tools else 0
+        budget = max(1, self.context_budget - schema_tokens) if self.context_budget else 0
+        if self.context_budget and schema_tokens >= self.context_budget:
+            raise ValueError("工具定义已超过上下文预算；请减少启用的工具或提高上下文预算")
+        fitted, report = ContextBudget(budget, protect_prefix=prefix).fit(messages)
         self.context_trimmed |= report.trimmed
-        self.context_tokens = max(self.context_tokens, report.after_tokens)
+        self.context_tokens = max(self.context_tokens, report.after_tokens + schema_tokens)
         return fitted
 
     def observe(self, event: AgentEvent) -> None:
@@ -137,7 +144,7 @@ class RunLLM:
         if context is None:
             return await self.client.chat(messages, **kwargs)
         context.check()
-        fitted = context.fit(messages)
+        fitted = context.fit(messages, kwargs.get("tools"))
         context.check()
         try:
             response = await self.client.chat(fitted, **kwargs)
@@ -157,7 +164,7 @@ class RunLLM:
         context = current_run_context()
         if context is not None:
             context.check()
-            messages = context.fit(messages)
+            messages = context.fit(messages, tools)
             context.check()
         latest = Usage()
         saw_usage = False

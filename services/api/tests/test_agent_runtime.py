@@ -98,7 +98,9 @@ async def test_sse_disconnect_cancels_and_waits_for_all_experts(
     from starlette.requests import Request
 
     # SSE 包把退出事件缓存为进程全局，TestClient 与本用例使用不同 event loop。
-    monkeypatch.setattr(AppStatus, "should_exit_event", None)
+    # SSE 3.x uses per-loop events; legacy 2.x needs explicit reset.
+    if hasattr(AppStatus, "should_exit_event"):
+        monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
     app = Starlette()
     llm = RuntimeLLM(expert=10)
